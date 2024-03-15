@@ -1,0 +1,97 @@
+* {
+  margin: 0;
+}
+
+.background {
+  background-image: url('../assets/img/SignInBackground.png');
+  background-size: cover;
+  background-repeat: no-repeat;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.logInFormDiv {
+  background-color: #313338;
+  display: flex;
+  flex-direction: column;
+  padding: 30px;
+  width: 400px;
+}
+
+.logInHeader {
+  color: #f2f3f5;
+  text-align: center;
+  padding: 10px;
+  margin-top: 10px;
+}
+
+.headMessage {
+  color: #9ea1a8;
+  text-align: center;
+}
+
+.usernameLogInLabel,
+.passwordLogInLabel {
+  color: #9ea1a8;
+  padding-top: 15px;
+  padding-bottom: 5px;
+}
+
+.usernameInput,
+.passwordInput {
+  background-color: #1e1f22;
+  border: none;
+  padding: 15px;
+}
+
+.usernameInput,
+.passwordInput:focus {
+  border: none;
+  outline: none;
+}
+
+.logInButton {
+  background-color: #5865f2;
+  color: #dfe1fd;
+  padding: 20px;
+  border: none;
+  margin-top: 20px;
+}
+.aroundCheckbox {
+  margin-top: 10px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+}
+.labelCheckbox {
+  font-size: 12px;
+  color: #d6d9dd;
+  margin-left: 5px;
+}
+input[type='checkbox'] {
+  accent-color: #5865f2;
+  opacity: 20;
+  outline: grey;
+  height: 20px;
+  width: 20px;
+  border-radius: 200px;
+}
+
+.switchToRegisterInfo {
+  color: #8b929a;
+  padding-top: 10px;
+}
+.labelLinks {
+  color: #00a8fc;
+}
+.switchToRegister {
+  color: #00a8fb;
+}
+
+.outContent {
+  display: flex;
+  flex-direction: column;
+}
