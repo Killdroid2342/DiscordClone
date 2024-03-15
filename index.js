@@ -10,7 +10,8 @@ function createWindow() {
     },
   });
 
-  win.loadFile('./html/index.html');
+  win.loadFile('./Pages/LogIn.html');
+  win.removeMenu();
 }
 
 app.whenReady().then(() => {
