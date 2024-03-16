@@ -1,5 +1,26 @@
+@font-face {
+  font-family: 'headMessage';
+  src: url('../assets/fonts/headMessage.woff2');
+}
+@font-face {
+  font-family: 'headerFont';
+  src: url('../assets/fonts/headFont.woff2');
+}
+@font-face {
+  font-family: 'formLabels';
+  src: url('../assets/fonts/labelInputs.woff2');
+}
+@font-face {
+  font-family: 'formButton';
+  src: url('../assets/fonts/labelInputs.woff2');
+}
+@font-face {
+  font-family: 'belowFormButton';
+  src: url('../assets/fonts/belowFormButton.woff2');
+}
 * {
   margin: 0;
+  color: #c7cacd;
 }
 
 .background {
@@ -26,11 +47,13 @@
   text-align: center;
   padding: 10px;
   margin-top: 10px;
+  font-family: 'headerFont';
 }
 
 .headMessage {
   color: #9ea1a8;
   text-align: center;
+  font-family: 'headMessage';
 }
 
 .usernameLogInLabel,
@@ -38,6 +61,8 @@
   color: #9ea1a8;
   padding-top: 15px;
   padding-bottom: 5px;
+  font-family: 'formLabels';
+  font-size: 11px;
 }
 
 .usernameInput,
@@ -61,15 +86,22 @@
   margin-top: 20px;
   text-decoration: none;
   text-align: center;
+  font-family: 'formButton';
+  cursor: pointer;
+  font-size: 16px;
 }
 
 .switchToRegisterInfo {
   color: #8b929a;
   padding-top: 10px;
+  font-size: 14px;
+  font-family: 'belowFormButton';
 }
 
 .switchToRegister {
   color: #00a8fb;
+  text-decoration: none;
+  font-family: 'belowFormButton';
 }
 
 .outContent {
