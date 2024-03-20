@@ -13,7 +13,7 @@ function LogInForm(event) {
   console.log(formDataObject);
 }
 
-function RegisterForm(event) {
+async function RegisterForm(event) {
   event.preventDefault();
 
   const formData = new FormData(event.target);
@@ -22,5 +22,5 @@ function RegisterForm(event) {
     formDataObject[key] = value;
   });
 
-  console.log(formDataObject);
+  console.log(formDataObject, 'data being sent from form');
 }
