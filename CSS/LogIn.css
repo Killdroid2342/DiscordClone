@@ -66,13 +66,19 @@
 }
 
 .usernameInput,
+.LogInpasswordInput,
 .passwordInput {
   background-color: #1e1f22;
   border: none;
   padding: 15px;
 }
-
+.confirmPasswordInput {
+  background-color: #1e1f22;
+  border: none;
+  padding: 15px;
+}
 .usernameInput,
+.LogInpasswordInput,
 .passwordInput:focus {
   border: none;
   outline: none;

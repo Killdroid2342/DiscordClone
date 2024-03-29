@@ -67,6 +67,7 @@
 
 .usernameInput,
 .passwordInput,
+.confirmPasswordInput,
 .displayname {
   background-color: #1e1f22;
   border: none;
@@ -74,6 +75,7 @@
 }
 
 .usernameInput,
+.confirmPasswordInput,
 .passwordInput:focus {
   border: none;
   outline: none;
