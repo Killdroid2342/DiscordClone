@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Discord</title>
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <link rel="stylesheet" href="../css/Register.css">
 </head>
 <body>
@@ -12,9 +12,9 @@
         <h2 class="logInHeader">Create an account</h2>
         <form class="outContent" onsubmit="RegisterForm(event)" method="post">
             <label class="usernameLogInLabel">Username</label>
-            <input type="text" class="usernameInput" name="username" /> 
+            <input type="text" class="usernameInput" name="UserName" /> 
             <label class="passwordLogInLabel">Password</label>
-            <input type="password" class="passwordInput" name="password" autocomplete="on" />
+            <input type="password" class="passwordInput" name="PassWord" autocomplete="on" />
             <label class="passwordLogInLabel">Confirm Password</label>
             <input type="password" class="confirmPasswordInput" name="confirm_password" autocomplete="on" />
             <input type="submit" value="Continue" class="logInButton">
