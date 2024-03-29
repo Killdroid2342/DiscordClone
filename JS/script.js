@@ -36,5 +36,15 @@ async function RegisterForm(event) {
   } else {
     console.log('Passwords match');
     console.log(formDataObject, 'data being sent from form');
+
+    try {
+      const response = await axios.post(
+        'https://localhost:7170/api/Account/CreateAccount',
+        formDataObject
+      );
+      console.log('Response from server:', response.data);
+    } catch (e) {
+      console.log(e);
+    }
   }
 }
