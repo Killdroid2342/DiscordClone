@@ -33,6 +33,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
+  flex-direction: column;
 }
 
 .logInFormDiv {
@@ -131,4 +132,25 @@ input[type='checkbox'] {
 .outContent {
   display: flex;
   flex-direction: column;
+}
+
+/* Modal */
+.outerModal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  display: none;
+}
+
+.innerModal {
+  background-color: #313338;
+  padding: 20px;
+  border-radius: 8px;
+  position: absolute;
+  margin-top: 120px;
+}
+
+.content {
+  color: #f2f3f5;
+  font-family: 'headerFont';
 }
