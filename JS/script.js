@@ -42,7 +42,19 @@ async function RegisterForm(event) {
         'https://localhost:7170/api/Account/CreateAccount',
         formDataObject
       );
-      console.log('Response from server:', response.data);
+      console.log(response);
+      console.log(response.data.message);
+
+      if (response.data.message) {
+        const modalContent = document.querySelector('.content');
+        modalContent.innerText = response.data.message;
+        const outerModal = document.querySelector('.outerModal');
+        outerModal.style.display = 'flex';
+
+        setTimeout(() => {
+          outerModal.style.display = 'none';
+        }, 2000);
+      }
     } catch (e) {
       console.log(e);
     }
