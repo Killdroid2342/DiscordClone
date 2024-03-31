@@ -6,16 +6,34 @@ const confirmPasswordInput = document.getElementsByClassName(
   'confirmPasswordInput'
 )[0];
 
-function LogInForm(event) {
+async function LogInForm(event) {
   event.preventDefault();
 
   const formData = new FormData(event.target);
-  console.log(formData);
   const formDataObject = {};
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
+  try {
+    const response = await axios.post(
+      'https://localhost:7170/api/Account/LogIn',
+      formDataObject
+    );
+    console.log(response);
 
+    if (response.data.message) {
+      const modalContent = document.querySelector('.content');
+      modalContent.innerText = response.data.message;
+      const outerModal = document.querySelector('.outerModal');
+      outerModal.style.display = 'flex';
+
+      setTimeout(() => {
+        outerModal.style.display = 'none';
+      }, 2000);
+    }
+  } catch (e) {
+    console.log(e);
+  }
   console.log(formDataObject);
 }
 
