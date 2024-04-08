@@ -21,6 +21,14 @@ async function LogInForm(event) {
     );
     console.log(response);
 
+    const token = response.data.token;
+    document.cookie = `JWT = ${token}`;
+
+    const jwtRes = await axios.post(
+      `https://localhost:7170/api/Account/VerifyToken?token=${token}`
+    );
+    console.log(jwtRes);
+
     if (response.data.message) {
       const modalContent = document.querySelector('.content');
       modalContent.innerText = response.data.message;
