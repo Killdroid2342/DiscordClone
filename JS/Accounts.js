@@ -22,7 +22,7 @@ async function LogInForm(event) {
     console.log(response);
 
     const token = response.data.token;
-    document.cookie = `JWT = ${token}`;
+    document.cookie = `token = ${token}`;
 
     const jwtRes = await axios.post(
       `https://localhost:7170/api/Account/VerifyToken?token=${token}`
@@ -39,6 +39,11 @@ async function LogInForm(event) {
         outerModal.style.display = 'none';
       }, 2000);
     }
+    setTimeout(() => {
+      if (jwtRes.data.message === 'Token is correct.') {
+        window.location.replace('http://127.0.0.1:5500/Pages/Home.html');
+      }
+    }, 3000);
   } catch (e) {
     console.log(e);
   }
