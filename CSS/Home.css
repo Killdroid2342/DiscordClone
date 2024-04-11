@@ -1,16 +1,46 @@
+@font-face {
+  font-family: 'MainFont';
+  src: url('../assets/fonts/headFont.woff2');
+}
+
 * {
   margin: 0;
 }
 .allservers {
-  background-color: #1e1f22;
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  background-color: #1e1f22;
 }
 .servers {
   color: white;
   padding: 15px;
   border-radius: 200px;
-  width: 30px; /* Adjust the width as desired */
-  height: auto; /* Maintain aspect ratio */
+  width: 30px;
+  height: auto;
   background-color: #313338;
+  margin: 10px;
+}
+.sections {
+  display: flex;
+}
+.secondColumn {
+  background-color: #2b2d31;
+}
+.inputForm {
+}
+.textInput {
+  background-color: #1e1f22;
+  padding: 10px;
+  margin: 10px;
+  outline: none;
+  border: none;
+  color: rgb(216, 216, 216);
+}
+.textInput::placeholder {
+  color: #949ba4;
+}
+.friendsDiv,
+.shopDiv {
+  display: flex;
 }
