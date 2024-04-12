@@ -25,10 +25,15 @@
   display: flex;
 }
 .secondColumn {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   background-color: #2b2d31;
+  height: 100vh;
+  color: #949ba4;
+  font-family: MainFont;
 }
-.inputForm {
-}
+
 .textInput {
   background-color: #1e1f22;
   padding: 10px;
@@ -41,6 +46,43 @@
   color: #949ba4;
 }
 .friendsDiv,
-.shopDiv {
+.smallHead {
   display: flex;
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+.smallHead {
+  justify-content: space-between;
+}
+.plus {
+  margin-right: 15px;
+}
+.friends {
+  padding-left: 10px;
+}
+
+.account {
+  display: flex;
+  padding: 10px;
+  background-color: #232428;
+}
+
+.testaddeduser {
+  padding: 10px 10px 10px 0px;
+  margin: 5px 0;
+}
+.positionSecond {
+  margin-left: 10px;
+}
+.topImages {
+  width: 30px;
+  height: 30px;
+}
+.MainFriendsDiv {
+  max-height: 75vh;
+  /* border: 1px solid red; */
+  overflow-y: auto;
+}
+.MainFriendsDiv::-webkit-scrollbar {
+  display: none;
 }
