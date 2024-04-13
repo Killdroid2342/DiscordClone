@@ -1,4 +1,5 @@
 'use strict';
+
 const username = document.getElementById('username');
 let GetCookieToken = function (name) {
   let value = '; ' + document.cookie;
@@ -7,7 +8,6 @@ let GetCookieToken = function (name) {
 };
 
 let cookieVal = GetCookieToken('token');
-console.log(cookieVal);
 
 function decodeJWT(token) {
   const parts = token.split('.');
@@ -23,3 +23,11 @@ const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
 const JWTusername = decodedJWT.payload.username;
 username.innerHTML = JWTusername;
+
+function openModal() {
+  document.querySelector('.outerModal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.querySelector('.outerModal').style.display = 'none';
+}
