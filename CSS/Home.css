@@ -5,12 +5,14 @@
 
 * {
   margin: 0;
+  font-family: MainFont;
 }
 .allservers {
   display: flex;
   flex-direction: column;
   height: 100vh;
   background-color: #1e1f22;
+  cursor: pointer;
 }
 .servers {
   color: white;
@@ -23,6 +25,7 @@
 }
 .sections {
   display: flex;
+  background-color: #313338;
 }
 .secondColumn {
   display: flex;
@@ -31,7 +34,6 @@
   background-color: #2b2d31;
   height: 100vh;
   color: #949ba4;
-  font-family: MainFont;
 }
 
 .textInput {
@@ -59,6 +61,7 @@
 }
 .friends {
   padding-left: 10px;
+  cursor: pointer;
 }
 
 .account {
@@ -70,6 +73,7 @@
 .testaddeduser {
   padding: 10px 10px 10px 0px;
   margin: 5px 0;
+  cursor: pointer;
 }
 .positionSecond {
   margin-left: 10px;
@@ -80,9 +84,26 @@
 }
 .MainFriendsDiv {
   max-height: 75vh;
-  /* border: 1px solid red; */
   overflow-y: auto;
 }
 .MainFriendsDiv::-webkit-scrollbar {
   display: none;
+}
+
+.nav {
+  display: flex;
+}
+.navText {
+  color: #b5bac1;
+}
+.addFriend {
+  color: white;
+  padding: 5px;
+  border-radius: 5px;
+  background-color: #248046;
+}
+.addFriend,
+.navText {
+  margin: 20px;
+  cursor: pointer;
 }
