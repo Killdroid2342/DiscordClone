@@ -121,8 +121,6 @@
 }
 
 .innerModal {
-  background-color: #313338;
-  padding: 20px;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -136,4 +134,50 @@
 .close {
   cursor: pointer;
   color: white;
+  padding: 20px;
+}
+.CreateServerHead {
+  color: #f2f3f5;
+  text-align: center;
+}
+
+.innerModal {
+  background-color: #313338;
+}
+.modalSubhead {
+  color: #a9aeb5;
+  padding: 20px;
+}
+.createServer {
+  border: 1px solid #3d3e45;
+  background-color: transparent;
+  padding: 20px;
+  color: #d9dcdf;
+  font-size: 20px;
+  border-radius: 20px;
+  margin: 20px;
+}
+.secondInnerModal {
+  background-color: #2b2d31;
+  width: 100%;
+  padding: 30px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.joinAServer {
+  margin-top: 20px;
+  padding: 15px 20px;
+  width: 100%;
+  background-color: #4e5058;
+  color: #f6f6f6;
+  outline: none;
+  border: none;
+  font-size: 17px;
+}
+.altHead {
+  text-align: center;
+  color: #f2f3f5;
 }
