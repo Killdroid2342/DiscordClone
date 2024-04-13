@@ -10,8 +10,7 @@
 <div class="sections">
     <div class="allservers">
         <img src="/assets/img/home.png"  class="servers">
-        <img src="/assets/img/addServer.png"  class="servers">
-        <img src="/assets/img/discover.png"  class="servers">
+        <img src="/assets/img/addServer.png"  class="servers" id="openModalBtn" onclick="openModal()">
     </div>
     <div class="secondColumn">
         <form action="" class="inputForm">
@@ -64,6 +63,20 @@
           </div>      
     </div>
 </div>
+
+<div class="outerModal">
+    <div class="innerModal">
+        <p onclick="closeModal()" class="close">x</p>
+        <h2>Create Your Server</h2>
+        <p>Your server is where you and your friends hang out. Make yours and start talking.</p>
+        <button>Create My Own</button>
+        <div>
+            <h2>Alreadt have an invite</h2>
+            <button>Join a Server</button>
+        </div>
+    </div>
+</div>
+
 
 <script src="/node_modules/axios/dist/axios.min.js"></script>
 <script src="/JS/Auth.js"></script>
