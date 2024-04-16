@@ -81,11 +81,24 @@
         <p class="closeSecond" onclick="closeSecondModal()">x</p>
         <h2 class="CreateSecondServerHead">Create Your Own Server</h2>
         <p class="modalSecondSubhead">In order to help you with your setup, is your new server for just a few friends or a larger community</p>
-        <button class="createServer" >For me and my friends</button>
+        <button class="createServer" onclick="OpenCreationModal()" >For me and my friends</button>
         <p class="backSecondModal" onclick="BackToFirstModal()">Back</p>
     </div>
 </div>
 
+<div class="outerCreationModal">
+    <div class="innerCreationModal">
+        <p class="closeThird" onclick="CloseCreationModal()">x</p>
+        <h2 class="CreateCreationServerHead">Customise Your Server</h2>
+        <p class="modalCreationSubhead">Give your new server a personality with a name</p>
+        <label for="">SERVER NAME</label>
+        <input type="text" name="" id="">
+        <div>
+            <p class="creationBack" onclick="BackLastModal()">Back</p>
+            <button>Create</button>
+        </div>
+    </div>
+</div>
 
 <script src="/node_modules/axios/dist/axios.min.js"></script>
 <script src="/JS/Auth.js"></script>
