@@ -43,7 +43,6 @@
                 <p class="testaddeduser">test added user</p>
                 <p class="testaddeduser">test added user</p>
                 <p class="testaddeduser">test added user</p>
-                <p class="testaddeduser">test added user</p>
             </div>
         </div>
         <div class="account">
@@ -69,11 +68,21 @@
         <p onclick="closeModal()" class="close">x</p>
         <h2 class="CreateServerHead">Create Your Server</h2>
         <p class="modalSubhead">Your server is where you and your friends hang out. Make <span> yours and start talking.</span></p>
-        <button class="createServer">Create My Own</button>
+        <button class="createServer" onclick="openSecondModal()">Create My Own</button>
         <div class="secondInnerModal">
             <h2 class="altHead">Already have an invite</h2>
             <button class="joinAServer">Join a Server</button>
         </div>
+    </div>
+</div>
+
+<div class="outerSecondModal">
+    <div class="innerSecondModal">
+        <p class="closeSecond" onclick="closeSecondModal()">x</p>
+        <h2>Create Your Own Server</h2>
+        <input type="text" placeholder="Server Name" />
+        <textarea placeholder="Description"></textarea>
+        <button>Create</button>
     </div>
 </div>
 
@@ -83,3 +92,4 @@
 <script src="/JS/Home.js"></script>
 </body>
 </html>
+
