@@ -31,3 +31,12 @@ function openModal() {
 function closeModal() {
   document.querySelector('.outerModal').style.display = 'none';
 }
+
+function openSecondModal() {
+  closeModal();
+  document.querySelector('.outerSecondModal').style.display = 'flex';
+}
+
+function closeSecondModal() {
+  document.querySelector('.outerSecondModal').style.display = 'none';
+}
