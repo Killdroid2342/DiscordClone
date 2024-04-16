@@ -40,3 +40,22 @@ function openSecondModal() {
 function closeSecondModal() {
   document.querySelector('.outerSecondModal').style.display = 'none';
 }
+
+function BackToFirstModal() {
+  closeSecondModal();
+  openModal();
+}
+
+function OpenCreationModal() {
+  closeSecondModal();
+  document.querySelector('.outerCreationModal').style.display = 'flex';
+}
+
+function CloseCreationModal() {
+  document.querySelector('.outerCreationModal').style.display = 'none';
+}
+
+function BackLastModal() {
+  CloseCreationModal();
+  openSecondModal();
+}
