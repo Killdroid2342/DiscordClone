@@ -59,3 +59,26 @@ function BackLastModal() {
   CloseCreationModal();
   openSecondModal();
 }
+
+function CreateServer(event) {
+  event.preventDefault();
+
+  var inputElement = document.querySelector('.serverInput');
+
+  var serverName = inputElement.value;
+
+  var formData = {
+    serverName: serverName,
+    serverID: crypto.randomUUID(),
+  };
+  var newServerElement = document.createElement('div');
+  newServerElement.classList.add('servers');
+  newServerElement.textContent = serverName;
+
+  var allServersDiv = document.querySelector('.allservers');
+  allServersDiv.appendChild(newServerElement);
+
+  inputElement.value = '';
+  CloseCreationModal();
+  console.log('server', formData);
+}
