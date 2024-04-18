@@ -54,9 +54,7 @@
     </div>
     <div class="lastSection">
           <div class="nav">
-            <p class="navText">Online</p>
             <p class="navText">All</p>
-            <p class="navText">Pending</p>
             <p class="navText">Blocked</p>
             <p class="addFriend">Add Friend</p>
           </div>      
@@ -91,11 +89,13 @@
         <p class="closeThird" onclick="CloseCreationModal()">x</p>
         <h2 class="CreateCreationServerHead">Customise Your Server</h2>
         <p class="modalCreationSubhead">Give your new server a personality with a name</p>
-        <label for="serverName" class="serverName">SERVER NAME</label>
-        <input type="text" name="Name" class="serverInput">
-        <form class="creationFlex">
-            <p class="creationBack" onclick="BackLastModal()">Back</p>
-            <button class="createServerbtn">Create</button>
+        <form action="POST"  onsubmit="CreateServer(event)" class="form">
+            <label for="serverName" class="serverName">SERVER NAME</label>
+            <input type="text" name="Name" class="serverInput">
+            <div class="creationFlex">
+                <p class="creationBack" onclick="BackLastModal()">Back</p>
+                <button class="createServerbtn">Create</button>
+            </div>
         </form>
     </div>
 </div>
