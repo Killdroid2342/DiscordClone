@@ -9,7 +9,7 @@
 <body>
 <div class="sections">
     <div class="allservers">
-        <img src="/assets/img/home.png"  class="servers">
+        <img src="/assets/img/home.png"  class="servers" id="home">
         <img src="/assets/img/addServer.png"  class="servers" id="openModalBtn" onclick="openModal()">
     </div>
     <div class="secondColumn">
@@ -59,7 +59,23 @@
             <p class="addFriend">Add Friend</p>
           </div>      
     </div>
+    <!-- <div id="serverDetails" style="display: none;" class="CurrentServer"> -->
+    <div id="serverDetails" class="CurrentServer">
+        <div class="CurrentServerMenu">
+            <h1><!--NAME OF THE SERVER YOU ARE ON IS IN HERE--></h1>
+            <p class="chats">Text Chat</p>
+            <p class="chats">Voice Chat</p>
+            <div class="account">
+                <p id="username"></p>
+                <img src="/assets/img/muteImg.png" alt="">
+                <img src="/assets/img/defenImg.png" alt="">
+                <img src="/assets/img/settingsImg.png" alt="">
+            </div>
+        </div>
+    </div>
 </div>
+
+
 
 <div class="outerModal">
     <div class="innerModal">
