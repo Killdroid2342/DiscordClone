@@ -81,4 +81,20 @@ function CreateServer(event) {
   inputElement.value = '';
   CloseCreationModal();
   console.log('server', formData);
+
+  newServerElement.addEventListener('click', function () {
+    document.querySelector('.secondColumn').style.display = 'none';
+    document.querySelector('.lastSection').style.display = 'none';
+
+    document.getElementById('serverDetails').style.display = 'block';
+    document.getElementById('serverDetails').querySelector('h1').textContent =
+      serverName;
+  });
+
+  document.getElementById('home').addEventListener('click', function () {
+    document.querySelector('.secondColumn').style.display = 'block';
+    document.querySelector('.lastSection').style.display = 'block';
+
+    document.getElementById('serverDetails').style.display = 'none';
+  });
 }
