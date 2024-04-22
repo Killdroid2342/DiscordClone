@@ -69,7 +69,6 @@
   display: flex;
   padding: 10px;
   background-color: #232428;
-  border: 1px solid red;
   margin-top: auto;
 }
 
@@ -245,19 +244,17 @@
 .CurrentServer {
   display: flex;
   flex-direction: row;
-  border: 1px solid white;
+  width: 100vw;
 }
 .CurrentServerMenu {
   display: flex;
   flex-direction: column;
-  /* border: 1px solid red; */
   background-color: #2b2d31;
   color: #949ba4;
   width: 200px;
   text-align: center;
 }
-.chats,
-.chatHeader {
+.chats {
   padding: 40px;
   margin-top: 20px;
   color: #949ba4;
@@ -265,25 +262,60 @@
 
 .chatForm {
   display: flex;
-  border: 1px solid green;
-
   margin-top: auto;
   align-self: flex-end;
   width: 100%;
   box-sizing: border-box;
 }
 .chatInput {
-  border: 1px solid purple;
   padding: 15px;
   border-radius: 20px;
+  width: 100%;
+  background-color: #383a40;
+  outline: none;
+  border: none;
+  margin: 10px;
+  font-size: 16px;
+  color: #a9aeb5;
+}
+.chatInput::placeholder {
+  font-size: 18px;
+  color: #8e939d;
+}
+.chatHeader {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 20px;
+  font-weight: bold;
+  color: #8e939d;
+}
+.formButton {
+  padding: 20px;
+  font-size: 16px;
+  border-radius: 10px;
+  background-color: #383a40;
+  margin: 10px;
+  outline: none;
+  border: none;
+  color: #8e939d;
 }
 .chatSection {
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 .viewServerAccounts {
-  border: 1px solid green;
   background-color: #2b2d31;
   color: #90969f;
   width: 200px;
+  margin-left: auto;
+}
+.serverAccounts {
+  text-align: center;
+  font-size: 18px;
+  margin-top: 10px;
+}
+.accounts {
+  text-align: center;
+  padding: 20px;
 }
