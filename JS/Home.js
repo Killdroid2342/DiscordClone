@@ -1,4 +1,5 @@
 'use strict';
+document.getElementById('serverDetails').style.display = 'none';
 
 const username = document.getElementById('username');
 let GetCookieToken = function (name) {
@@ -21,6 +22,7 @@ function decodeJWT(token) {
 }
 const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
+console.log(decodedJWT);
 const JWTusername = decodedJWT.payload.username;
 username.innerHTML = JWTusername;
 
@@ -63,19 +65,20 @@ function BackLastModal() {
 function CreateServer(event) {
   event.preventDefault();
 
-  var inputElement = document.querySelector('.serverInput');
+  let inputElement = document.querySelector('.serverInput');
 
-  var serverName = inputElement.value;
-
-  var formData = {
-    serverName: serverName,
-    serverID: crypto.randomUUID(),
+  let ServerName = inputElement.value;
+  let serverOwner = decodedJWT.payload.username;
+  let formData = {
+    ServerName: ServerName,
+    ServerID: crypto.randomUUID(),
+    ServerOwner: serverOwner,
   };
-  var newServerElement = document.createElement('div');
+  let newServerElement = document.createElement('div');
   newServerElement.classList.add('servers');
-  newServerElement.textContent = serverName;
+  newServerElement.textContent = ServerName;
 
-  var allServersDiv = document.querySelector('.allservers');
+  let allServersDiv = document.querySelector('.allservers');
   allServersDiv.appendChild(newServerElement);
 
   inputElement.value = '';
@@ -86,9 +89,9 @@ function CreateServer(event) {
     document.querySelector('.secondColumn').style.display = 'none';
     document.querySelector('.lastSection').style.display = 'none';
 
-    document.getElementById('serverDetails').style.display = 'block';
+    document.getElementById('serverDetails').style.display = 'flex';
     document.getElementById('serverDetails').querySelector('h1').textContent =
-      serverName;
+      ServerName;
   });
 
   document.getElementById('home').addEventListener('click', function () {
