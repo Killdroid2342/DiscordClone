@@ -62,18 +62,25 @@ function BackLastModal() {
   openSecondModal();
 }
 
-function CreateServer(event) {
+async function CreateServer(event) {
   event.preventDefault();
 
   let inputElement = document.querySelector('.serverInput');
 
   let ServerName = inputElement.value;
   let serverOwner = decodedJWT.payload.username;
+
   let formData = {
     ServerName: ServerName,
     ServerID: crypto.randomUUID(),
     ServerOwner: serverOwner,
   };
+
+  const response = await axios.post(
+    'https://localhost:7170/api/Server/CreateServer',
+    formData
+  );
+  console.log(response);
   let newServerElement = document.createElement('div');
   newServerElement.classList.add('servers');
   newServerElement.textContent = ServerName;
@@ -101,3 +108,12 @@ function CreateServer(event) {
     document.getElementById('serverDetails').style.display = 'none';
   });
 }
+
+async function GetServer() {
+  const response =
+    await axios.get(`https://localhost:7170/api/Server/GetServer?username=${JWTusername}
+  `);
+  console.log('server items retrived');
+  console.log(response);
+}
+GetServer();
