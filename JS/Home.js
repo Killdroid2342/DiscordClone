@@ -108,12 +108,33 @@ async function CreateServer(event) {
     document.getElementById('serverDetails').style.display = 'none';
   });
 }
-
 async function GetServer() {
-  const response =
-    await axios.get(`https://localhost:7170/api/Server/GetServer?username=${JWTusername}
-  `);
-  console.log('server items retrived');
-  console.log(response);
+  try {
+    const response = await axios.get(
+      `https://localhost:7170/api/Server/GetServer?username=${JWTusername}`
+    );
+    console.log('Server items retrieved:', response);
+
+    let serverData = response.data;
+    console.log(serverData);
+    console.log('previous res', response);
+    console.log('THIS IS THE RESPONSE', response.data);
+
+    let allServersDiv = document.querySelector('.allservers');
+
+    serverData.forEach((server) => {
+      let newServerElement = document.createElement('div');
+      newServerElement.classList.add('servers');
+      newServerElement.textContent = server.serverName;
+      allServersDiv.appendChild(newServerElement);
+    });
+  } catch (e) {
+    console.log(e);
+  }
 }
+
 GetServer();
+
+function LogOut() {
+  console.log('hi');
+}
