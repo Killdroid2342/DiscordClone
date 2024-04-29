@@ -1,4 +1,6 @@
 'use strict';
+let inServerUsername = document.getElementById('inServerUsername');
+
 document.getElementById('serverDetails').style.display = 'none';
 
 const username = document.getElementById('username');
@@ -23,8 +25,9 @@ function decodeJWT(token) {
 const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
 console.log(decodedJWT);
-const JWTusername = decodedJWT.payload.username;
+let JWTusername = decodedJWT.payload.username;
 username.innerHTML = JWTusername;
+inServerUsername.innerHTML = JWTusername;
 
 function openModal() {
   document.querySelector('.outerModal').style.display = 'flex';
@@ -117,8 +120,6 @@ async function GetServer() {
 
     let serverData = response.data;
     console.log(serverData);
-    console.log('previous res', response);
-    console.log('THIS IS THE RESPONSE', response.data);
 
     let allServersDiv = document.querySelector('.allservers');
 
@@ -127,6 +128,21 @@ async function GetServer() {
       newServerElement.classList.add('servers');
       newServerElement.textContent = server.serverName;
       allServersDiv.appendChild(newServerElement);
+      newServerElement.addEventListener('click', function () {
+        document.querySelector('.secondColumn').style.display = 'none';
+        document.querySelector('.lastSection').style.display = 'none';
+
+        document.getElementById('serverDetails').style.display = 'flex';
+        document
+          .getElementById('serverDetails')
+          .querySelector('h1').textContent = server.serverName;
+      });
+
+      document.getElementById('home').addEventListener('click', function () {
+        document.querySelector('.secondColumn').style.display = 'block';
+        document.querySelector('.lastSection').style.display = 'block';
+        document.getElementById('serverDetails').style.display = 'none';
+      });
     });
   } catch (e) {
     console.log(e);
@@ -136,5 +152,18 @@ async function GetServer() {
 GetServer();
 
 function LogOut() {
-  console.log('hi');
+  document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+  window.location.href = 'http://127.0.0.1:5500/Pages/LogIn.html';
+}
+
+function ServerChat(event) {
+  event.preventDefault();
+
+  const formData = new FormData(event.target);
+  const formDataObject = {};
+  formData.forEach((value, key) => {
+    formDataObject[key] = value;
+  });
+
+  console.log(formDataObject);
 }
