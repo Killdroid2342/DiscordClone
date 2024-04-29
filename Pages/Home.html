@@ -55,19 +55,23 @@
             <p class="navText">All</p>
             <p class="navText">Blocked</p>
             <p class="addFriend">Add Friend</p>
-            <button onclick=" LogOut()">Log Out</button>
+            <button onclick=" LogOut()" class="logOut">Log Out</button>
           </div>      
     </div>
+
+    <!--SERVERS IS HERE -->
+    
+    
     <div id="serverDetails" class="CurrentServer">
         <div class="CurrentServerMenu">
-            <h1><!--NAME OF THE SERVER YOU ARE ON IS IN HERE--></h1>
+            <h1 class="currentServerName"><!--NAME OF THE SERVER YOU ARE ON IS IN HERE--></h1>
             <p class="chats">Text Chat</p>
             <p class="chats">Voice Chat</p>
 
             <div class="account">
-                <p id="username"></p>
-                <button>mute</button>
-                <button>defen</button>
+                <p id="inServerUsername">USERNAME</p>
+                <button>Mute</button>
+                <button>Defen</button>
             </div>
         </div>
         <div class="chatSection">
@@ -75,7 +79,7 @@
             <div>
             <!-- text goes here -->
             </div>
-            <form action="" class="chatForm">
+            <form action="" class="chatForm" onsubmit="ServerChat(event)">
                 <input type="text" name="userText" class="chatInput" placeholder="Message">
                 <button class="formButton">Send</button>
             </form>
@@ -88,6 +92,7 @@
 </div>
 
 
+    <!--SERVERS IS HERE -->
 
 <div class="outerModal">
     <div class="innerModal">
