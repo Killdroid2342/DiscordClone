@@ -104,7 +104,16 @@
   border-radius: 5px;
   background-color: #248046;
 }
+.logOut {
+  color: white;
+  padding: 5px;
+  border-radius: 5px;
+  background-color: #f20808;
+  border: none;
+  font-size: 16px;
+}
 .addFriend,
+.logOut,
 .navText {
   margin: 20px;
   cursor: pointer;
@@ -318,4 +327,8 @@
 .accounts {
   text-align: center;
   padding: 20px;
+}
+#username,
+#inServerUsername {
+  padding: 10px;
 }
