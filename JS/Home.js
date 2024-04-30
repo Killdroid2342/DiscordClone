@@ -1,7 +1,7 @@
 'use strict';
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
-
+let currentServerName;
 document.getElementById('serverDetails').style.display = 'none';
 
 const username = document.getElementById('username');
@@ -140,6 +140,7 @@ async function GetServer() {
         document
           .getElementById('serverDetails')
           .querySelector('h1').textContent = server.serverName;
+        currentServerName = server.serverName;
       });
 
       document.getElementById('home').addEventListener('click', function () {
@@ -160,18 +161,29 @@ function LogOut() {
   window.location.href = 'http://127.0.0.1:5500/Pages/LogIn.html';
 }
 
-function ServerChat(event) {
+async function ServerChat(event) {
   event.preventDefault();
 
   const formData = new FormData(event.target);
-  const formDataObject = {};
+  const formDataObject = {
+    MessageID: crypto.randomUUID(),
+    ServerID: selectedServerID,
+    ServerName: currentServerName,
+    MessagesUserSender: JWTusername,
+    Date: new Date().toLocaleString().toString(),
+  };
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
-  formDataObject.UserSender = JWTusername;
-  formDataObject.ServerID = selectedServerID;
-
-  formDataObject.Date = new Date().toLocaleString();
+  try {
+    const res = await axios.post(
+      'https://localhost:7170/api/ServerMessages/ServerMessages',
+      formDataObject
+    );
+    console.log(res);
+  } catch (e) {
+    console.log(e);
+  }
 
   const messageElement = document.createElement('p');
   messageElement.textContent = formDataObject.userText;
