@@ -1,5 +1,6 @@
 'use strict';
 let inServerUsername = document.getElementById('inServerUsername');
+let selectedServerID;
 
 document.getElementById('serverDetails').style.display = 'none';
 
@@ -128,7 +129,10 @@ async function GetServer() {
       newServerElement.classList.add('servers');
       newServerElement.textContent = server.serverName;
       allServersDiv.appendChild(newServerElement);
+
       newServerElement.addEventListener('click', function () {
+        selectedServerID = server.serverID;
+
         document.querySelector('.secondColumn').style.display = 'none';
         document.querySelector('.lastSection').style.display = 'none';
 
@@ -164,6 +168,18 @@ function ServerChat(event) {
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
+  formDataObject.UserSender = JWTusername;
+  formDataObject.ServerID = selectedServerID;
+
+  formDataObject.Date = new Date().toLocaleString();
+
+  const messageElement = document.createElement('p');
+  messageElement.textContent = formDataObject.userText;
+
+  const chatMessages = document.querySelector('.chatMessages');
+  chatMessages.appendChild(messageElement);
+
+  event.target.querySelector('.chatInput').value = '';
 
   console.log(formDataObject);
 }
