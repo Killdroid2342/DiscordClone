@@ -332,3 +332,43 @@
 #inServerUsername {
   padding: 10px;
 }
+.addFriendsDiv {
+  margin-left: 20px;
+  display: none;
+}
+.addFriendHeader {
+  font-family: MainFont;
+  color: #f2f3f5;
+  font-size: 18px;
+}
+.addFriendText {
+  color: #a6acb2;
+  margin-top: 5px;
+  margin-bottom: 10px;
+}
+.addFriendsForm {
+  background-color: #1e1f22;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin-right: 10px;
+}
+.friendsInput {
+  padding: 14px;
+  background-color: #1e1f22;
+  outline: none;
+  border: none;
+  width: 50%;
+  color: #dbdee1;
+  font-family: MainFont;
+}
+.friendsButton {
+  background-color: #5865f2;
+  color: #ffffff;
+  padding: 10px;
+  border: none;
+  outline: none;
+}
+.lastSection {
+  width: 1200px;
+}
