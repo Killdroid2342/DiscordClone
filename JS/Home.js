@@ -210,3 +210,22 @@ async function ServerChat(event) {
 
   console.log(formDataObject);
 }
+function showAddFriends() {
+  document.querySelector('.addFriendsDiv').style.display = 'block';
+}
+
+function clearContent() {
+  document.querySelector('.addFriendsDiv').style.display = 'none';
+}
+
+function SearchFriends(event) {
+  event.preventDefault();
+
+  const formData = new FormData(event.target);
+  const formDataObject = {};
+  formData.forEach((value, key) => {
+    formDataObject[key] = value;
+  });
+
+  console.log(formDataObject);
+}
