@@ -9,8 +9,8 @@
 <body>
 <div class="sections">
     <div class="allservers">
-        <img src="/assets/img/home.png"  class="servers" id="home">
-        <img src="/assets/img/addServer.png"  class="servers" id="openModalBtn" onclick="openModal()">
+        <img src="/assets/img/home.png" class="servers" id="home" onclick="clearContent()">
+        <img src="/assets/img/addServer.png" class="servers" id="openModalBtn" onclick="openModal()">
     </div>
     <div class="secondColumn">
         <form action="" class="inputForm">
@@ -51,13 +51,22 @@
         </div>
     </div>
     <div class="lastSection">
-          <div class="nav">
+        <div class="nav">
             <p class="navText">All</p>
             <p class="navText">Blocked</p>
-            <p class="addFriend">Add Friend</p>
-            <button onclick=" LogOut()" class="logOut">Log Out</button>
-          </div>      
+            <p class="addFriend" onclick="showAddFriends()">Add Friend</p>
+            <button onclick="LogOut()" class="logOut">Log Out</button>
+        </div> 
+        <div class="addFriendsDiv">
+            <p class="addFriendHeader">ADD FRIEND</p>
+            <p class="addFriendText">You can add friends with their Discord usernames</p>
+            <form action="" class="addFriendsForm" onsubmit="SearchFriends(event)">
+                <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput" name="username"/>
+                <button type="submit" class="friendsButton">Send Friend Request</button>
+            </form>
+        </div>     
     </div>
+
 
     <!--SERVERS IS HERE -->
     
