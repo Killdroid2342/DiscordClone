@@ -5,7 +5,7 @@ async function Auth() {
   const tokenRes = await axios.post(
     `https://localhost:7170/api/Account/VerifyToken?token=${token}`
   );
-  console.log(tokenRes);
+
   if (tokenRes.data.message !== 'Token is correct.') {
     window.location.replace('http://127.0.0.1:5500/Pages/LogIn.html');
   }

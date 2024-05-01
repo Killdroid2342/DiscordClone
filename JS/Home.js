@@ -2,6 +2,7 @@
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let currentServerName;
+const chatMessages = document.querySelector('.chatMessages');
 document.getElementById('serverDetails').style.display = 'none';
 
 const username = document.getElementById('username');
@@ -130,7 +131,7 @@ async function GetServer() {
       newServerElement.textContent = server.serverName;
       allServersDiv.appendChild(newServerElement);
 
-      newServerElement.addEventListener('click', function () {
+      newServerElement.addEventListener('click', async function () {
         selectedServerID = server.serverID;
 
         document.querySelector('.secondColumn').style.display = 'none';
@@ -141,6 +142,19 @@ async function GetServer() {
           .getElementById('serverDetails')
           .querySelector('h1').textContent = server.serverName;
         currentServerName = server.serverName;
+
+        chatMessages.innerHTML = '';
+
+        const messageRes = await axios.get(
+          `https://localhost:7170/api/ServerMessages/GetServerMessages?serverID=${selectedServerID}`
+        );
+        console.log(messageRes);
+
+        messageRes.data.forEach((message) => {
+          const UserMessageServer = document.createElement('p');
+          UserMessageServer.textContent = message.userText;
+          chatMessages.appendChild(UserMessageServer);
+        });
       });
 
       document.getElementById('home').addEventListener('click', function () {
@@ -171,7 +185,9 @@ async function ServerChat(event) {
     ServerName: currentServerName,
     MessagesUserSender: JWTusername,
     Date: new Date().toLocaleString().toString(),
+    userText: formData.get('userText'),
   };
+  console.log(formData, 'this is formdata');
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
@@ -188,7 +204,6 @@ async function ServerChat(event) {
   const messageElement = document.createElement('p');
   messageElement.textContent = formDataObject.userText;
 
-  const chatMessages = document.querySelector('.chatMessages');
   chatMessages.appendChild(messageElement);
 
   event.target.querySelector('.chatInput').value = '';
