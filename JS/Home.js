@@ -131,8 +131,9 @@ async function GetServer() {
       newServerElement.textContent = server.serverName;
       allServersDiv.appendChild(newServerElement);
 
-      newServerElement.addEventListener('click', async function () {
+      newServerElement.addEventListener('click', async function ClickServer() {
         selectedServerID = server.serverID;
+        console.log(selectedServerID, 'selected server');
 
         document.querySelector('.secondColumn').style.display = 'none';
         document.querySelector('.lastSection').style.display = 'none';
@@ -228,4 +229,10 @@ function SearchFriends(event) {
   });
 
   console.log(formDataObject);
+}
+
+function LeaveCall() {
+  const voiceChatDiv = document.querySelector('.voiceChat');
+
+  voiceChatDiv.innerHTML = '';
 }
