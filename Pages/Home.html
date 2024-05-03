@@ -5,6 +5,7 @@
     <title>Discord</title>
     <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
     <link rel="stylesheet" href="../css/Home.css">
+    <script src="/JS/Home.js" defer></script>
 </head>
 <body>
 <div class="sections">
@@ -46,8 +47,9 @@
         </div>
         <div class="account">
             <p id="username"></p>
-            <button>mute</button>
-            <button>defen</button>
+            <button>Mute</button>
+            <button>Defen</button>
+            <button>Leave Call</button>
         </div>
     </div>
     <div class="lastSection">
@@ -75,12 +77,15 @@
         <div class="CurrentServerMenu">
             <h1 class="currentServerName"><!--NAME OF THE SERVER YOU ARE ON IS IN HERE--></h1>
             <p class="chats">Text Chat</p>
-            <p class="chats">Voice Chat</p>
-
+            <p class="chats" >Voice Chat</p>
+            <div class="voiceChat">
+                
+            </div>
             <div class="account">
                 <p id="inServerUsername">USERNAME</p>
                 <button>Mute</button>
                 <button>Defen</button>
+                <button onclick="LeaveCall()">Leave Call</button>
             </div>
         </div>
         <div class="chatSection">
@@ -145,7 +150,7 @@
 
 <script src="/node_modules/axios/dist/axios.min.js"></script>
 <script src="/JS/Auth.js"></script>
-<script src="/JS/Home.js"></script>
+
 </body>
 </html>
 
