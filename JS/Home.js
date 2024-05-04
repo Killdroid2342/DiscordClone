@@ -5,6 +5,7 @@ let currentServerName;
 const chatMessages = document.querySelector('.chatMessages');
 const voiceChatsPTag = document.querySelector('.voicechats');
 const voiceChatDiv = document.querySelector('.voiceChat');
+let userJoinedPTag = document.querySelector('.userJoined');
 
 document.getElementById('serverDetails').style.display = 'none';
 const username = document.getElementById('username');
@@ -131,10 +132,7 @@ async function GetServer() {
 
       newServerElement.addEventListener('click', async function ClickServer() {
         selectedServerID = server.serverID;
-
-        console.log(server);
-        console.log(selectedServerID, ' this is selected server');
-
+        console.log(selectedServerID, 'this is selectedServerID');
         document.querySelector('.secondColumn').style.display = 'none';
         document.querySelector('.lastSection').style.display = 'none';
 
@@ -143,21 +141,6 @@ async function GetServer() {
           .getElementById('serverDetails')
           .querySelector('h1').textContent = server.serverName;
         currentServerName = server.serverName;
-
-        voiceChatDiv.innerHTML = '';
-
-        if (server.serverID === selectedServerID) {
-          voiceChatsPTag.addEventListener(
-            'click',
-            async function voiceChatHandler() {
-              const usernamePTag = document.createElement('p');
-              usernamePTag.textContent = JWTusername;
-              const voiceChatDiv = document.querySelector('.voiceChat');
-              voiceChatDiv.innerHTML = '';
-              voiceChatDiv.appendChild(usernamePTag);
-            }
-          );
-        }
 
         chatMessages.innerHTML = '';
 
@@ -171,12 +154,12 @@ async function GetServer() {
           chatMessages.appendChild(UserMessageServer);
         });
       });
+    });
 
-      document.getElementById('home').addEventListener('click', function () {
-        document.querySelector('.secondColumn').style.display = 'block';
-        document.querySelector('.lastSection').style.display = 'block';
-        document.getElementById('serverDetails').style.display = 'none';
-      });
+    document.getElementById('home').addEventListener('click', function () {
+      document.querySelector('.secondColumn').style.display = 'block';
+      document.querySelector('.lastSection').style.display = 'block';
+      document.getElementById('serverDetails').style.display = 'none';
     });
   } catch (e) {
     console.log(e);
@@ -241,7 +224,11 @@ function SearchFriends(event) {
 }
 
 function LeaveCall() {
-  const voiceChatDiv = document.querySelector('.voiceChat');
-
   voiceChatDiv.innerHTML = '';
+}
+
+function JoinVoiceCalls() {
+  console.log(userJoinedPTag);
+  userJoinedPTag.innerHTML = JWTusername;
+  userJoinedPTag.style.display = 'block';
 }
