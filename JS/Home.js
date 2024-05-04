@@ -3,8 +3,10 @@ let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let currentServerName;
 const chatMessages = document.querySelector('.chatMessages');
-document.getElementById('serverDetails').style.display = 'none';
+const voiceChatsPTag = document.querySelector('.voicechats');
+const voiceChatDiv = document.querySelector('.voiceChat');
 
+document.getElementById('serverDetails').style.display = 'none';
 const username = document.getElementById('username');
 let GetCookieToken = function (name) {
   let value = '; ' + document.cookie;
@@ -26,7 +28,6 @@ function decodeJWT(token) {
 }
 const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
-console.log(decodedJWT);
 let JWTusername = decodedJWT.payload.username;
 username.innerHTML = JWTusername;
 inServerUsername.innerHTML = JWTusername;
@@ -85,7 +86,7 @@ async function CreateServer(event) {
     'https://localhost:7170/api/Server/CreateServer',
     formData
   );
-  console.log(response);
+
   let newServerElement = document.createElement('div');
   newServerElement.classList.add('servers');
   newServerElement.textContent = ServerName;
@@ -95,7 +96,6 @@ async function CreateServer(event) {
 
   inputElement.value = '';
   CloseCreationModal();
-  console.log('server', formData);
 
   newServerElement.addEventListener('click', function () {
     document.querySelector('.secondColumn').style.display = 'none';
@@ -118,10 +118,8 @@ async function GetServer() {
     const response = await axios.get(
       `https://localhost:7170/api/Server/GetServer?username=${JWTusername}`
     );
-    console.log('Server items retrieved:', response);
 
     let serverData = response.data;
-    console.log(serverData);
 
     let allServersDiv = document.querySelector('.allservers');
 
@@ -133,7 +131,9 @@ async function GetServer() {
 
       newServerElement.addEventListener('click', async function ClickServer() {
         selectedServerID = server.serverID;
-        console.log(selectedServerID, 'selected server');
+
+        console.log(server);
+        console.log(selectedServerID, ' this is selected server');
 
         document.querySelector('.secondColumn').style.display = 'none';
         document.querySelector('.lastSection').style.display = 'none';
@@ -144,12 +144,26 @@ async function GetServer() {
           .querySelector('h1').textContent = server.serverName;
         currentServerName = server.serverName;
 
+        voiceChatDiv.innerHTML = '';
+
+        if (server.serverID === selectedServerID) {
+          voiceChatsPTag.addEventListener(
+            'click',
+            async function voiceChatHandler() {
+              const usernamePTag = document.createElement('p');
+              usernamePTag.textContent = JWTusername;
+              const voiceChatDiv = document.querySelector('.voiceChat');
+              voiceChatDiv.innerHTML = '';
+              voiceChatDiv.appendChild(usernamePTag);
+            }
+          );
+        }
+
         chatMessages.innerHTML = '';
 
         const messageRes = await axios.get(
           `https://localhost:7170/api/ServerMessages/GetServerMessages?serverID=${selectedServerID}`
         );
-        console.log(messageRes);
 
         messageRes.data.forEach((message) => {
           const UserMessageServer = document.createElement('p');
@@ -188,7 +202,7 @@ async function ServerChat(event) {
     Date: new Date().toLocaleString().toString(),
     userText: formData.get('userText'),
   };
-  console.log(formData, 'this is formdata');
+
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
@@ -197,7 +211,6 @@ async function ServerChat(event) {
       'https://localhost:7170/api/ServerMessages/ServerMessages',
       formDataObject
     );
-    console.log(res);
   } catch (e) {
     console.log(e);
   }
@@ -208,8 +221,6 @@ async function ServerChat(event) {
   chatMessages.appendChild(messageElement);
 
   event.target.querySelector('.chatInput').value = '';
-
-  console.log(formDataObject);
 }
 function showAddFriends() {
   document.querySelector('.addFriendsDiv').style.display = 'block';
@@ -227,8 +238,6 @@ function SearchFriends(event) {
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
-
-  console.log(formDataObject);
 }
 
 function LeaveCall() {
