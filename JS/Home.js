@@ -3,7 +3,7 @@ let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let currentServerName;
 let chatMessages = document.querySelector('.chatMessages');
-let displayUserJoined = document.querySelector('.displayUserJoined');
+let userJoined = document.querySelector('.UserJoined');
 
 document.getElementById('serverDetails').style.display = 'none';
 const username = document.getElementById('username');
@@ -137,14 +137,13 @@ async function GetServer() {
           .querySelector('h1').textContent = server.serverName;
         currentServerName = server.serverName;
 
-        document.querySelector('.chats').id = `${selectedServerID}`;
-        document.querySelector('.voicechatBTN').id = `${selectedServerID}`;
-        document.querySelector(
-          '.viewServerAccounts .accounts'
-        ).id = `${selectedServerID}`;
-
         chatMessages.innerHTML = '';
+        userJoined.innerHTML = '';
 
+        let getJoined = sessionStorage.getItem('UserJoined');
+        if (getJoined === selectedServerID) {
+          userJoined.innerHTML = JWTusername;
+        }
         const messageRes = await axios.get(
           `https://localhost:7170/api/ServerMessages/GetServerMessages?serverID=${selectedServerID}`
         );
@@ -154,8 +153,8 @@ async function GetServer() {
           UserMessageServer.textContent = message.userText;
           chatMessages.appendChild(UserMessageServer);
         });
-        JoinVoiceCalls(selectedServerID);
       });
+      console.log(server, 'this is server');
     });
 
     document.getElementById('home').addEventListener('click', function () {
@@ -226,9 +225,14 @@ function SearchFriends(event) {
 }
 
 function LeaveCall() {
-  voiceChatDiv.innerHTML = '';
+  sessionStorage.removeItem('UserJoined');
+  userJoined.innerHTML = '';
 }
-
-function JoinVoiceCalls(serverID) {
-  console.log('Joining voice chat for server:', serverID);
+function JoinVoiceCalls() {
+  sessionStorage.setItem('UserJoined', selectedServerID);
+  let joined = sessionStorage.getItem('UserJoined');
+  if (joined === selectedServerID) {
+    userJoined.style.display = 'block';
+    userJoined.innerHTML = JWTusername;
+  }
 }
