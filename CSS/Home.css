@@ -326,10 +326,7 @@
   font-size: 18px;
   margin-top: 10px;
 }
-.accounts {
-  text-align: center;
-  padding: 20px;
-}
+
 #username,
 #inServerUsername {
   padding: 10px;
@@ -373,4 +370,7 @@
 }
 .lastSection {
   width: 1200px;
+}
+.chatMessages {
+  color: #dbdee1;
 }

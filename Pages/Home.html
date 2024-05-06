@@ -75,11 +75,11 @@
     
     <div id="serverDetails" class="CurrentServer">
         <div class="CurrentServerMenu">
-            <h1 class="currentServerName"><!--NAME OF THE SERVER YOU ARE ON IS IN HERE--></h1>
+            <h1 class="currentServerName"></h1>
             <p class="chats">Text Chat</p>
-            <p class="voicechatBTN" onclick="JoinVoiceCalls(selectedServerID)">Voice Chat</p>
+            <p class="voicechatBTN" onclick="JoinVoiceCalls()">Voice Chat</p>
             <div>
-                <p style="display: none;"></p>
+                <p class="UserJoined"></p>
             </div>
             <div class="account">
                 <p id="inServerUsername">USERNAME</p>
@@ -91,7 +91,7 @@
         <div class="chatSection">
             <p class="chatHeader">Text Channel</p>
             <div class="chatMessages">
-                <!-- Messages will be displayed here -->
+
             </div>
             <form action="" class="chatForm" onsubmit="ServerChat(event)">
                 <input type="text" name="userText" class="chatInput" placeholder="Message">
@@ -101,13 +101,11 @@
         
         <div class="viewServerAccounts">
             <p class="serverAccounts">Accounts</p>
-            <p class="accounts">A</p>
+            
         </div>
     </div>
 </div>
 
-
-    <!--SERVERS IS HERE -->
 
 <div class="outerModal">
     <div class="innerModal">
