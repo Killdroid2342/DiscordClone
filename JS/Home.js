@@ -2,10 +2,8 @@
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let currentServerName;
-const chatMessages = document.querySelector('.chatMessages');
-const voiceChatsPTag = document.querySelector('.voicechats');
-const voiceChatDiv = document.querySelector('.voiceChat');
-let userJoinedPTag = document.querySelector('.userJoined');
+let chatMessages = document.querySelector('.chatMessages');
+let displayUserJoined = document.querySelector('.displayUserJoined');
 
 document.getElementById('serverDetails').style.display = 'none';
 const username = document.getElementById('username');
@@ -83,10 +81,7 @@ async function CreateServer(event) {
     ServerOwner: serverOwner,
   };
 
-  const response = await axios.post(
-    'https://localhost:7170/api/Server/CreateServer',
-    formData
-  );
+  await axios.post('https://localhost:7170/api/Server/CreateServer', formData);
 
   let newServerElement = document.createElement('div');
   newServerElement.classList.add('servers');
@@ -142,6 +137,12 @@ async function GetServer() {
           .querySelector('h1').textContent = server.serverName;
         currentServerName = server.serverName;
 
+        document.querySelector('.chats').id = `${selectedServerID}`;
+        document.querySelector('.voicechatBTN').id = `${selectedServerID}`;
+        document.querySelector(
+          '.viewServerAccounts .accounts'
+        ).id = `${selectedServerID}`;
+
         chatMessages.innerHTML = '';
 
         const messageRes = await axios.get(
@@ -153,6 +154,7 @@ async function GetServer() {
           UserMessageServer.textContent = message.userText;
           chatMessages.appendChild(UserMessageServer);
         });
+        JoinVoiceCalls(selectedServerID);
       });
     });
 
@@ -227,8 +229,6 @@ function LeaveCall() {
   voiceChatDiv.innerHTML = '';
 }
 
-function JoinVoiceCalls() {
-  console.log(userJoinedPTag);
-  userJoinedPTag.innerHTML = JWTusername;
-  userJoinedPTag.style.display = 'block';
+function JoinVoiceCalls(serverID) {
+  console.log('Joining voice chat for server:', serverID);
 }
