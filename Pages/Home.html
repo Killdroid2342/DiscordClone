@@ -55,7 +55,7 @@
     <div class="lastSection">
         <div class="nav">
             <p class="navText">All</p>
-            <p class="navText">Blocked</p>
+            <p class="navText" onclick="showDeleteFriend()">Remove Friend</p>
             <p class="addFriend" onclick="showAddFriends()">Add Friend</p>
             <button onclick="LogOut()" class="logOut">Log Out</button>
         </div> 
@@ -63,10 +63,18 @@
             <p class="addFriendHeader">ADD FRIEND</p>
             <p class="addFriendText">You can add friends with their Discord usernames</p>
             <form action="" class="addFriendsForm" onsubmit="SearchFriends(event)">
-                <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput" name="username"/>
+                <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput" name="friendUsername"/>
                 <button type="submit" class="friendsButton">Send Friend Request</button>
             </form>
-        </div>     
+        </div>
+        <div class="removeFriendsDiv">
+            <p class="removeFriendHeader">BLOCK FRIEND</p>
+            <p class="removeFriendText">You can remove friends with their Discord usernames</p>
+            <form action="" class="removeFriendsForm" onsubmit="RemoveFriends(event)">
+                <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput" name="removeFriendInput"/>
+                <button type="submit" class="removeFriendsButton">Remove Friend</button>
+            </form>
+        </div>      
     </div>
 
 
