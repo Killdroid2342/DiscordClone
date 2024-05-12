@@ -331,28 +331,34 @@
 #inServerUsername {
   padding: 10px;
 }
-.addFriendsDiv {
+.addFriendsDiv,
+.removeFriendsDiv {
   margin-left: 20px;
   display: none;
 }
-.addFriendHeader {
+
+.addFriendHeader,
+.removeFriendHeader {
   font-family: MainFont;
   color: #f2f3f5;
   font-size: 18px;
 }
-.addFriendText {
+.addFriendText,
+.removeFriendText {
   color: #a6acb2;
   margin-top: 5px;
   margin-bottom: 10px;
 }
-.addFriendsForm {
+.addFriendsForm,
+.removeFriendsForm {
   background-color: #1e1f22;
   display: flex;
   flex-direction: row;
   justify-content: space-between;
   margin-right: 10px;
 }
-.friendsInput {
+.friendsInput,
+.removeFriendInput {
   padding: 14px;
   background-color: #1e1f22;
   outline: none;
@@ -361,7 +367,8 @@
   color: #dbdee1;
   font-family: MainFont;
 }
-.friendsButton {
+.friendsButton,
+.removeFriendsButton {
   background-color: #5865f2;
   color: #ffffff;
   padding: 10px;
