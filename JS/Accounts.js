@@ -10,7 +10,8 @@ async function LogInForm(event) {
   event.preventDefault();
 
   const formData = new FormData(event.target);
-  const formDataObject = {};
+  console.log(formData);
+  const formDataObject = { Friends: [] };
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
@@ -54,7 +55,7 @@ async function RegisterForm(event) {
   event.preventDefault();
 
   const formData = new FormData(event.target);
-  const formDataObject = {};
+  const formDataObject = { Friends: [] };
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });

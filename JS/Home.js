@@ -208,13 +208,15 @@ async function ServerChat(event) {
 }
 function showAddFriends() {
   document.querySelector('.addFriendsDiv').style.display = 'block';
+  document.querySelector('.removeFriendsDiv').style.display = 'none';
 }
 
 function clearContent() {
   document.querySelector('.addFriendsDiv').style.display = 'none';
+  document.querySelector('.removeFriendsDiv').style.display = 'none';
 }
 
-function SearchFriends(event) {
+async function SearchFriends(event) {
   event.preventDefault();
 
   const formData = new FormData(event.target);
@@ -222,6 +224,18 @@ function SearchFriends(event) {
   formData.forEach((value, key) => {
     formDataObject[key] = value;
   });
+  let friendUsername = formDataObject.friendUsername;
+  console.log(friendUsername);
+
+  try {
+    const res = await axios.post(
+      `https://localhost:7170/api/Account/AddFriend?username=${JWTusername}&friendUsername=${friendUsername}`,
+      formDataObject
+    );
+    console.log(res.data.message);
+  } catch (e) {
+    console.log(e);
+  }
 }
 
 function LeaveCall() {
@@ -235,4 +249,20 @@ function JoinVoiceCalls() {
     userJoined.style.display = 'block';
     userJoined.innerHTML = JWTusername;
   }
+}
+
+function showDeleteFriend() {
+  document.querySelector('.removeFriendsDiv').style.display = 'block';
+  document.querySelector('.addFriendsDiv').style.display = 'none';
+}
+
+function RemoveFriends(event) {
+  event.preventDefault();
+
+  const formData = new FormData(event.target);
+  const formDataObject = {};
+  formData.forEach((value, key) => {
+    formDataObject[key] = value;
+  });
+  console.log(formDataObject);
 }
