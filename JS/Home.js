@@ -4,7 +4,7 @@ let selectedServerID;
 let currentServerName;
 let chatMessages = document.querySelector('.chatMessages');
 let userJoined = document.querySelector('.UserJoined');
-
+let mainFriendsDiv = document.querySelector('.MainFriendsDiv');
 document.getElementById('serverDetails').style.display = 'none';
 const username = document.getElementById('username');
 let GetCookieToken = function (name) {
@@ -258,11 +258,42 @@ function showDeleteFriend() {
 
 function RemoveFriends(event) {
   event.preventDefault();
-
-  const formData = new FormData(event.target);
-  const formDataObject = {};
-  formData.forEach((value, key) => {
-    formDataObject[key] = value;
-  });
-  console.log(formDataObject);
+  try {
+    const formData = new FormData(event.target);
+    const formDataObject = {};
+    formData.forEach((value, key) => {
+      formDataObject[key] = value;
+    });
+    console.log(formDataObject);
+  } catch (e) {
+    console.log(e);
+  }
 }
+
+async function GetFriends() {
+  try {
+    let res =
+      await axios.get(`https://localhost:7170/api/Account/GetFriends?username=${JWTusername}
+  `);
+    console.log(res.data);
+    console.log(res);
+    let friendsTag = document.createElement('p');
+    if (res.data === 'No Friends Added!') {
+      friendsTag.textContent = 'No Friends Added!';
+      console.log(friendsTag);
+      mainFriendsDiv.appendChild(friendsTag);
+    } else {
+      let friends = res.data;
+
+      friends.forEach((e) => {
+        console.log(e);
+        friendsTag.textContent = e;
+        console.log(friendsTag);
+        mainFriendsDiv.appendChild(friendsTag);
+      });
+    }
+  } catch (e) {
+    console.log(e);
+  }
+}
+GetFriends();
