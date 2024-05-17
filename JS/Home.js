@@ -233,6 +233,7 @@ async function SearchFriends(event) {
       formDataObject
     );
     console.log(res.data.message);
+    await GetFriends();
   } catch (e) {
     console.log(e);
   }
@@ -256,7 +257,7 @@ function showDeleteFriend() {
   document.querySelector('.addFriendsDiv').style.display = 'none';
 }
 
-function RemoveFriends(event) {
+async function RemoveFriends(event) {
   event.preventDefault();
   try {
     const formData = new FormData(event.target);
@@ -264,31 +265,33 @@ function RemoveFriends(event) {
     formData.forEach((value, key) => {
       formDataObject[key] = value;
     });
-    console.log(formDataObject);
+    let friendUsername = formDataObject.friendUsername;
+    await axios.post(
+      `https://localhost:7170/api/Account/RemoveFriend?username=${JWTusername}&friendUsername=${friendUsername}`
+    );
+    await GetFriends();
   } catch (e) {
     console.log(e);
   }
 }
-
 async function GetFriends() {
+  mainFriendsDiv.innerHTML = '';
+
   try {
-    let res =
-      await axios.get(`https://localhost:7170/api/Account/GetFriends?username=${JWTusername}
-  `);
+    let res = await axios.get(
+      `https://localhost:7170/api/Account/GetFriends?username=${JWTusername}`
+    );
     console.log(res.data);
-    console.log(res);
-    let friendsTag = document.createElement('p');
+
     if (res.data === 'No Friends Added!') {
-      friendsTag.textContent = 'No Friends Added!';
-      console.log(friendsTag);
-      mainFriendsDiv.appendChild(friendsTag);
+      let noFriendsTag = document.createElement('p');
+      noFriendsTag.textContent = 'No Friends Added!';
+      mainFriendsDiv.appendChild(noFriendsTag);
     } else {
       let friends = res.data;
-
-      friends.forEach((e) => {
-        console.log(e);
-        friendsTag.textContent = e;
-        console.log(friendsTag);
+      friends.forEach((friend) => {
+        let friendsTag = document.createElement('p');
+        friendsTag.textContent = friend;
         mainFriendsDiv.appendChild(friendsTag);
       });
     }
