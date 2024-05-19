@@ -6,6 +6,8 @@ let chatMessages = document.querySelector('.chatMessages');
 let userJoined = document.querySelector('.UserJoined');
 let mainFriendsDiv = document.querySelector('.MainFriendsDiv');
 document.getElementById('serverDetails').style.display = 'none';
+const messageModalContent = document.querySelector('.ContentMessage');
+const messageOuterModal = document.querySelector('.outerModalMessage');
 const username = document.getElementById('username');
 let GetCookieToken = function (name) {
   let value = '; ' + document.cookie;
@@ -232,7 +234,18 @@ async function SearchFriends(event) {
       `https://localhost:7170/api/Account/AddFriend?username=${JWTusername}&friendUsername=${friendUsername}`,
       formDataObject
     );
+    console.log(res, 'ADD FRIEND');
     console.log(res.data.message);
+
+    if (res.data.message) {
+      messageModalContent.innerText = res.data.message;
+
+      messageOuterModal.style.display = 'flex';
+
+      setTimeout(() => {
+        messageOuterModal.style.display = 'none';
+      }, 2000);
+    }
     await GetFriends();
   } catch (e) {
     console.log(e);
@@ -266,9 +279,18 @@ async function RemoveFriends(event) {
       formDataObject[key] = value;
     });
     let friendUsername = formDataObject.friendUsername;
-    await axios.post(
+    let res = await axios.post(
       `https://localhost:7170/api/Account/RemoveFriend?username=${JWTusername}&friendUsername=${friendUsername}`
     );
+    console.log(res, 'REMOVE FRIENDS');
+    if (res.data.message) {
+      messageModalContent.innerText = res.data.message;
+      messageOuterModal.style.display = 'flex';
+
+      setTimeout(() => {
+        messageOuterModal.style.display = 'none';
+      }, 2000);
+    }
     await GetFriends();
   } catch (e) {
     console.log(e);
