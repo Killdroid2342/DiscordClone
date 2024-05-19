@@ -8,6 +8,13 @@
     <script src="/JS/Home.js" defer></script>
 </head>
 <body>
+    <!-- Message Modals -->
+
+<div class="outerModalMessage">
+    <div class="innerModalMessage">
+        <p class="ContentMessage"></p>
+    </div>
+</div>
 <div class="sections">
     <div class="allservers">
         <img src="/assets/img/home.png" class="servers" id="home" onclick="clearContent()">
@@ -28,7 +35,6 @@
             </div>
             <div class="MainFriendsDiv">
                 <p class="testaddeduser"></p>
-
             </div>
         </div>
         <div class="account">
@@ -54,10 +60,10 @@
             </form>
         </div>
         <div class="removeFriendsDiv">
-            <p class="removeFriendHeader">BLOCK FRIEND</p>
+            <p class="removeFriendHeader">REMOVE FRIEND</p>
             <p class="removeFriendText">You can remove friends with their Discord usernames</p>
             <form action="" class="removeFriendsForm" onsubmit="RemoveFriends(event)">
-                <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput" name="removeFriendInput"/>
+                <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput" name="friendUsername"/>
                 <button type="submit" class="removeFriendsButton">Remove Friend</button>
             </form>
         </div>      
@@ -139,6 +145,8 @@
         </form>
     </div>
 </div>
+
+
 
 <script src="/node_modules/axios/dist/axios.min.js"></script>
 <script src="/JS/Auth.js"></script>
