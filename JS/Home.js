@@ -2,9 +2,11 @@
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let currentServerName;
+let currentFriend;
 let chatMessages = document.querySelector('.chatMessages');
 let userJoined = document.querySelector('.UserJoined');
 let mainFriendsDiv = document.querySelector('.MainFriendsDiv');
+let directMessageUser = document.querySelector('.messageUser');
 document.getElementById('serverDetails').style.display = 'none';
 const messageModalContent = document.querySelector('.ContentMessage');
 const messageOuterModal = document.querySelector('.outerModalMessage');
@@ -316,8 +318,10 @@ async function GetFriends() {
         friendsTag.textContent = friend;
         friendsTag.addEventListener('click', () => {
           console.log(friend, 'name clicked');
+          currentFriend = friend;
           document.querySelector('.nav').style.display = 'none';
           document.querySelector('.privateMessage').style.display = 'block';
+          directMessageUser.innerText = currentFriend;
         });
         mainFriendsDiv.appendChild(friendsTag);
       });
@@ -328,6 +332,42 @@ async function GetFriends() {
 }
 GetFriends();
 
-function PrivateMessage(event) {
+async function PrivateMessage(event) {
   event.preventDefault();
+  try {
+    const formData = new FormData(event.target);
+    const formDataObject = {
+      messageUserReciver: currentFriend,
+      messagesUserSender: JWTusername,
+      date: new Date().toLocaleString().toString(),
+    };
+
+    formData.forEach((value, key) => {
+      formDataObject[key] = value;
+    });
+    console.log(formDataObject, 'this is formdataobject');
+
+    const response = await axios.post(
+      'https://localhost:7170/api/PrivateMessageFriend/SendPrivateMessage',
+      formDataObject
+    );
+    console.log(response);
+
+    const messagesDisplay = document.querySelector('.messagesDisplay');
+    const messageText = formDataObject.friendMessagesData;
+    const messageElement = document.createElement('p');
+    messageElement.textContent = `${JWTusername}: ${messageText} (${formDataObject.date})`;
+    messagesDisplay.appendChild(messageElement);
+
+    event.target.reset();
+  } catch (e) {
+    console.log(e);
+  }
+}
+
+async function GetPrivateMessage() {
+  try {
+  } catch (e) {
+    console.log(e);
+  }
 }
