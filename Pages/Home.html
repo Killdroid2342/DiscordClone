@@ -68,16 +68,14 @@
         </div>
         
         
-<div class="privateMessage">
-    <h2 class="messageUser"></h2>
-    <div></div>
-    <form action="" >
-        <input type="text" name="userText" class="chatInput" placeholder="Message">
-        <button class="formButton">Send</button>
-    </form>
-</div>
-
-
+        <div class="privateMessage">
+            <h2 class="messageUser"></h2>
+            <div class="messagesDisplay"></div>
+            <form action="" class="privateMessageForm" onsubmit="PrivateMessage(event)">
+                <input type="text" name="friendMessagesData" class="chatInput" placeholder="Message">
+                <button class="formButton">Send</button>
+            </form>
+        </div>
     </div>
 
 
