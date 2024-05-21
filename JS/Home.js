@@ -314,6 +314,11 @@ async function GetFriends() {
       friends.forEach((friend) => {
         let friendsTag = document.createElement('p');
         friendsTag.textContent = friend;
+        friendsTag.addEventListener('click', () => {
+          console.log(friend, 'name clicked');
+          document.querySelector('.nav').style.display = 'none';
+          document.querySelector('.privateMessage').style.display = 'block';
+        });
         mainFriendsDiv.appendChild(friendsTag);
       });
     }
@@ -322,3 +327,7 @@ async function GetFriends() {
   }
 }
 GetFriends();
+
+function PrivateMessage(event) {
+  event.preventDefault();
+}
