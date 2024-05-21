@@ -402,3 +402,10 @@
   color: #f2f3f5;
   font-family: 'MainFont';
 }
+.privateMessage {
+  background-color: #313338;
+  display: none;
+}
+.privateMessageForm {
+  display: flex;
+}
