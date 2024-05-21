@@ -8,7 +8,6 @@
     <script src="/JS/Home.js" defer></script>
 </head>
 <body>
-    <!-- Message Modals -->
 
 <div class="outerModalMessage">
     <div class="innerModalMessage">
@@ -66,7 +65,19 @@
                 <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput" name="friendUsername"/>
                 <button type="submit" class="removeFriendsButton">Remove Friend</button>
             </form>
-        </div>      
+        </div>
+        
+        
+<div class="privateMessage">
+    <h2 class="messageUser"></h2>
+    <div></div>
+    <form action="" >
+        <input type="text" name="userText" class="chatInput" placeholder="Message">
+        <button class="formButton">Send</button>
+    </form>
+</div>
+
+
     </div>
 
 
@@ -145,7 +156,6 @@
         </form>
     </div>
 </div>
-
 
 
 <script src="/node_modules/axios/dist/axios.min.js"></script>
