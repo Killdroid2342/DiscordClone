@@ -109,7 +109,6 @@ async function CreateServer(event) {
   document.getElementById('home').addEventListener('click', function () {
     document.querySelector('.secondColumn').style.display = 'block';
     document.querySelector('.lastSection').style.display = 'block';
-
     document.getElementById('serverDetails').style.display = 'none';
   });
 }
@@ -316,9 +315,10 @@ async function GetFriends() {
       friends.forEach((friend) => {
         let friendsTag = document.createElement('p');
         friendsTag.textContent = friend;
-        friendsTag.addEventListener('click', () => {
+        friendsTag.addEventListener('click', async () => {
           console.log(friend, 'name clicked');
           currentFriend = friend;
+          await GetPrivateMessage();
           document.querySelector('.nav').style.display = 'none';
           document.querySelector('.privateMessage').style.display = 'block';
           directMessageUser.innerText = currentFriend;
@@ -330,7 +330,6 @@ async function GetFriends() {
     console.log(e);
   }
 }
-GetFriends();
 
 async function PrivateMessage(event) {
   event.preventDefault();
@@ -367,7 +366,32 @@ async function PrivateMessage(event) {
 
 async function GetPrivateMessage() {
   try {
+    const res = await axios.get(
+      `https://localhost:7170/api/PrivateMessageFriend/GetPrivateMessage?currentUsername=${JWTusername}&targetUsername=${currentFriend}`
+    );
+    console.log(res);
+
+    const messagesDisplay = document.querySelector('.messagesDisplay');
+    messagesDisplay.innerHTML = '';
+
+    res.data.forEach((message) => {
+      const messageElement = document.createElement('p');
+      const sender = message.messagesUserSender;
+      const text = message.friendMessagesData;
+      const date = message.date;
+
+      messageElement.textContent = `${sender}: ${text} (${date})`;
+      messagesDisplay.appendChild(messageElement);
+    });
+    document.getElementById('home').addEventListener('click', function () {
+      document.querySelector('.secondColumn').style.display = 'block';
+      document.querySelector('.lastSection').style.display = 'block';
+      document.getElementById('serverDetails').style.display = 'none';
+      document.querySelector('.privateMessage').style.display = 'none';
+      document.querySelector('.nav').style.display = 'flex';
+    });
   } catch (e) {
     console.log(e);
   }
 }
+GetFriends();
