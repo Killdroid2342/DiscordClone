@@ -110,7 +110,6 @@
         
         <div class="viewServerAccounts">
             <p class="serverAccounts">Accounts</p>
-            
         </div>
     </div>
 </div>
@@ -155,7 +154,74 @@
     </div>
 </div>
 
+<video id="localVideo" autoplay></video>
+<video id="remoteVideo" autoplay></video>
+<button onclick="startCall()">Start Call</button>
+<script>
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
 
+    let localStream;
+    let peerConnection;
+    const config = {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    async function startCall() {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+
+        peerConnection = new RTCPeerConnection(config);
+        peerConnection.onicecandidate = handleIceCandidate;
+        peerConnection.ontrack = handleRemoteStream;
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        await fetch('https://yourserver/api/signaling/offer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: 'user1', data: JSON.stringify(offer) })
+        });
+
+        pollAnswer();
+    }
+
+    async function pollAnswer() {
+        const response = await fetch('https://yourserver/api/signaling/answer/user1');
+        const answer = await response.json();
+        if (answer) {
+            const remoteDesc = new RTCSessionDescription(JSON.parse(answer));
+            await peerConnection.setRemoteDescription(remoteDesc);
+            pollIceCandidates();
+        } else {
+            setTimeout(pollAnswer, 1000);
+        }
+    }
+
+    async function pollIceCandidates() {
+        const response = await fetch('https://yourserver/api/signaling/ice-candidates');
+        const candidates = await response.json();
+        candidates.forEach(async candidate => {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(candidate)));
+        });
+    }
+
+    function handleIceCandidate(event) {
+        if (event.candidate) {
+            fetch('https://yourserver/api/signaling/ice-candidate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user: 'user1', data: JSON.stringify(event.candidate) })
+            });
+        }
+    }
+
+    function handleRemoteStream(event) {
+        remoteVideo.srcObject = event.streams[0];
+    }
+</script>
 <script src="/node_modules/axios/dist/axios.min.js"></script>
 <script src="/JS/Auth.js"></script>
 
