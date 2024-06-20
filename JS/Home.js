@@ -11,11 +11,12 @@ document.getElementById('serverDetails').style.display = 'none';
 const messageModalContent = document.querySelector('.ContentMessage');
 const messageOuterModal = document.querySelector('.outerModalMessage');
 const username = document.getElementById('username');
-let GetCookieToken = function (name) {
+
+function GetCookieToken(name) {
   let value = '; ' + document.cookie;
   let parts = value.split('; ' + name + '=');
   if (parts.length == 2) return parts.pop().split(';').shift();
-};
+}
 
 let cookieVal = GetCookieToken('token');
 
@@ -31,7 +32,7 @@ function decodeJWT(token) {
 }
 const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
-let JWTusername = decodedJWT.payload.username;
+export let JWTusername = decodedJWT.payload.username;
 username.innerHTML = JWTusername;
 inServerUsername.innerHTML = JWTusername;
 
@@ -217,6 +218,10 @@ function showAddFriends() {
 function clearContent() {
   document.querySelector('.addFriendsDiv').style.display = 'none';
   document.querySelector('.removeFriendsDiv').style.display = 'none';
+
+  const accountElement = document.querySelector('.account');
+  // temp solution
+  accountElement.style.marginTop = '668px';
 }
 
 async function SearchFriends(event) {
