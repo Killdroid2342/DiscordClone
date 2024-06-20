@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Discord</title>
     <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
     <link rel="stylesheet" href="../css/Home.css">
-    <script src="/JS/Home.js" defer></script>
+    <script type="module" src="/JS/Home.js" defer></script>
 </head>
 <body>
 
@@ -39,7 +39,7 @@
         <div class="account">
             <p id="username"></p>
             <button>Mute</button>
-            <button>Defen</button>
+            <button>Deafen</button>
             <button>Leave Call</button>
         </div>
     </div>
@@ -93,7 +93,7 @@
             <div class="account">
                 <p id="inServerUsername">USERNAME</p>
                 <button>Mute</button>
-                <button>Defen</button>
+                <button>Deafen</button>
                 <button onclick="LeaveCall()">Leave Call</button>
             </div>
         </div>
@@ -141,9 +141,9 @@
 <div class="outerCreationModal">
     <div class="innerCreationModal">
         <p class="closeThird" onclick="CloseCreationModal()">x</p>
-        <h2 class="CreateCreationServerHead">Customise Your Server</h2>
+        <h2 class="CreateCreationServerHead">Customize Your Server</h2>
         <p class="modalCreationSubhead">Give your new server a personality with a name</p>
-        <form action="POST"  onsubmit="CreateServer(event)" class="form">
+        <form action="POST" onsubmit="CreateServer(event)" class="form">
             <label for="serverName" class="serverName">SERVER NAME</label>
             <input type="text" name="Name" class="serverInput">
             <div class="creationFlex">
@@ -157,74 +157,10 @@
 <video id="localVideo" autoplay></video>
 <video id="remoteVideo" autoplay></video>
 <button onclick="startCall()">Start Call</button>
-<script>
-    const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
 
-    let localStream;
-    let peerConnection;
-    const config = {
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    };
-
-    async function startCall() {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localVideo.srcObject = localStream;
-
-        peerConnection = new RTCPeerConnection(config);
-        peerConnection.onicecandidate = handleIceCandidate;
-        peerConnection.ontrack = handleRemoteStream;
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-
-        await fetch('https://yourserver/api/signaling/offer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user: 'user1', data: JSON.stringify(offer) })
-        });
-
-        pollAnswer();
-    }
-
-    async function pollAnswer() {
-        const response = await fetch('https://yourserver/api/signaling/answer/user1');
-        const answer = await response.json();
-        if (answer) {
-            const remoteDesc = new RTCSessionDescription(JSON.parse(answer));
-            await peerConnection.setRemoteDescription(remoteDesc);
-            pollIceCandidates();
-        } else {
-            setTimeout(pollAnswer, 1000);
-        }
-    }
-
-    async function pollIceCandidates() {
-        const response = await fetch('https://yourserver/api/signaling/ice-candidates');
-        const candidates = await response.json();
-        candidates.forEach(async candidate => {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(candidate)));
-        });
-    }
-
-    function handleIceCandidate(event) {
-        if (event.candidate) {
-            fetch('https://yourserver/api/signaling/ice-candidate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user: 'user1', data: JSON.stringify(event.candidate) })
-            });
-        }
-    }
-
-    function handleRemoteStream(event) {
-        remoteVideo.srcObject = event.streams[0];
-    }
-</script>
 <script src="/node_modules/axios/dist/axios.min.js"></script>
 <script src="/JS/Auth.js"></script>
+<script type="module" src="/JS/Chats.js"></script>
 
 </body>
 </html>
-
