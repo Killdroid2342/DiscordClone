@@ -1,5 +1,4 @@
-import { JWTusername } from './Home.js';
-
+console.log(JWTusername, 'this is the username');
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 
@@ -25,8 +24,8 @@ async function startCall() {
 
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
-
-  await fetch(`https://yourserver/api/signaling/offer/${JWTusername}`, {
+  console.log(offer, 'this is the offer');
+  await fetch(`https://localhost:7170/api/Signaling/PostOffer/offer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user: 'user1', data: JSON.stringify(offer) }),

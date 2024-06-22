@@ -32,7 +32,7 @@ function decodeJWT(token) {
 }
 const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
-export let JWTusername = decodedJWT.payload.username;
+let JWTusername = decodedJWT.payload.username;
 username.innerHTML = JWTusername;
 inServerUsername.innerHTML = JWTusername;
 
