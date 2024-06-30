@@ -147,6 +147,7 @@ async function GetServer() {
         let getJoined = sessionStorage.getItem('UserJoined');
         if (getJoined === selectedServerID) {
           userJoined.innerHTML = JWTusername;
+          await startCall();
         }
         const messageRes = await axios.get(
           `https://localhost:7170/api/ServerMessages/GetServerMessages?serverID=${selectedServerID}`
@@ -261,6 +262,8 @@ async function SearchFriends(event) {
 function LeaveCall() {
   sessionStorage.removeItem('UserJoined');
   userJoined.innerHTML = '';
+  EndCall();
+  // REMOVE THE VOICE CHATS HERE
 }
 function JoinVoiceCalls() {
   sessionStorage.setItem('UserJoined', selectedServerID);
@@ -423,120 +426,55 @@ const config = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
 
+async function startStream(videoEnabled, audioEnabled) {
+  localStream = await navigator.mediaDevices.getUserMedia({
+    video: videoEnabled,
+    audio: audioEnabled,
+  });
+  localVideo.srcObject = localStream;
+
+  peerConnection = new RTCPeerConnection(config);
+
+  localStream
+    .getTracks()
+    .forEach((track) => peerConnection.addTrack(track, localStream));
+
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+  console.log(offer, 'this is the offer');
+  await fetch(`https://localhost:7170/api/Signaling/PostOffer/offer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user: 'user1', data: JSON.stringify(offer) }),
+  });
+}
+
 async function startCall() {
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: false,
-    audio: true,
-  });
-  localVideo.srcObject = localStream;
-
-  peerConnection = new RTCPeerConnection(config);
-  // peerConnection.onicecandidate = handleIceCandidate;
-  // peerConnection.ontrack = handleRemoteStream;
-  localStream
-    .getTracks()
-    .forEach((track) => peerConnection.addTrack(track, localStream));
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  console.log(offer, 'this is the offer');
-  await fetch(`https://localhost:7170/api/Signaling/PostOffer/offer`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user: 'user1', data: JSON.stringify(offer) }),
-  });
-
-  // pollAnswer();
+  await startStream(false, true);
 }
+
 async function VideoOn() {
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true,
-  });
-  localVideo.srcObject = localStream;
-
-  peerConnection = new RTCPeerConnection(config);
-  // peerConnection.onicecandidate = handleIceCandidate;
-  // peerConnection.ontrack = handleRemoteStream;
-  localStream
-    .getTracks()
-    .forEach((track) => peerConnection.addTrack(track, localStream));
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  console.log(offer, 'this is the offer');
-  await fetch(`https://localhost:7170/api/Signaling/PostOffer/offer`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user: 'user1', data: JSON.stringify(offer) }),
-  });
-
-  // pollAnswer();
+  await startStream(true, true);
 }
+
 async function VideoOff() {
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: false,
-    audio: true,
-  });
-  localVideo.srcObject = localStream;
-
-  peerConnection = new RTCPeerConnection(config);
-  // peerConnection.onicecandidate = handleIceCandidate;
-  // peerConnection.ontrack = handleRemoteStream;
-  localStream
-    .getTracks()
-    .forEach((track) => peerConnection.addTrack(track, localStream));
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  console.log(offer, 'this is the offer');
-  await fetch(`https://localhost:7170/api/Signaling/PostOffer/offer`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user: 'user1', data: JSON.stringify(offer) }),
-  });
-
-  // pollAnswer();
+  await startStream(false, true);
 }
-// async function pollAnswer() {
-//   const response = await fetch('https://yourserver/api/signaling/answer/user1');
-//   const answer = await response.json();
-//   if (answer) {
-//     const remoteDesc = new RTCSessionDescription(JSON.parse(answer));
-//     await peerConnection.setRemoteDescription(remoteDesc);
-//     pollIceCandidates();
-//   } else {
-//     setTimeout(pollAnswer, 1000);
-//   }
-// }
 
-// async function pollIceCandidates() {
-//   const response = await fetch(
-//     'https://localhost:7170/api/Signalling/pollicecandidate/user2'
-//   );
-//   const candidate = await response.json();
-//   if (candidate) {
-//     await peerConnection.addIceCandidate(JSON.parse(candidate));
-//   } else {
-//     setTimeout(pollIceCandidates, 1000);
-//   }
-// }
+async function EndCall() {
+  if (localStream) {
+    localStream.getTracks().forEach((track) => track.stop());
+    localStream = null;
+  }
 
-// function handleIceCandidate(event) {
-//   if (event.candidate) {
-//     fetch('https://yourserver/api/signaling/candidate/user1', {
-//       method: 'POST',
-//       headers: { 'Content-Type': 'application/json' },
-//       body: JSON.stringify({
-//         user: 'user1',
-//         data: JSON.stringify(event.candidate),
-//       }),
-//     });
-//   }
-// }
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
 
-// function handleRemoteStream(event) {
-//   remoteVideo.srcObject = event.streams[0];
-// }
+  localVideo.srcObject = null;
+
+  console.log('Call ended');
+}
 
 window.startCall = startCall;
