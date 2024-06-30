@@ -262,6 +262,7 @@
   color: #949ba4;
   width: 200px;
   text-align: center;
+  border: 1px solid red;
 }
 .voicechatBTN,
 .chats {
@@ -408,4 +409,17 @@
 }
 .privateMessageForm {
   display: flex;
+}
+.videoBox {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+.videos {
+  border: 1px solid red;
+  z-index: 1;
+  width: 200px;
+  margin: 5px;
 }
