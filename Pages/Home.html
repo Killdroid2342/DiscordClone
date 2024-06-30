@@ -94,11 +94,19 @@
                 <p id="inServerUsername">USERNAME</p>
                 <button>Mute</button>
                 <button>Deafen</button>
-                <button onclick="LeaveCall()">Leave Call</button>
+                <button onclick="VideoOn()">Video on</button>
+                <button onclick="VideoOff()">Video off</button>
+
             </div>
+            <button onclick="LeaveCall()">Leave Call</button>
         </div>
         <div class="chatSection">
             <p class="chatHeader">Text Channel</p>
+            <div class="videoBox">
+
+                <video class="videos" id="localVideo" autoplay></video>
+                <video class="videos" id="remoteVideo" autoplay></video>
+            </div>
             <div class="chatMessages">
 
             </div>
@@ -154,13 +162,9 @@
     </div>
 </div>
 
-<video id="localVideo" autoplay></video>
-<video id="remoteVideo" autoplay></video>
-<button onclick="startCall()">Start Call</button>
 
 <script src="/node_modules/axios/dist/axios.min.js"></script>
 <script src="/JS/Auth.js"></script>
-<script type="module" src="/JS/Chats.js"></script>
 
 </body>
 </html>
