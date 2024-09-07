@@ -11,7 +11,7 @@ document.getElementById('serverDetails').style.display = 'none';
 const messageModalContent = document.querySelector('.ContentMessage');
 const messageOuterModal = document.querySelector('.outerModalMessage');
 const username = document.getElementById('username');
-
+let socket;
 function GetCookieToken(name) {
   let value = '; ' + document.cookie;
   let parts = value.split('; ' + name + '=');
@@ -327,6 +327,7 @@ async function GetFriends() {
         friendsTag.addEventListener('click', async () => {
           console.log(friend, 'name clicked');
           currentFriend = friend;
+          InitWebSocket();
           await GetPrivateMessage();
           document.querySelector('.nav').style.display = 'none';
           document.querySelector('.privateMessage').style.display = 'block';
@@ -339,40 +340,90 @@ async function GetFriends() {
     console.log(e);
   }
 }
+// async function PrivateMessage(event) {
+//   event.preventDefault();
+//   try {
+//     const formData = new FormData(event.target);
+//     const formDataObject = {
+//       messageUserReciver: currentFriend,
+//       messagesUserSender: JWTusername,
+//       date: new Date().toLocaleString().toString(),
+//     };
+
+//     formData.forEach((value, key) => {
+//       formDataObject[key] = value;
+//     });
+//     console.log(formDataObject, 'this is formdataobject');
+
+//     const response = await axios.post(
+//       'https://localhost:7170/api/PrivateMessageFriend/SendPrivateMessage',
+//       formDataObject
+//     );
+//     console.log(response);
+
+//     const messagesDisplay = document.querySelector('.messagesDisplay');
+//     const messageText = formDataObject.friendMessagesData;
+//     const messageElement = document.createElement('p');
+//     messageElement.textContent = `${JWTusername}: ${messageText} (${formDataObject.date})`;
+//     messagesDisplay.appendChild(messageElement);
+
+//     event.target.reset();
+//   } catch (e) {
+//     console.log(e);
+//   }
+// }
+function InitWebSocket() {
+  socket = new WebSocket(
+    `wss://localhost:7170/api/PrivateMessageFriend/HandlePrivateWebsocket?username=${JWTusername}`
+  );
+  console.log(socket);
+
+  socket.onopen = function () {
+    console.log('WebSocket connected.');
+  };
+
+  socket.onmessage = function (event) {
+    const message = JSON.parse(event.data);
+
+    const messagesDisplay = document.querySelector('.messagesDisplay');
+    const messageElement = document.createElement('p');
+    messageElement.textContent = `${message.MessagesUserSender}: ${message.friendMessagesData} (${message.date})`;
+    messagesDisplay.appendChild(messageElement);
+  };
+
+  socket.onclose = function () {
+    console.log('WebSocket disconnected.');
+  };
+}
 
 async function PrivateMessage(event) {
   event.preventDefault();
-  try {
-    const formData = new FormData(event.target);
-    const formDataObject = {
-      messageUserReciver: currentFriend,
-      messagesUserSender: JWTusername,
-      date: new Date().toLocaleString().toString(),
-    };
 
-    formData.forEach((value, key) => {
-      formDataObject[key] = value;
-    });
-    console.log(formDataObject, 'this is formdataobject');
-
-    const response = await axios.post(
-      'https://localhost:7170/api/PrivateMessageFriend/SendPrivateMessage',
-      formDataObject
-    );
-    console.log(response);
-
-    const messagesDisplay = document.querySelector('.messagesDisplay');
-    const messageText = formDataObject.friendMessagesData;
-    const messageElement = document.createElement('p');
-    messageElement.textContent = `${JWTusername}: ${messageText} (${formDataObject.date})`;
-    messagesDisplay.appendChild(messageElement);
-
-    event.target.reset();
-  } catch (e) {
-    console.log(e);
+  // Ensure that WebSocket is connected
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    console.log('WebSocket is not connected.');
+    return;
   }
-}
 
+  const formData = new FormData(event.target);
+  const messageObject = {
+    MessagesUserSender: JWTusername,
+    MessageUserReciver: currentFriend,
+    friendMessagesData: formData.get('friendMessagesData'),
+    date: new Date().toLocaleString(),
+  };
+
+  // Send the message via WebSocket
+  socket.send(JSON.stringify(messageObject));
+
+  // Optionally, display the message locally
+  const messagesDisplay = document.querySelector('.messagesDisplay');
+  const messageElement = document.createElement('p');
+  messageElement.textContent = `${JWTusername}: ${messageObject.friendMessagesData} (${messageObject.date})`;
+  messagesDisplay.appendChild(messageElement);
+
+  event.target.reset();
+}
 async function GetPrivateMessage() {
   try {
     const res = await axios.get(
@@ -416,7 +467,6 @@ GetFriends();
 //////////////////////////////////////////////////////
 //////////////////////////////////////////////////////
 //////////////////////////////////////////////////////
-
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 
