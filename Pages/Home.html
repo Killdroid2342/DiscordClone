@@ -91,6 +91,9 @@
                 <h1 class="currentServerName"></h1>
                 <p class="chats">Text Chat</p>
                 <p class="voicechatBTN" onclick="JoinVoiceCalls()">Voice Chat</p>
+                <div id="activeUsersList">
+                    <b>Active Users:</b>
+                </div>
                 <div>
                     <p class="UserJoined"></p>
                 </div>
@@ -153,10 +156,10 @@
 
             <form onsubmit="JoinServer(event)" class="joinForm">
                 <label>Invite Link</label>
-                <input type="text" id="serverLinkInput" class="serverInput"
+                <input type="text" id="serverLinkInput" class="inviteLinkInput"
                     placeholder="e.g. https://localhost:7170/invite/12345">
 
-                <button type="submit" class="joinServerBtn">Join</button>
+                <button type="submit" class="joinButton">Join</button>
             </form>
         </div>
     </div>
@@ -192,6 +195,7 @@
 
 
     <script src="/node_modules/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
     <script src="/JS/Auth.js"></script>
 
 </body>

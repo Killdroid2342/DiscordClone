@@ -134,7 +134,7 @@ input[type='checkbox'] {
   flex-direction: column;
 }
 
-/* Modal */
+
 .outerModal {
   display: flex;
   justify-content: center;

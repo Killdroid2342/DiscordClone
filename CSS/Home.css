@@ -160,7 +160,7 @@
   color: #f2f3f5;
 }
 
-/* CREATE A SERVER FOR MODAL MODAL */
+
 
 .outerSecondModal,
 .outerCreationModal,
@@ -270,6 +270,33 @@
   margin-top: 20px;
   color: #949ba4;
   cursor: pointer;
+}
+
+#activeUsersList {
+  background-color: #1e1f22;
+  margin: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  color: #949ba4;
+  font-size: 14px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+#activeUsersList b {
+  color: #ffffff;
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+#activeUsersList div {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 4px;
+  background-color: #2b2d31;
+  color: #b9bbbe;
 }
 
 .chatForm {
@@ -383,7 +410,7 @@
   color: #dbdee1;
 }
 
-/* Message Modal */
+
 .outerModalMessage {
   display: flex;
   justify-content: center;
@@ -422,4 +449,76 @@
   z-index: 1;
   width: 200px;
   margin: 5px;
+}
+
+
+.outerJoinModal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.innerJoinModal {
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  background-color: #313338;
+  padding: 20px;
+  min-width: 400px;
+}
+
+.closeJoin {
+  cursor: pointer;
+  color: white;
+  padding: 20px;
+  font-size: 30px;
+  align-self: flex-end;
+  margin: -10px -10px 0 0;
+}
+
+.joinServerHead {
+  color: #f2f3f5;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.joinServerSubhead {
+  color: #a9aeb5;
+  padding: 10px 0;
+  margin-bottom: 15px;
+}
+
+.inviteLinkInput {
+  background-color: #1e1f22;
+  padding: 12px;
+  margin-bottom: 20px;
+  outline: none;
+  border: none;
+  color: rgb(216, 216, 216);
+  border-radius: 4px;
+}
+
+.inviteLinkInput::placeholder {
+  color: #949ba4;
+}
+
+.joinButton {
+  padding: 12px 20px;
+  background-color: #5865f2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.joinButton:hover {
+  background-color: #4752c4;
 }
