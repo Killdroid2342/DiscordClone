@@ -10,7 +10,7 @@ async function LogInForm(event) {
   event.preventDefault();
 
   const formData = new FormData(event.target);
-  console.log(formData);
+  console.log('login stuff:', formData);
   const formDataObject = { Friends: [] };
   formData.forEach((value, key) => {
     formDataObject[key] = value;
@@ -20,7 +20,7 @@ async function LogInForm(event) {
       'http://localhost:5018/api/Account/LogIn',
       formDataObject
     );
-    console.log(response);
+    console.log('login response:', response);
 
     const token = response.data.token;
     document.cookie = `token = ${token}`;
@@ -28,7 +28,7 @@ async function LogInForm(event) {
     const jwtRes = await axios.post(
       `http://localhost:5018/api/Account/VerifyToken?token=${token}`
     );
-    console.log(jwtRes);
+    console.log('token check result:', jwtRes);
 
     if (response.data.message) {
       const modalContent = document.querySelector('.content');
@@ -46,9 +46,9 @@ async function LogInForm(event) {
       }
     }, 3000);
   } catch (e) {
-    console.log(e);
+    console.log('login failed:', e);
   }
-  console.log(formDataObject);
+  console.log('form validation broke:', formDataObject);
 }
 
 async function RegisterForm(event) {
@@ -64,18 +64,18 @@ async function RegisterForm(event) {
   const confirmPassword = confirmPasswordInput.value;
 
   if (password !== confirmPassword) {
-    console.log('Passwords do not match');
+    console.log('passwords dont match');
   } else {
-    console.log('Passwords match');
-    console.log(formDataObject, 'data being sent from form');
+    console.log('passwords match');
+    console.log('signup data being sent:', formDataObject);
 
     try {
       const response = await axios.post(
         'http://localhost:5018/api/Account/CreateAccount',
         formDataObject
       );
-      console.log(response);
-      console.log(response.data.message);
+      console.log('signup response:', response);
+      console.log('signup msg:', response.data.message);
 
       if (response.data.message) {
         const modalContent = document.querySelector('.content');
@@ -88,7 +88,7 @@ async function RegisterForm(event) {
         }, 2000);
       }
     } catch (e) {
-      console.log(e);
+      console.log('signup failed:', e);
     }
   }
 }
