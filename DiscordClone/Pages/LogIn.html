@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Discord</title>
+    <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
+    <link rel="stylesheet" href="../css/LogIn.css">
+</head>
+<body>
+    <div class="outerModal">
+        <div class="innerModal">
+            <p class="content"></p>
+        </div>
+    </div>
+<div class="background">
+<div class="logInFormDiv">
+    <h2 class="logInHeader">Welcome back!</h2>
+    <p class="headMessage">We're so excited to see you again!</p>
+    <form class="outContent"  onsubmit="LogInForm(event)" method="post">
+        <label class="usernameLogInLabel">USERNAME</label>
+        <input type="text" class="usernameInput" name="username" /> 
+        <label class="passwordLogInLabel">PASSWORD</label>
+        <input type="password" class="LogInpasswordInput" name="password" autocomplete="on"/>
+        <input type="submit" class="logInButton" value="Log In" />
+        <p class="switchToRegisterInfo">Need an account? <a href="Register.html" class="switchToRegister">Register</a></p>
+    </form>
+</div>
+</div>
+<script src="/node_modules/axios/dist/axios.min.js"></script>
+<script src="../index.js"></script>
+<script type="text/javascript" src="../JS/Accounts.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,528 @@
+@font-face {
+  font-family: 'MainFont';
+  src: url('../assets/fonts/headFont.woff2');
+}
+
+* {
+  margin: 0;
+  font-family: MainFont;
+}
+.allservers {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: #1e1f22;
+  cursor: pointer;
+}
+.servers {
+  color: white;
+  padding: 15px;
+  border-radius: 200px;
+  width: 30px;
+  height: auto;
+  background-color: #313338;
+  margin: 10px;
+  text-align: center;
+}
+.sections {
+  display: flex;
+  background-color: #313338;
+}
+.secondColumn {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background-color: #2b2d31;
+  height: 100vh;
+  color: #949ba4;
+}
+
+.textInput {
+  background-color: #1e1f22;
+  padding: 10px;
+  margin: 10px;
+  outline: none;
+  border: none;
+  color: rgb(216, 216, 216);
+}
+.textInput::placeholder {
+  color: #949ba4;
+}
+.friendsDiv,
+.smallHead {
+  display: flex;
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+.smallHead {
+  justify-content: space-between;
+}
+.plus {
+  margin-right: 15px;
+}
+.friends {
+  padding-left: 10px;
+  cursor: pointer;
+}
+
+.account {
+  display: flex;
+  padding: 10px;
+  background-color: #232428;
+  margin-top: auto;
+}
+
+.testaddeduser {
+  padding: 10px 10px 10px 0px;
+  margin: 5px 0;
+  cursor: pointer;
+}
+.positionSecond {
+  margin-left: 10px;
+}
+.topImages {
+  width: 30px;
+  height: 30px;
+}
+.MainFriendsDiv {
+  max-height: 75vh;
+  overflow-y: auto;
+}
+.MainFriendsDiv::-webkit-scrollbar {
+  display: none;
+}
+
+.nav {
+  display: flex;
+}
+.navText {
+  color: #b5bac1;
+}
+.addFriend {
+  color: white;
+  padding: 5px;
+  border-radius: 5px;
+  background-color: #248046;
+}
+.logOut {
+  color: white;
+  padding: 5px;
+  border-radius: 5px;
+  background-color: #f20808;
+  border: none;
+  font-size: 16px;
+}
+.addFriend,
+.logOut,
+.navText {
+  margin: 20px;
+  cursor: pointer;
+}
+
+.content {
+  color: #f2f3f5;
+  font-family: 'headerFont';
+}
+
+.createServer {
+  border: 1px solid #3d3e45;
+  background-color: transparent;
+  padding: 20px;
+  color: #d9dcdf;
+  font-size: 20px;
+  border-radius: 20px;
+  margin: 20px;
+  cursor: pointer;
+}
+.secondInnerModal {
+  background-color: #2b2d31;
+  width: 100%;
+  padding: 30px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.joinAServer {
+  margin-top: 20px;
+  padding: 15px 20px;
+  width: 100%;
+  background-color: #4e5058;
+  color: #f6f6f6;
+  outline: none;
+  border: none;
+  font-size: 17px;
+  cursor: pointer;
+}
+.altHead {
+  text-align: center;
+  color: #f2f3f5;
+}
+
+
+
+.outerSecondModal,
+.outerCreationModal,
+.outerModal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+.innerSecondModal,
+.innerCreationModal,
+.innerModal {
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  background-color: #313338;
+}
+.closeSecond,
+.closeThird,
+.close {
+  cursor: pointer;
+  color: white;
+  padding: 20px;
+  font-size: 30px;
+}
+
+.CreateSecondServerHead,
+.CreateCreationServerHead,
+.CreateServerHead {
+  color: #f2f3f5;
+  text-align: center;
+}
+.modalSecondSubhead,
+.modalCreationSubhead,
+.modalSubhead {
+  color: #a9aeb5;
+  padding: 20px;
+}
+.backSecondModal,
+.creationBack {
+  color: #d2d5d8;
+  padding: 20px;
+  cursor: pointer;
+  background-color: #2b2d31;
+}
+
+.creationFlex {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  padding: 10px;
+  background-color: #2b2d31;
+}
+
+.createServerbtn {
+  background-color: #5865f2;
+  border: none;
+  color: #e7e9fd;
+  padding: 20px;
+  font-size: 16px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.serverName {
+  margin-left: 20px;
+  font-family: MainFont;
+  color: #b3b7be;
+}
+.serverInput {
+  padding: 20px;
+  margin: 20px;
+  outline: none;
+  border: none;
+  font-family: MainFont;
+  font-size: 16px;
+  background-color: #1e1f22;
+  color: #bdc0c2;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+}
+.CurrentServer {
+  display: flex;
+  flex-direction: row;
+  width: 100vw;
+}
+.CurrentServerMenu {
+  display: flex;
+  flex-direction: column;
+  background-color: #2b2d31;
+  color: #949ba4;
+  width: 200px;
+  text-align: center;
+  border: 1px solid red;
+}
+.voicechatBTN,
+.chats {
+  padding: 40px;
+  margin-top: 20px;
+  color: #949ba4;
+  cursor: pointer;
+}
+
+#activeUsersList {
+  background-color: #1e1f22;
+  margin: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  color: #949ba4;
+  font-size: 14px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+#activeUsersList b {
+  color: #ffffff;
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+#activeUsersList div {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 4px;
+  background-color: #2b2d31;
+  color: #b9bbbe;
+}
+
+.chatForm {
+  display: flex;
+  margin-top: auto;
+  align-self: flex-end;
+  width: 100%;
+  box-sizing: border-box;
+}
+.chatInput {
+  padding: 15px;
+  border-radius: 20px;
+  width: 100%;
+  background-color: #383a40;
+  outline: none;
+  border: none;
+  margin: 10px;
+  font-size: 16px;
+  color: #a9aeb5;
+}
+.chatInput::placeholder {
+  font-size: 18px;
+  color: #8e939d;
+}
+.chatHeader {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 20px;
+  font-weight: bold;
+  color: #8e939d;
+}
+.formButton {
+  padding: 20px;
+  font-size: 16px;
+  border-radius: 10px;
+  background-color: #383a40;
+  margin: 10px;
+  outline: none;
+  border: none;
+  color: #8e939d;
+}
+.chatSection {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  width: auto; 
+}
+.viewServerAccounts {
+  background-color: #2b2d31;
+  color: #90969f;
+  width: 240px; 
+  min-width: 240px;
+  margin-left: 0; 
+  height: 100vh;
+  overflow-y: auto;
+}
+.serverAccounts {
+  text-align: center;
+  font-size: 18px;
+  margin-top: 10px;
+}
+
+#username,
+#inServerUsername {
+  padding: 10px;
+}
+.addFriendsDiv,
+.removeFriendsDiv {
+  margin-left: 20px;
+  display: none;
+}
+
+.addFriendHeader,
+.removeFriendHeader {
+  font-family: MainFont;
+  color: #f2f3f5;
+  font-size: 18px;
+}
+.addFriendText,
+.removeFriendText {
+  color: #a6acb2;
+  margin-top: 5px;
+  margin-bottom: 10px;
+}
+.addFriendsForm,
+.removeFriendsForm {
+  background-color: #1e1f22;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  margin-right: 10px;
+}
+.friendsInput,
+.removeFriendInput {
+  padding: 14px;
+  background-color: #1e1f22;
+  outline: none;
+  border: none;
+  width: 50%;
+  color: #dbdee1;
+  font-family: MainFont;
+}
+.friendsButton,
+.removeFriendsButton {
+  background-color: #5865f2;
+  color: #ffffff;
+  padding: 10px;
+  border: none;
+  outline: none;
+}
+.lastSection {
+  width: 1200px;
+}
+.chatMessages {
+  color: #dbdee1;
+}
+
+
+.outerModalMessage {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  display: none;
+}
+
+.innerModalMessage {
+  background-color: #1e1f22;
+  padding: 20px;
+  border-radius: 8px;
+  position: absolute;
+  margin-top: 120px;
+}
+
+.ContentMessage {
+  color: #f2f3f5;
+  font-family: 'MainFont';
+}
+.privateMessage {
+  background-color: #313338;
+  display: none;
+}
+.privateMessageForm {
+  display: flex;
+}
+.videoBox {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+.videos {
+  border: 1px solid red;
+  z-index: 1;
+  width: 200px;
+  margin: 5px;
+}
+
+
+.outerJoinModal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.innerJoinModal {
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  background-color: #313338;
+  padding: 20px;
+  min-width: 400px;
+}
+
+.closeJoin {
+  cursor: pointer;
+  color: white;
+  padding: 20px;
+  font-size: 30px;
+  align-self: flex-end;
+  margin: -10px -10px 0 0;
+}
+
+.joinServerHead {
+  color: #f2f3f5;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.joinServerSubhead {
+  color: #a9aeb5;
+  padding: 10px 0;
+  margin-bottom: 15px;
+}
+
+.inviteLinkInput {
+  background-color: #1e1f22;
+  padding: 12px;
+  margin-bottom: 20px;
+  outline: none;
+  border: none;
+  color: rgb(216, 216, 216);
+  border-radius: 4px;
+}
+
+.inviteLinkInput::placeholder {
+  color: #949ba4;
+}
+
+.joinButton {
+  padding: 12px 20px;
+  background-color: #5865f2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.joinButton:hover {
+  background-color: #4752c4;
+}
