@@ -2,201 +2,292 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <title>Discord</title>
-    <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-    <link rel="stylesheet" href="../css/Home.css">
-    <script src="/JS/Home.js" defer></script>
+  <meta charset="UTF-8" />
+  <title>Discord</title>
+  <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
+  <link rel="stylesheet" href="../css/Home.css" />
+  <script src="/JS/Home.js?v=19" defer></script>
 </head>
 
 <body>
-
-    <div class="outerModalMessage">
-        <div class="innerModalMessage">
-            <p class="ContentMessage"></p>
-        </div>
+  <div class="outerModalMessage">
+    <div class="innerModalMessage">
+      <p class="ContentMessage"></p>
     </div>
-    <div class="sections">
-        <div class="allservers">
-            <img src="/assets/img/home.png" class="servers" id="home" onclick="clearContent()">
-            <img src="/assets/img/addServer.png" class="servers" id="openModalBtn" onclick="openModal()">
+  </div>
+  <div class="sections">
+    <div class="allservers">
+      <img src="/assets/img/home.png" class="servers" id="home" onclick="clearContent()" />
+      <img src="/assets/img/addServer.png" class="servers" id="openModalBtn" onclick="openModal()" />
+    </div>
+    <div class="secondColumn">
+      <form action="" class="inputForm">
+        <input class="textInput" type="text" name="" id="" placeholder="Find or start a conversation" />
+      </form>
+      <div class="positionSecond">
+        <div class="friendsDiv">
+          <img src="/assets/img/friendsImg.png" alt="" class="topImages" />
+          <p class="friends">Friends</p>
         </div>
-        <div class="secondColumn">
-            <form action="" class="inputForm">
-                <input class="textInput" type="text" name="" id="" placeholder="Find or start a conversation">
+        <div class="smallHead">
+          <p>Direct Message</p>
+          <p class="plus">+</p>
+        </div>
+        <div class="MainFriendsDiv">
+          <p class="testaddeduser"></p>
+        </div>
+      </div>
+      <div class="account">
+        <p id="username"></p>
+        <button>Mute</button>
+        <button>Deafen</button>
+        <button>Leave Call</button>
+      </div>
+    </div>
+    <div class="lastSection" style="border: 1px solid green">
+      <div class="nav">
+        <p class="navText">All</p>
+        <p class="navText" onclick="showPendingRequests()">Pending</p>
+        <p class="navText" onclick="showDeleteFriend()">Remove Friend</p>
+        <p class="addFriend" onclick="showAddFriends()">Add Friend</p>
+        <button onclick="LogOut()" class="logOut">Log Out</button>
+      </div>
+      <div class="pendingRequestsDiv" style="display: none">
+        <p class="addFriendHeader">PENDING REQUESTS</p>
+        <div class="pendingList"></div>
+      </div>
+      <div class="addFriendsDiv">
+        <p class="addFriendHeader">ADD FRIEND</p>
+        <p class="addFriendText">
+          You can add friends with their Discord usernames
+        </p>
+        <form action="" class="addFriendsForm" onsubmit="SearchFriends(event)">
+          <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput"
+            name="friendUsername" />
+          <button type="submit" class="friendsButton">
+            Send Friend Request
+          </button>
+        </form>
+      </div>
+      <div class="removeFriendsDiv">
+        <p class="removeFriendHeader">REMOVE FRIEND</p>
+        <p class="removeFriendText">
+          You can remove friends with their Discord usernames
+        </p>
+        <form action="" class="removeFriendsForm" onsubmit="RemoveFriends(event)">
+          <input type="text" placeholder="You can add friends with their Discord usernames" class="friendsInput"
+            name="friendUsername" />
+          <button type="submit" class="removeFriendsButton">
+            Remove Friend
+          </button>
+        </form>
+      </div>
+
+      <!-- private messages  -->
+      <div class="privateMessage">
+        <div id="preCallUI" style="
+              display: flex;
+              flex-direction: row;
+              border: 1px solid red;
+              justify-content: space-between;
+            ">
+          <div style="display: flex; flex-direction: row; border: 1px solid red">
+            <h2 class="messageUser"></h2>
+          </div>
+          <div style="
+                display: flex;
+                flex-direction: row;
+                border: 1px solid red;
+                align-self: center;
+              ">
+            <button onclick="startPrivateCall()">call</button>
+            <button>video call</button>
+            <form action="">
+              <input type="text" name="" id="" placeholder="Search" />
             </form>
-            <div class="positionSecond">
-                <div class="friendsDiv">
-                    <img src="/assets/img/friendsImg.png" alt="" class="topImages">
-                    <p class="friends">Friends</p>
-                </div>
-                <div class="smallHead">
-                    <p>Direct Message</p>
-                    <p class="plus">+</p>
-                </div>
-                <div class="MainFriendsDiv">
-                    <p class="testaddeduser"></p>
-                </div>
-            </div>
-            <div class="account">
-                <p id="username"></p>
-                <button>Mute</button>
-                <button>Deafen</button>
-                <button>Leave Call</button>
-            </div>
+          </div>
         </div>
-        <div class="lastSection">
-            <div class="nav">
-                <p class="navText">All</p>
-                <p class="navText" onclick="showDeleteFriend()">Remove Friend</p>
-                <p class="addFriend" onclick="showAddFriends()">Add Friend</p>
-                <button onclick="LogOut()" class="logOut">Log Out</button>
+        <!-- when calling -->
+        <div id="activeCallUI" style="display: none; background-color: #000000;">
+          <div style="
+                display: flex;
+                flex-direction: row;
+                border: 1px solid red;
+                justify-content: space-between;
+              ">
+            <div style="
+                  display: flex;
+                  flex-direction: row;
+                  border: 1px solid red;
+                ">
+              <h2 class="messageUser" id="activeCallUsername" style="color: white;"></h2>
             </div>
-            <div class="addFriendsDiv">
-                <p class="addFriendHeader">ADD FRIEND</p>
-                <p class="addFriendText">You can add friends with their Discord usernames</p>
-                <form action="" class="addFriendsForm" onsubmit="SearchFriends(event)">
-                    <input type="text" placeholder="You can add friends with their Discord usernames"
-                        class="friendsInput" name="friendUsername" />
-                    <button type="submit" class="friendsButton">Send Friend Request</button>
-                </form>
+            <div style="
+                  display: flex;
+                  flex-direction: row;
+                  border: 1px solid red;
+                  align-self: center;
+                ">
+              <form action="">
+                <input type="text" name="" id="" placeholder="Search" />
+              </form>
             </div>
-            <div class="removeFriendsDiv">
-                <p class="removeFriendHeader">REMOVE FRIEND</p>
-                <p class="removeFriendText">You can remove friends with their Discord usernames</p>
-                <form action="" class="removeFriendsForm" onsubmit="RemoveFriends(event)">
-                    <input type="text" placeholder="You can add friends with their Discord usernames"
-                        class="friendsInput" name="friendUsername" />
-                    <button type="submit" class="removeFriendsButton">Remove Friend</button>
-                </form>
+          </div>
+          <div>
+            <img src="" alt="UserImg"
+              style="display: block; margin: 0 auto; border: 1px solid blue; width: 40px; margin-top: 120px" />
+            <div
+              style="display: flex; flex-direction: row; justify-content: center; margin-top: 120px; padding-bottom: 20px;">
+              <button>Mute/Unmute</button>
+              <button>Video</button>
+              <button>Share Screen</button>
+              <button onclick="endPrivateCall()">End Call</button>
             </div>
-
-
-            <div class="privateMessage">
-                <h2 class="messageUser"></h2>
-                <div class="messagesDisplay"></div>
-                <form action="" class="privateMessageForm" onsubmit="PrivateMessage(event)">
-                    <input type="text" name="friendMessagesData" class="chatInput" placeholder="Message">
-                    <button class="formButton">Send</button>
-                </form>
-            </div>
+          </div>
         </div>
+        <div class="messagesDisplay"></div>
+        <form action="" class="privateMessageForm" onsubmit="PrivateMessage(event)">
+          <input type="text" name="friendMessagesData" class="chatInput" placeholder="Message" />
+          <button class="formButton">Send</button>
+        </form>
+      </div>
 
-
-        <!--SERVERS IS HERE -->
-
-
-        <div id="serverDetails" class="CurrentServer">
-            <div class="CurrentServerMenu">
-                <h1 class="currentServerName"></h1>
-
-                <div id="channelsList" style="overflow-y: auto; flex-grow: 1;">
-                
-                </div>
-
-                <div class="account" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #202225;">
-                    <p id="inServerUsername" style="margin-bottom: 5px;">USERNAME</p>
-                    <div style="display: flex; gap: 5px; flex-wrap: wrap;">
-                        <button onclick="VideoOn()" style="font-size: 12px; padding: 2px;">Video On</button>
-                        <button onclick="VideoOff()" style="font-size: 12px; padding: 2px;">Video Off</button>
-                        <button onclick="LeaveCall()" style="font-size: 12px; padding: 2px; color: red;">Leave</button>
-                    </div>
-                </div>
-
-
-
-                <button onclick="getInviteLink(selectedServerID)" class="inviteBtn" style="margin-top: 10px;">
-                    📎 Invite
-                </button>
-            </div>
-            <div class="chatSection">
-                <p class="chatHeader">Text Channel</p>
-                <div class="videoBox">
-                    <video class="videos" id="localVideo" autoplay muted></video>
-                    <div id="remoteVideosContainer"></div>
-                </div>
-
-                <div class="chatMessages">
-
-                </div>
-                <form action="" class="chatForm" onsubmit="ServerChat(event)">
-                    <input type="text" name="userText" class="chatInput" placeholder="Message">
-                    <button class="formButton">Send</button>
-                </form>
-            </div>
-
-            <div class="viewServerAccounts">
-                <p class="serverAccounts">Accounts</p>
-            </div>
-        </div>
+      <!-- when calling below -->
     </div>
 
+    <!--SERVERS IS HERE -->
 
-    <div class="outerModal">
-        <div class="innerModal">
-            <p onclick="closeModal()" class="close">x</p>
-            <h2 class="CreateServerHead">Create Your Server</h2>
-            <p class="modalSubhead">Your server is where you and your friends hang out. Make yours and start talking.
-            </p>
+    <div id="serverDetails" class="CurrentServer">
+      <div class="CurrentServerMenu">
+        <h1 class="currentServerName"></h1>
 
-            <button class="createServer" onclick="openSecondModal()">Create My Own</button>
+        <div id="channelsList" style="overflow-y: auto; flex-grow: 1"></div>
 
-            <div class="secondInnerModal">
-                <h2 class="altHead">Already have an invite</h2>
-                <button class="joinAServer" onclick="openJoinModal()">Join a Server</button>
-            </div>
+        <div class="account" style="
+              margin-top: 10px;
+              padding-top: 10px;
+              border-top: 1px solid #202225;
+            ">
+          <p id="inServerUsername" style="margin-bottom: 5px">USERNAME</p>
+          <div style="display: flex; gap: 5px; flex-wrap: wrap">
+            <button onclick="VideoOn()" style="font-size: 12px; padding: 2px">
+              Video On
+            </button>
+            <button onclick="VideoOff()" style="font-size: 12px; padding: 2px">
+              Video Off
+            </button>
+            <button onclick="Mute()" style="font-size: 12px; padding: 2px">
+              Mute
+            </button>
+            <button onclick="Deafen()" style="font-size: 12px; padding: 2px">
+              Deafen
+            </button>
+            <button onclick="ShareScreen()" style="font-size: 12px; padding: 2px">
+              Share Screen
+            </button>
+            <button onclick="LeaveCall()" style="font-size: 12px; padding: 2px; color: red">
+              Leave
+            </button>
+          </div>
         </div>
-    </div>
-    <div class="outerJoinModal" style="display:none;">
-        <div class="innerJoinModal">
-            <p class="closeJoin" onclick="closeJoinModal()">x</p>
-            <h2 class="joinServerHead">Join a Server</h2>
-            <p class="joinServerSubhead">Enter Invite Link</p>
 
-            <form onsubmit="JoinServer(event)" class="joinForm">
-                <label>Invite Link</label>
-                <input type="text" id="serverLinkInput" class="inviteLinkInput"
-                    placeholder="e.g. https://localhost:7170/invite/12345">
-
-                <button type="submit" class="joinButton">Join</button>
-            </form>
+        <button onclick="getInviteLink(selectedServerID)" class="inviteBtn" style="margin-top: 10px">
+          📎 Invite
+        </button>
+      </div>
+      <div class="chatSection">
+        <p class="chatHeader">Text Channel</p>
+        <div class="videoBox">
+          <video class="videos" id="localVideo" autoplay muted></video>
+          <div id="remoteVideosContainer"></div>
         </div>
+
+        <div class="chatMessages"></div>
+        <form action="" class="chatForm" onsubmit="ServerChat(event)">
+          <input type="text" name="userText" class="chatInput" placeholder="Message" />
+          <button class="formButton">Send</button>
+        </form>
+      </div>
+
+      <div class="viewServerAccounts">
+        <p class="serverAccounts">Accounts</p>
+      </div>
     </div>
+  </div>
 
+  <div class="outerModal">
+    <div class="innerModal">
+      <p onclick="closeModal()" class="close">x</p>
+      <h2 class="CreateServerHead">Create Your Server</h2>
+      <p class="modalSubhead">
+        Your server is where you and your friends hang out. Make yours and
+        start talking.
+      </p>
 
+      <button class="createServer" onclick="openSecondModal()">
+        Create My Own
+      </button>
 
-    <div class="outerSecondModal">
-        <div class="innerSecondModal">
-            <p class="closeSecond" onclick="closeSecondModal()">x</p>
-            <h2 class="CreateSecondServerHead">Create Your Own Server</h2>
-            <p class="modalSecondSubhead">In order to help you with your setup, is your new server for just a few
-                friends or a larger community</p>
-            <button class="createServer" onclick="OpenCreationModal()">For me and my friends</button>
-            <p class="backSecondModal" onclick="BackToFirstModal()">Back</p>
+      <div class="secondInnerModal">
+        <h2 class="altHead">Already have an invite</h2>
+        <button class="joinAServer" onclick="openJoinModal()">
+          Join a Server
+        </button>
+      </div>
+    </div>
+  </div>
+  <div class="outerJoinModal" style="display: none">
+    <div class="innerJoinModal">
+      <p class="closeJoin" onclick="closeJoinModal()">x</p>
+      <h2 class="joinServerHead">Join a Server</h2>
+      <p class="joinServerSubhead">Enter Invite Link</p>
+
+      <form onsubmit="JoinServer(event)" class="joinForm">
+        <label>Invite Link</label>
+        <input type="text" id="serverLinkInput" class="inviteLinkInput"
+          placeholder="e.g. https://localhost:7170/invite/12345" />
+
+        <button type="submit" class="joinButton">Join</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="outerSecondModal">
+    <div class="innerSecondModal">
+      <p class="closeSecond" onclick="closeSecondModal()">x</p>
+      <h2 class="CreateSecondServerHead">Create Your Own Server</h2>
+      <p class="modalSecondSubhead">
+        In order to help you with your setup, is your new server for just a
+        few friends or a larger community
+      </p>
+      <button class="createServer" onclick="OpenCreationModal()">
+        For me and my friends
+      </button>
+      <p class="backSecondModal" onclick="BackToFirstModal()">Back</p>
+    </div>
+  </div>
+
+  <div class="outerCreationModal">
+    <div class="innerCreationModal">
+      <p class="closeThird" onclick="CloseCreationModal()">x</p>
+      <h2 class="CreateCreationServerHead">Customize Your Server</h2>
+      <p class="modalCreationSubhead">
+        Give your new server a personality with a name
+      </p>
+      <form onsubmit="CreateServer(event)" class="form">
+        <label for="serverNameInput" class="serverName">SERVER NAME</label>
+        <input type="text" id="serverNameInput" class="serverInput" />
+        <div class="creationFlex">
+          <p class="creationBack" onclick="BackLastModal()">Back</p>
+          <button type="submit" class="createServerbtn">Create</button>
         </div>
+      </form>
     </div>
+  </div>
 
-    <div class="outerCreationModal">
-        <div class="innerCreationModal">
-            <p class="closeThird" onclick="CloseCreationModal()">x</p>
-            <h2 class="CreateCreationServerHead">Customize Your Server</h2>
-            <p class="modalCreationSubhead">Give your new server a personality with a name</p>
-            <form onsubmit="CreateServer(event)" class="form">
-                <label for="serverNameInput" class="serverName">SERVER NAME</label>
-                <input type="text" id="serverNameInput" class="serverInput">
-                <div class="creationFlex">
-                    <p class="creationBack" onclick="BackLastModal()">Back</p>
-                    <button type="submit" class="createServerbtn">Create</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-
-    <script src="/node_modules/axios/dist/axios.min.js"></script>
-    <script src="https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
-    <script src="/JS/Auth.js"></script>
-
+  <script src="/node_modules/axios/dist/axios.min.js"></script>
+  <script src="https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
+  <script src="/JS/Auth.js?v=2"></script>
 </body>
 
 </html>
