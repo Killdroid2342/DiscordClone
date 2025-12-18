@@ -6,10 +6,14 @@
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
   <link rel="stylesheet" href="../css/Home.css" />
-  <script src="/JS/Home.js?v=19" defer></script>
+  <script src="../JS/Home.js?v=89" defer></script>
 </head>
 
 <body>
+  <div id="audioPermBanner"
+    style="display:none; position:fixed; top:0; left:0; width:100%; height: 50px; background: #f04747; color: white; text-align: center; line-height: 50px; font-weight: bold; z-index: 99999; cursor: pointer; border-bottom: 2px solid #8e2020;">
+    🎵 Sound Blocked! Click anywhere on this screen to enable ringtone. 🎵
+  </div>
   <div class="outerModalMessage">
     <div class="innerModalMessage">
       <p class="ContentMessage"></p>
@@ -27,7 +31,7 @@
       <div class="positionSecond">
         <div class="friendsDiv">
           <img src="/assets/img/friendsImg.png" alt="" class="topImages" />
-          <p class="friends">Friends</p>
+          <p class="friends" id="seeFriends">Friends</p>
         </div>
         <div class="smallHead">
           <p>Direct Message</p>
@@ -39,14 +43,14 @@
       </div>
       <div class="account">
         <p id="username"></p>
-        <button>Mute</button>
-        <button>Deafen</button>
-        <button>Leave Call</button>
+        <button class="call-control-btn" onclick="Mute()">Mute</button>
+        <button class="call-control-btn" onclick="Deafen()">Deafen</button>
+        <button class="call-control-btn danger" onclick="LeaveCall()">Leave Call</button>
       </div>
     </div>
-    <div class="lastSection" style="border: 1px solid green">
+    <div class="lastSection">
       <div class="nav">
-        <p class="navText">All</p>
+        <p class="navText" onclick="ShowFriendsMainView()">All</p>
         <p class="navText" onclick="showPendingRequests()">Pending</p>
         <p class="navText" onclick="showDeleteFriend()">Remove Friend</p>
         <p class="addFriend" onclick="showAddFriends()">Add Friend</p>
@@ -83,31 +87,23 @@
         </form>
       </div>
 
-      <!-- private messages  -->
+
       <div class="privateMessage">
-        <div id="preCallUI" style="
-              display: flex;
-              flex-direction: row;
-              border: 1px solid red;
-              justify-content: space-between;
-            ">
-          <div style="display: flex; flex-direction: row; border: 1px solid red">
+        <div id="preCallUI">
+          <div style="display: flex; flex-direction: row; align-items: center;">
             <h2 class="messageUser"></h2>
+
           </div>
-          <div style="
-                display: flex;
-                flex-direction: row;
-                border: 1px solid red;
-                align-self: center;
-              ">
-            <button onclick="startPrivateCall()">call</button>
-            <button>video call</button>
-            <form action="">
-              <input type="text" name="" id="" placeholder="Search" />
+          <div class="header-controls">
+            <button class="header-btn" onclick="startPrivateCall()" title="Start Voice Call">📞</button>
+
+            <form action="" class="search-form">
+              <input type="text" placeholder="Search" class="search-bar" />
+              <span class="search-icon">🔍</span>
             </form>
           </div>
         </div>
-        <!-- when calling -->
+
         <div id="activeCallUI" style="display: none; background-color: #000000;">
           <div style="
                 display: flex;
@@ -118,44 +114,68 @@
             <div style="
                   display: flex;
                   flex-direction: row;
-                  border: 1px solid red;
                 ">
               <h2 class="messageUser" id="activeCallUsername" style="color: white;"></h2>
             </div>
-            <div style="
-                  display: flex;
-                  flex-direction: row;
-                  border: 1px solid red;
-                  align-self: center;
-                ">
-              <form action="">
-                <input type="text" name="" id="" placeholder="Search" />
-              </form>
-            </div>
+
           </div>
           <div>
-            <img src="" alt="UserImg"
-              style="display: block; margin: 0 auto; border: 1px solid blue; width: 40px; margin-top: 120px" />
+            <h2 id="centerCallUser" style="text-align: center; color: white; margin-top: 10px; font-size: 2em;"></h2>
+
+            <div id="videoContainer"
+              style="position: relative; display: flex; flex-direction: row; justify-content: center; align-items: center; height: 60vh; width: 100%;">
+              <video id="remoteVideo" autoplay playsinline
+                style="width: 48%; height: 100%; background: black; margin: 5px; object-fit: cover;"></video>
+              <video id="localVideo" autoplay playsinline muted
+                style="width: 48%; height: 100%; background: #222; margin: 5px; object-fit: cover;"></video>
+
+              <div id="videoDebug"
+                style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: lime; padding: 10px; pointer-events: none; font-family: monospace; font-size: 12px; z-index: 1000; border-radius: 4px;">
+                Waiting for diagnostics...
+              </div>
+            </div>
+
             <div
-              style="display: flex; flex-direction: row; justify-content: center; margin-top: 120px; padding-bottom: 20px;">
-              <button>Mute/Unmute</button>
-              <button>Video</button>
-              <button>Share Screen</button>
-              <button onclick="endPrivateCall()">End Call</button>
+              style="display: flex; flex-direction: row; justify-content: center; margin-top: 20px; padding-bottom: 20px;">
+              <button class="call-control-btn" onclick="Mute()">Mute/Unmute</button>
+              <button class="call-control-btn" onclick="ToggleVideo()">Video</button>
+              <button class="call-control-btn" onclick="ShareScreen()">Share Screen</button>
+              <button class="call-control-btn danger" onclick="endPrivateCall()">End Call</button>
             </div>
           </div>
         </div>
         <div class="messagesDisplay"></div>
         <form action="" class="privateMessageForm" onsubmit="PrivateMessage(event)">
-          <input type="text" name="friendMessagesData" class="chatInput" placeholder="Message" />
-          <button class="formButton">Send</button>
+          <div class="chat-input-container">
+            <button type="button" class="chat-attach-btn" title="Upload a file">
+              <div class="plus-icon">+</div>
+            </button>
+            <input type="text" name="friendMessagesData" class="chatInput" placeholder="Message" autocomplete="off" />
+            <div class="chat-input-icons">
+
+              <button type="button" class="chat-icon-btn">😊</button>
+            </div>
+
+            <button type="submit" style="display: none;"></button>
+          </div>
         </form>
       </div>
 
-      <!-- when calling below -->
+
+
+      <div class="friendsMainView" style="display: none;">
+        <form action="" class="friendsSearchForm">
+          <input type="text" placeholder="Search" class="friendsSearchInput" />
+        </form>
+        <p class="friendsHeader">ALL FRIENDS — <span id="friendsCount">0</span></p>
+        <div class="friendsListMain">
+
+        </div>
+      </div>
+
     </div>
 
-    <!--SERVERS IS HERE -->
+
 
     <div id="serverDetails" class="CurrentServer">
       <div class="CurrentServerMenu">
@@ -170,24 +190,12 @@
             ">
           <p id="inServerUsername" style="margin-bottom: 5px">USERNAME</p>
           <div style="display: flex; gap: 5px; flex-wrap: wrap">
-            <button onclick="VideoOn()" style="font-size: 12px; padding: 2px">
-              Video On
-            </button>
-            <button onclick="VideoOff()" style="font-size: 12px; padding: 2px">
-              Video Off
-            </button>
-            <button onclick="Mute()" style="font-size: 12px; padding: 2px">
-              Mute
-            </button>
-            <button onclick="Deafen()" style="font-size: 12px; padding: 2px">
-              Deafen
-            </button>
-            <button onclick="ShareScreen()" style="font-size: 12px; padding: 2px">
-              Share Screen
-            </button>
-            <button onclick="LeaveCall()" style="font-size: 12px; padding: 2px; color: red">
-              Leave
-            </button>
+            <button class="call-control-btn" onclick="VideoOn()">Video On</button>
+            <button class="call-control-btn" onclick="VideoOff()">Video Off</button>
+            <button class="call-control-btn" onclick="Mute()">Mute</button>
+            <button class="call-control-btn" onclick="Deafen()">Deafen</button>
+            <button class="call-control-btn" onclick="ShareScreen()">Share Screen</button>
+            <button class="call-control-btn danger" onclick="LeaveCall()">Leave</button>
           </div>
         </div>
 
@@ -282,6 +290,20 @@
           <button type="submit" class="createServerbtn">Create</button>
         </div>
       </form>
+    </div>
+  </div>
+
+
+  <div id="incomingCallModal" class="outerModal" style="display: none; z-index: 1000;">
+    <div class="innerModal" style="height: auto; text-align: center; padding: 20px;">
+      <h2 style="color: white; margin-bottom: 10px;">Incoming Call</h2>
+      <p id="incomingCallUser" style="color: #b9bbbe; font-size: 1.2em; margin-bottom: 20px;"></p>
+      <div style="display: flex; justify-content: center; gap: 20px;">
+        <button onclick="AcceptCall()"
+          style="background-color: #3ba55c; padding: 10px 30px; color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold;">Accept</button>
+        <button onclick="DeclineCall()"
+          style="background-color: #ed4245; padding: 10px 30px; color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold;">Decline</button>
+      </div>
     </div>
   </div>
 
