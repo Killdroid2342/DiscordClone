@@ -1,40 +1,44 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="UTF-8">
     <title>Discord</title>
     <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
     <link rel="stylesheet" href="../css/Register.css">
 </head>
+
 <body>
     <div class="outerModal">
         <div class="innerModal">
             <p class="content"></p>
         </div>
     </div>
-<div class="background">
-    <div class="logInFormDiv">
-        <h2 class="logInHeader">Create an account</h2>
-        <form class="outContent" onsubmit="RegisterForm(event)" method="post">
-            <label class="usernameLogInLabel">Username</label>
-            <input type="text" class="usernameInput" name="UserName" /> 
-            <label class="passwordLogInLabel">Password</label>
-            <input type="password" class="passwordInput" name="PassWord" autocomplete="on" />
-            <label class="passwordLogInLabel">Confirm Password</label>
-            <input type="password" class="confirmPasswordInput" name="confirm_password" autocomplete="on" />
-            <input type="submit" value="Continue" class="logInButton">
-            <div class="aroundCheckbox">
-                <input type="checkbox" name="" id="" class="checkboxTerms" required>
-                <label for="" class="labelCheckbox"> I have read and agree to Discord's <a class="labelLinks">Terms of Service</a>  and <a class="labelLinks">Privacy Policy</a> </label>
-            </div>
-            <a href="LogIn.html" class="switchToRegister">Already have an account?</a>
-        </form>
+    <div class="background">
+        <div class="logInFormDiv">
+            <h2 class="logInHeader">Create an account</h2>
+            <form class="outContent" onsubmit="RegisterForm(event)" method="post">
+                <label class="usernameLogInLabel">Username</label>
+                <input type="text" class="usernameInput" name="UserName" />
+                <label class="passwordLogInLabel">Password</label>
+                <input type="password" class="passwordInput" name="PassWord" autocomplete="on" />
+                <label class="passwordLogInLabel">Confirm Password</label>
+                <input type="password" class="confirmPasswordInput" name="confirm_password" autocomplete="on" />
+                <input type="submit" value="Continue" class="logInButton">
+                <div class="aroundCheckbox">
+                    <input type="checkbox" name="" id="" class="checkboxTerms" required>
+                    <label for="" class="labelCheckbox"> I have read and agree to Discord's <a class="labelLinks">Terms
+                            of Service</a> and <a class="labelLinks">Privacy Policy</a> </label>
+                </div>
+                <a href="LogIn.html" class="switchToRegister">Already have an account?</a>
+            </form>
+        </div>
+
     </div>
 
-</div>
-
-<script src="/node_modules/axios/dist/axios.min.js"></script>
+    <script src="/node_modules/axios/dist/axios.min.js"></script>
     <script src="../index.js"></script>
-    <script type="text/javascript" src="../JS/Accounts.js"></script>
+    <script type="text/javascript" src="../JS/Accounts.js?v=2"></script>
 </body>
+
 </html>

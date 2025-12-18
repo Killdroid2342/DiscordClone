@@ -17,7 +17,7 @@ async function LogInForm(event) {
   });
   try {
     const response = await axios.post(
-      'http://localhost:5017/api/Account/LogIn',
+      'http://localhost:5018/api/Account/LogIn',
       formDataObject
     );
     console.log('login response:', response);
@@ -26,7 +26,7 @@ async function LogInForm(event) {
     document.cookie = `token=${token}; path=/`;
 
     const jwtRes = await axios.post(
-      `http://localhost:5017/api/Account/VerifyToken?token=${token}`
+      `http://localhost:5018/api/Account/VerifyToken?token=${token}`
     );
     console.log('token check result:', jwtRes);
 
@@ -71,7 +71,7 @@ async function RegisterForm(event) {
 
     try {
       const response = await axios.post(
-        'http://localhost:5017/api/Account/CreateAccount',
+        'http://localhost:5018/api/Account/CreateAccount',
         formDataObject
       );
       console.log('signup response:', response);

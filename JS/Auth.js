@@ -3,7 +3,7 @@
 async function Auth() {
   let token = getCookie('token');
   const tokenRes = await axios.post(
-    `http://localhost:5017/api/Account/VerifyToken?token=${token}`
+    `http://localhost:5018/api/Account/VerifyToken?token=${token}`
   );
 
   if (tokenRes.data.message !== 'Token is correct.') {
