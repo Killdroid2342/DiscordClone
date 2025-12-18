@@ -15,6 +15,7 @@ const username = document.getElementById('username');
 let socket;
 
 let chatConnection = null;
+let signalRConnection = null;
 
 function GetCookieToken(name) {
   let value = '; ' + document.cookie;
@@ -36,7 +37,71 @@ function decodeJWT(token) {
 const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
 let JWTusername = decodedJWT.payload.username;
-username.innerHTML = JWTusername;
+
+let ringtoneAudio = null;
+
+function startRingtone() {
+  if (ringtoneAudio) return;
+  console.log("Starting Ringtone");
+
+  try {
+    ringtoneAudio = new Audio('/assets/audio/ringtone.mp3');
+    ringtoneAudio.loop = true;
+    ringtoneAudio.volume = 0.5;
+
+
+    const playPromise = ringtoneAudio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(e => {
+        console.warn("Autoplay blocked. Waiting for interaction...", e);
+        const banner = document.getElementById('audioPermBanner');
+        if (banner) banner.style.display = 'block';
+
+        const resumeAudio = () => {
+          if (ringtoneAudio) ringtoneAudio.play().catch(err => console.error("Retry failed", err));
+          if (banner) banner.style.display = 'none';
+          document.removeEventListener('click', resumeAudio);
+          document.removeEventListener('keydown', resumeAudio);
+        };
+        document.addEventListener('click', resumeAudio);
+        document.addEventListener('keydown', resumeAudio);
+      });
+    }
+  } catch (e) {
+    console.error("Failed to load ringtone:", e);
+  }
+}
+
+const playBeep = () => {
+  try {
+    const osc = globalAudioContext.createOscillator();
+    const gain = globalAudioContext.createGain();
+    osc.connect(gain);
+    gain.connect(globalAudioContext.destination);
+
+
+    osc.frequency.setValueAtTime(800, globalAudioContext.currentTime);
+    osc.frequency.setValueAtTime(600, globalAudioContext.currentTime + 0.4);
+
+    gain.gain.setValueAtTime(0.2, globalAudioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, globalAudioContext.currentTime + 1.5);
+
+    osc.start();
+    osc.stop(globalAudioContext.currentTime + 1.5);
+  } catch (e) { console.error("Ringtone error:", e); }
+};
+
+
+
+function stopRingtone() {
+  if (ringtoneAudio) {
+    console.log("Stopping Ringtone");
+    ringtoneAudio.pause();
+    ringtoneAudio.currentTime = 0;
+    ringtoneAudio = null;
+  }
+}
+
 inServerUsername.innerHTML = JWTusername;
 
 function openModal() {
@@ -81,7 +146,7 @@ async function CreateServer(event) {
   };
   try {
     const response = await axios.post(
-      'http://localhost:5017/api/Server/CreateServer',
+      'http://localhost:5018/api/Server/CreateServer',
       formData
     );
     const createdServer = response.data;
@@ -95,7 +160,7 @@ async function CreateServer(event) {
       document.querySelector('.currentServerName').textContent =
         createdServer.serverName;
       selectedServerID = createdServer.serverID;
-     
+
       await fetchServerDetails();
       startServerMessagePolling();
     });
@@ -107,7 +172,7 @@ async function CreateServer(event) {
       document.querySelector('.secondColumn').style.display = 'block';
       document.querySelector('.lastSection').style.display = 'block';
       document.getElementById('serverDetails').style.display = 'none';
-      
+
     });
   } catch (err) {
     console.log('couldnt make server:', err);
@@ -117,7 +182,7 @@ async function CreateServer(event) {
 async function GetServer() {
   try {
     const response = await axios.get(
-      `http://localhost:5017/api/Server/GetServer?username=${JWTusername}`
+      `http://localhost:5018/api/Server/GetServer?username=${JWTusername}`
     );
     let serverData = response.data;
     let allServersDiv = document.querySelector('.allservers');
@@ -170,7 +235,21 @@ async function GetServer() {
 
 
         await fetchServerDetails();
+        if (signalRConnection && signalRConnection.state === "Connected") {
+          try {
+            await signalRConnection.invoke("JoinServer", server.serverID, JWTusername);
+          } catch (err) { console.error("SignalR Join failed", err); }
+        } else {
+          console.log("SignalR not connected yet, skipping join group...");
+        }
         startServerMessagePolling();
+
+
+        const joinedServer = sessionStorage.getItem('UserJoined');
+        if (joinedServer && joinedServer === selectedServerID) {
+          console.log("Auto-rejoining voice for", selectedServerID);
+          JoinVoiceCalls();
+        }
       });
       allServersDiv.appendChild(newServerElement);
 
@@ -189,7 +268,7 @@ async function GetServer() {
         document.querySelector('.secondColumn').style.display = 'block';
         document.querySelector('.lastSection').style.display = 'block';
         document.getElementById('serverDetails').style.display = 'none';
-  
+
         stopServerMessagePolling();
       });
   } catch (e) {
@@ -200,7 +279,7 @@ GetServer();
 async function fetchServerMessages() {
   try {
     const messageRes = await axios.get(
-      `http://localhost:5017/api/ServerMessages/GetServerMessages?channelId=${selectedChannelID}`
+      `http://localhost:5018/api/ServerMessages/GetServerMessages?channelId=${selectedChannelID}`
     );
     chatMessages.innerHTML = '';
     messageRes.data.forEach((message) => {
@@ -245,7 +324,7 @@ async function ServerChat(event) {
 
   try {
     await axios.post(
-      'http://localhost:5017/api/ServerMessages/ServerMessages',
+      'http://localhost:5018/api/ServerMessages/ServerMessages',
       formDataObject
     );
 
@@ -255,14 +334,126 @@ async function ServerChat(event) {
   }
 }
 function showAddFriends() {
-  document.querySelector('.addFriendsDiv').style.display = 'block';
-  document.querySelector('.removeFriendsDiv').style.display = 'none';
+  clearContent();
+  const addDiv = document.querySelector('.addFriendsDiv');
+  if (addDiv) addDiv.style.display = 'block';
 }
+
 function clearContent() {
-  document.querySelector('.addFriendsDiv').style.display = 'none';
-  document.querySelector('.removeFriendsDiv').style.display = 'none';
+  const sections = [
+    '.addFriendsDiv',
+    '.removeFriendsDiv',
+    '.pendingRequestsDiv',
+    '.privateMessage',
+    '.friendsMainView',
+    '#serverDetails'
+  ];
+
+  sections.forEach(selector => {
+    document.querySelectorAll(selector).forEach(el => {
+      el.style.display = 'none';
+    });
+  });
+
+
   const accountElement = document.querySelector('.account');
-  accountElement.style.marginTop = '668px';
+
+}
+
+const friendsDiv = document.querySelector('.friendsDiv');
+if (friendsDiv) {
+  friendsDiv.addEventListener('click', () => {
+    document.querySelector('.secondColumn').style.display = 'block';
+    document.querySelector('.lastSection').style.display = 'block';
+    document.getElementById('serverDetails').style.display = 'none';
+
+    document.querySelector('.nav').style.display = 'flex';
+    const privateMsg = document.querySelector('.privateMessage');
+    if (privateMsg) privateMsg.style.display = 'none';
+
+    ShowFriendsMainView();
+  });
+}
+function showPendingRequests() {
+  clearContent();
+  const pendingDiv = document.querySelector('.pendingRequestsDiv');
+  if (pendingDiv) {
+    pendingDiv.style.display = 'block';
+    fetchPendingRequests();
+  }
+}
+async function fetchPendingRequests() {
+  const pendingList = document.querySelector('.pendingList');
+  pendingList.innerHTML = 'Loading...';
+  try {
+    const res = await axios.get(`http://localhost:5018/api/Account/GetFriendRequests?username=${JWTusername}`);
+    pendingList.innerHTML = '';
+
+    if (!Array.isArray(res.data) || res.data.length === 0) {
+      pendingList.innerHTML = '<p class="no-requests">No pending requests.</p>';
+      return;
+    }
+
+    res.data.forEach(reqUser => {
+      const item = document.createElement('div');
+      item.className = 'friend-item';
+      item.style.cursor = 'default';
+
+      const left = document.createElement('div');
+      left.className = 'friend-item-left';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'friend-item-avatar';
+      avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+
+      const info = document.createElement('div');
+      info.className = 'friend-item-info';
+
+      const name = document.createElement('span');
+      name.className = 'friend-item-name';
+      name.textContent = reqUser;
+
+      const status = document.createElement('span');
+      status.className = 'friend-item-status';
+      status.textContent = 'Incoming Friend Request';
+
+      info.appendChild(name);
+      info.appendChild(status);
+      left.appendChild(avatar);
+      left.appendChild(info);
+
+
+
+
+
+      item.appendChild(left);
+      pendingList.appendChild(item);
+    });
+  } catch (err) {
+    console.error('Error fetching requests:', err);
+    pendingList.innerHTML = '<p style="color:red; padding:20px;">Error loading requests</p>';
+  }
+}
+async function acceptRequest(friendUsername) {
+  try {
+    const res = await axios.post(`http://localhost:5018/api/Account/AcceptFriendRequest?username=${JWTusername}&friendUsername=${friendUsername}`);
+    alert(res.data.message);
+    fetchPendingRequests();
+    GetFriends();
+  } catch (err) {
+    console.error(err);
+    alert('Failed to accept request');
+  }
+}
+async function declineRequest(friendUsername) {
+  try {
+    const res = await axios.post(`http://localhost:5018/api/Account/DeclineFriendRequest?username=${JWTusername}&friendUsername=${friendUsername}`);
+    alert(res.data.message);
+    fetchPendingRequests();
+  } catch (err) {
+    console.error(err);
+    alert('Failed to decline request');
+  }
 }
 async function SearchFriends(event) {
   event.preventDefault();
@@ -274,7 +465,7 @@ async function SearchFriends(event) {
   let friendUsername = formDataObject.friendUsername;
   try {
     const res = await axios.post(
-      `http://localhost:5017/api/Account/AddFriend?username=${JWTusername}&friendUsername=${friendUsername}`,
+      `http://localhost:5018/api/Account/AddFriend?username=${JWTusername}&friendUsername=${friendUsername}`,
       formDataObject
     );
     if (res.data.message) {
@@ -289,27 +480,13 @@ async function SearchFriends(event) {
     console.log('server creation broke:', e);
   }
 }
-function LeaveCall() {
-  sessionStorage.removeItem('UserJoined');
 
-  const myMemberEl = document.querySelector(`.viewServerAccounts div[data-username="${JWTusername}"]`);
-  if (myMemberEl) {
-    const icon = myMemberEl.querySelector('.voice-status-icon');
-    if (icon) icon.remove();
-  }
-
-
-  document.querySelectorAll('.voice-user-list').forEach(el => el.remove());
-
-  EndCall();
-}
-function JoinVoiceCalls() {
-  sessionStorage.setItem('UserJoined', selectedServerID);
-
-}
 function showDeleteFriend() {
+  clearContent();
+  const pendingDiv = document.querySelector('.pendingRequestsDiv');
+  if (pendingDiv) pendingDiv.style.display = 'none';
   document.querySelector('.removeFriendsDiv').style.display = 'block';
-  document.querySelector('.addFriendsDiv').style.display = 'none';
+
 }
 async function RemoveFriends(event) {
   event.preventDefault();
@@ -321,7 +498,7 @@ async function RemoveFriends(event) {
     });
     let friendUsername = formDataObject.friendUsername;
     let res = await axios.post(
-      `http://localhost:5017/api/Account/RemoveFriend?username=${JWTusername}&friendUsername=${friendUsername}`
+      `http://localhost:5018/api/Account/RemoveFriend?username=${JWTusername}&friendUsername=${friendUsername}`
     );
     if (res.data.message) {
       messageModalContent.innerText = res.data.message;
@@ -339,7 +516,7 @@ async function GetFriends() {
   mainFriendsDiv.innerHTML = '';
   try {
     let res = await axios.get(
-      `http://localhost:5017/api/Account/GetFriends?username=${JWTusername}`
+      `http://localhost:5018/api/Account/GetFriends?username=${JWTusername}`
     );
     if (res.data === 'No Friends Added!') {
       let noFriendsTag = document.createElement('p');
@@ -353,11 +530,24 @@ async function GetFriends() {
           let friendsTag = document.createElement('p');
           friendsTag.textContent = friend;
           friendsTag.addEventListener('click', async () => {
+            console.log("Friend clicked:", friend);
+            clearContent();
+
+
+            const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
+            pendingRequests.forEach(el => {
+              el.style.cssText = 'display: none !important;';
+              void el.offsetWidth; // Force reflow
+            });
+            console.log("Pending requests forced hidden");
+
             currentFriend = friend;
             InitWebSocket();
             await GetPrivateMessage();
             document.querySelector('.nav').style.display = 'none';
-            document.querySelector('.privateMessage').style.display = 'block';
+
+            const privateMsg = document.querySelector('.privateMessage');
+            if (privateMsg) privateMsg.style.display = 'flex';
             directMessageUser.innerText = currentFriend;
           });
           mainFriendsDiv.appendChild(friendsTag);
@@ -368,9 +558,49 @@ async function GetFriends() {
     console.log('private msg handling broke:', e);
   }
 }
+const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+function createMessageElement(sender, text, date) {
+  const container = document.createElement('div');
+  container.className = 'message-group';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+
+
+  const content = document.createElement('div');
+  content.className = 'message-content';
+
+  const header = document.createElement('div');
+  header.className = 'message-header';
+
+  const username = document.createElement('span');
+  username.className = 'message-username';
+  username.textContent = sender;
+
+  const timestamp = document.createElement('span');
+  timestamp.className = 'message-timestamp';
+  timestamp.textContent = date;
+
+  header.appendChild(username);
+  header.appendChild(timestamp);
+
+  const messageText = document.createElement('div');
+  messageText.className = 'message-text';
+  messageText.textContent = text;
+
+  content.appendChild(header);
+  content.appendChild(messageText);
+
+  container.appendChild(avatar);
+  container.appendChild(content);
+
+  return container;
+}
+
 function InitWebSocket() {
   socket = new WebSocket(
-    `ws://localhost:5017/api/PrivateMessageFriend/HandlePrivateWebsocket?username=${JWTusername}`
+    `ws://localhost:5018/api/PrivateMessageFriend/HandlePrivateWebsocket?username=${JWTusername}`
   );
   socket.onopen = function () {
     console.log('connected to chat');
@@ -378,9 +608,9 @@ function InitWebSocket() {
   socket.onmessage = function (event) {
     const message = JSON.parse(event.data);
     const messagesDisplay = document.querySelector('.messagesDisplay');
-    const messageElement = document.createElement('p');
-    messageElement.textContent = `${message.MessagesUserSender}: ${message.friendMessagesData} (${message.date})`;
+    const messageElement = createMessageElement(message.MessagesUserSender, message.friendMessagesData, message.date);
     messagesDisplay.appendChild(messageElement);
+    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
   };
   socket.onclose = function () {
     console.log('chat disconnected');
@@ -401,26 +631,23 @@ async function PrivateMessage(event) {
   };
   socket.send(JSON.stringify(messageObject));
   const messagesDisplay = document.querySelector('.messagesDisplay');
-  const messageElement = document.createElement('p');
-  messageElement.textContent = `${JWTusername}: ${messageObject.friendMessagesData} (${messageObject.date})`;
+  const messageElement = createMessageElement(JWTusername, messageObject.friendMessagesData, messageObject.date);
   messagesDisplay.appendChild(messageElement);
+  messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
   event.target.reset();
 }
 async function GetPrivateMessage() {
   try {
     const res = await axios.get(
-      `http://localhost:5017/api/PrivateMessageFriend/GetPrivateMessage?currentUsername=${JWTusername}&targetUsername=${currentFriend}`
+      `http://localhost:5018/api/PrivateMessageFriend/GetPrivateMessage?currentUsername=${JWTusername}&targetUsername=${currentFriend}`
     );
     const messagesDisplay = document.querySelector('.messagesDisplay');
     messagesDisplay.innerHTML = '';
     res.data.forEach((message) => {
-      const messageElement = document.createElement('p');
-      const sender = message.messagesUserSender;
-      const text = message.friendMessagesData;
-      const date = message.date;
-      messageElement.textContent = `${sender}: ${text} (${date})`;
+      const messageElement = createMessageElement(message.messagesUserSender, message.friendMessagesData, message.date);
       messagesDisplay.appendChild(messageElement);
     });
+    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
     document.getElementById('home').addEventListener('click', function () {
       document.querySelector('.secondColumn').style.display = 'block';
       document.querySelector('.lastSection').style.display = 'block';
@@ -428,13 +655,17 @@ async function GetPrivateMessage() {
       document.querySelector('.privateMessage').style.display = 'none';
       document.querySelector('.nav').style.display = 'flex';
       document.querySelector('.nav').style.display = 'flex';
-      
+
     });
   } catch (e) {
     console.log('ugh something went wrong with private msgs:', e);
   }
 }
 GetFriends();
+
+if (JWTusername) {
+  setTimeout(initializeVoiceConnection, 500);
+}
 
 
 
@@ -448,7 +679,7 @@ function closeJoinModal() {
 async function getInviteLink(serverId) {
   try {
     let res = await fetch(
-      `http://localhost:5017/api/Server/GetInviteLink?serverId=${serverId}`
+      `http://localhost:5018/api/Server/GetInviteLink?serverId=${serverId}`
     );
     if (res.ok) {
       let data = await res.json();
@@ -468,7 +699,7 @@ async function JoinServer(event) {
   event.preventDefault();
   let serverLink = document.getElementById('serverLinkInput').value.trim();
   try {
-    let res = await fetch('http://localhost:5017/api/Server/JoinServer', {
+    let res = await fetch('http://localhost:5018/api/Server/JoinServer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -479,6 +710,7 @@ async function JoinServer(event) {
     if (res.ok) {
       let server = await res.json();
       closeJoinModal();
+      closeModal();
       document.querySelector('.currentServerName').innerText =
         server.serverName;
       selectedServerID = server.serverID;
@@ -541,6 +773,9 @@ const config = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
 
+console.log("%c HOME.JS RELOADED - VERSION 26", "background: red; color: white; font-size: 20px");
+
+
 
 let globalAudioContext = null;
 
@@ -572,10 +807,22 @@ document.addEventListener('touchstart', enableAudioPlayback, { once: true });
 
 async function initializeVoiceConnection() {
   try {
-    voiceConnection = new WebSocket('ws://localhost:5017/voice-ws');
+    if (voiceConnection && (voiceConnection.readyState === WebSocket.OPEN || voiceConnection.readyState === WebSocket.CONNECTING)) {
+      console.log("Voice connection already active or connecting");
+      return;
+    }
+    voiceConnection = new WebSocket('ws://localhost:5018/voice-ws');
 
     voiceConnection.onopen = () => {
       console.log('voice chat connected');
+
+
+
+      voiceConnection.send(JSON.stringify({
+        Type: 'identify',
+        Username: JWTusername
+      }));
+
       const joinedServer = sessionStorage.getItem('UserJoined');
       if (joinedServer) {
         console.log(`Re-joining voice for server ${joinedServer} as ${JWTusername}`);
@@ -594,6 +841,10 @@ async function initializeVoiceConnection() {
         switch (message.Type) {
           case 'user-joined':
             console.log(`${message.Username} joined voice chat`);
+            if (!currentVoiceUsers.includes(message.Username)) {
+              currentVoiceUsers.push(message.Username);
+              renderVoiceUserList(currentVoiceUsers);
+            }
 
             if (JWTusername < message.Username) {
               try {
@@ -616,6 +867,9 @@ async function initializeVoiceConnection() {
 
           case 'user-left':
             console.log(`${message.Username} left the voice channel`);
+            currentVoiceUsers = currentVoiceUsers.filter(u => u !== message.Username);
+            renderVoiceUserList(currentVoiceUsers);
+
             removePeerUI(message.Username);
 
             const peerConnection = peerConnections.get(message.Username);
@@ -629,6 +883,7 @@ async function initializeVoiceConnection() {
             const users = JSON.parse(message.Data);
             console.log('users already in voice chat:', users);
             currentVoiceUsers = users;
+            renderVoiceUserList(currentVoiceUsers);
 
             if (!serverPeerConnection && users.length > 0) {
               await establishServerConnection();
@@ -658,63 +913,8 @@ async function initializeVoiceConnection() {
           case 'users-updated':
             const updatedUsers = JSON.parse(message.Data);
             console.log('voice channel updated:', updatedUsers);
-
-            document.querySelectorAll('.voice-user-list').forEach(el => el.remove());
-
-       
-            const allMemberEls = document.querySelectorAll('.viewServerAccounts div[data-username]');
-            allMemberEls.forEach(el => {
-              const icon = el.querySelector('.voice-status-icon');
-              if (icon) icon.remove();
-            });
-
-
-            const firstVoiceChannel = document.querySelector('div[data-channel-type="voice"]');
-
-            if (firstVoiceChannel && updatedUsers.length > 0) {
-              const userListContainer = document.createElement('div');
-              userListContainer.className = 'voice-user-list';
-              userListContainer.style.marginLeft = '20px';
-              userListContainer.style.marginBottom = '5px';
-
-              updatedUsers.forEach(username => {
-                const userDiv = document.createElement('div');
-                userDiv.style.color = '#dbdee1';
-                userDiv.style.fontSize = '12px';
-                userDiv.style.padding = '2px 0';
-                userDiv.style.cursor = 'pointer';
-                userDiv.style.display = 'flex';
-                userDiv.style.alignItems = 'center';
-
-                const avatar = document.createElement('div');
-                avatar.style.width = '20px';
-                avatar.style.height = '20px';
-                avatar.style.borderRadius = '50%';
-                avatar.style.backgroundColor = '#5865f2'; 
-                avatar.style.marginRight = '5px';
-                avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
-                avatar.style.backgroundSize = 'cover';
-
-                const nameSpan = document.createElement('span');
-                nameSpan.textContent = username;
-
-                userDiv.appendChild(avatar);
-                userDiv.appendChild(nameSpan);
-                userListContainer.appendChild(userDiv);
-
-                const memberEl = document.querySelector(`.viewServerAccounts div[data-username="${username}"]`);
-                if (memberEl) {
-                  const icon = document.createElement('span');
-                  icon.className = 'voice-status-icon';
-                  icon.textContent = ' 🔊';
-                  icon.style.marginLeft = 'auto';
-                  icon.style.fontSize = '12px';
-                  memberEl.appendChild(icon);
-                }
-              });
-
-              firstVoiceChannel.after(userListContainer);
-            }
+            currentVoiceUsers = updatedUsers;
+            renderVoiceUserList(currentVoiceUsers);
             break;
           case 'server-offer':
             await handleServerOffer(message.Data);
@@ -729,7 +929,7 @@ async function initializeVoiceConnection() {
             break;
 
           case 'peer-offer':
-            await handlePeerOffer(message.Username, message.Data);
+            await handlePeerOffer(message.Username, message.Data, message.IsPrivate, message.IsVideo);
             break;
 
           case 'peer-answer':
@@ -743,6 +943,17 @@ async function initializeVoiceConnection() {
           case 'audio-data':
             await handleIncomingAudio(message.Username, message.Data);
             break;
+
+          case 'call-cancel':
+
+            break;
+
+          case 'call-ended':
+            console.log(`Call ended by ${message.Username}`);
+            if (activeCallUI && activeCallUI.style.display !== 'none') {
+              endPrivateCall(false);
+            }
+            break;
         }
       } catch (err) {
         console.error('couldnt process voice msg:', err);
@@ -755,6 +966,15 @@ async function initializeVoiceConnection() {
 
     voiceConnection.onclose = () => {
       console.log('voice disconnected');
+      voiceConnection = null;
+
+      const joinedServer = sessionStorage.getItem('UserJoined');
+      if (joinedServer) {
+        console.log("Attempting to reconnect voice in 3 seconds...");
+        setTimeout(() => {
+          initializeVoiceConnection();
+        }, 3000);
+      }
     };
 
 
@@ -826,13 +1046,29 @@ async function initializeVoiceConnection() {
     }
 
 
-    async function handlePeerOffer(fromUser, offer) {
-      logToScreen(`RX Offer from ${fromUser}`);
+    async function handlePeerOffer(fromUser, offer, isPrivateCall, isVideo) {
+
+
+      const isServerPeer = currentVoiceUsers && currentVoiceUsers.includes(fromUser);
+
+      if (isPrivateCall || !isServerPeer) {
+        console.log(`Routing offer from ${fromUser} to Private Call Handler (Private=${isPrivateCall}, Video=${isVideo})`);
+        if (window.handlePrivatePeerOffer) {
+          await window.handlePrivatePeerOffer(fromUser, offer, isVideo);
+        } else {
+          console.error("handlePrivatePeerOffer not found!");
+        }
+        return;
+      }
+
+
+
       try {
         let peerConnection = peerConnections.get(fromUser);
 
-        if (peerConnection && peerConnection.signalingState !== 'stable') {
-          console.log(`already connected to ${fromUser}, ignoring...`);
+
+        if (peerConnection && peerConnection.signalingState !== 'stable' && peerConnection.signalingState !== 'have-local-offer') {
+          console.log(`Connection with ${fromUser} is busy (${peerConnection.signalingState}), possibly ignoring offer collision.`);
           return;
         }
 
@@ -840,18 +1076,32 @@ async function initializeVoiceConnection() {
           peerConnection = await createPeerConnection(fromUser);
         }
 
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
-        logToScreen(`RX SDP: hasVideo=${offer.includes('m=video')}`);
+        const remoteDesc = new RTCSessionDescription(JSON.parse(offer));
+        if (peerConnection.signalingState === 'have-local-offer') {
+          if (platform === 'browser') {
+            if (JWTusername > fromUser) {
+              console.log("I am impolite (initiator), ignoring colliding offer from", fromUser);
+              return;
+            }
+          }
 
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
+          await peerConnection.setRemoteDescription(remoteDesc);
+          logToScreen(`RX SDP: hasVideo=${offer.includes('m=video')}, State=${peerConnection.signalingState}`);
 
-        if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
-          voiceConnection.send(JSON.stringify({
-            Type: 'peer-answer',
-            Data: JSON.stringify(answer),
-            TargetUser: fromUser
-          }));
+          if (peerConnection.signalingState === 'have-remote-offer') {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+              voiceConnection.send(JSON.stringify({
+                Type: 'peer-answer',
+                Data: JSON.stringify(answer),
+                TargetUser: fromUser
+              }));
+            }
+          } else {
+            console.warn(`Cannot set local answer, state is ${peerConnection.signalingState} (expected have-remote-offer)`);
+          }
         }
       } catch (err) {
         console.error('couldnt handle connection request:', err);
@@ -860,6 +1110,18 @@ async function initializeVoiceConnection() {
 
     async function handlePeerAnswer(fromUser, answer) {
       logToScreen(`RX Answer from ${fromUser}`);
+
+
+      const isServerPeer = currentVoiceUsers && currentVoiceUsers.includes(fromUser);
+      if (!isServerPeer) {
+        if (window.handlePeerAnswer) {
+          await window.handlePeerAnswer(fromUser, answer);
+        } else {
+          console.error("Global handlePeerAnswer not found!");
+        }
+        return;
+      }
+
       try {
         const peerConnection = peerConnections.get(fromUser);
         if (peerConnection && peerConnection.signalingState === 'have-local-offer') {
@@ -928,6 +1190,7 @@ async function initializeVoiceConnection() {
       peerConnections.set(userId, peerConnection);
       return peerConnection;
     }
+    window.createPeerConnection = createPeerConnection;
 
     console.log('voice chat system ready');
   } catch (err) {
@@ -945,7 +1208,7 @@ function createRemoteMediaElement(peerName, stream) {
   console.log(
     `Creating remote media for ${peerName}: video=${hasVideo}, audio=${hasAudio}`
   );
-  logToScreen(`Media for ${peerName}: Vid=${hasVideo} Aud=${hasAudio}`);
+
 
 
   stream.getTracks().forEach((track, i) => {
@@ -959,6 +1222,13 @@ function createRemoteMediaElement(peerName, stream) {
     return null;
   }
 
+  if (privateCallUI && privateCallUI.style.display !== 'none' && privateRemoteVideo) {
+    console.log(`Redirecting stream from ${peerName} to Private Call Video UI`);
+    privateRemoteVideo.srcObject = stream;
+    return privateRemoteVideo;
+  }
+
+
   if (hasVideo) {
     const v = document.createElement('video');
     v.id = 'remote_' + peerName;
@@ -966,7 +1236,7 @@ function createRemoteMediaElement(peerName, stream) {
     v.playsInline = true;
     v.srcObject = stream;
     v.width = 240;
-    v.classList.add('videos'); 
+    v.classList.add('videos');
     document.querySelector('.videoBox').appendChild(v);
     return v;
   } else {
@@ -1104,13 +1374,17 @@ async function establishServerConnection() {
 }
 
 async function ensureLocalStream(wantAudio = true, wantVideo = false) {
+  const localVideo = document.getElementById('localVideo');
+
   if (!localStream) {
     localStream = await navigator.mediaDevices.getUserMedia({
       audio: wantAudio,
       video: wantVideo,
     });
-    localVideo.srcObject = localStream;
-    localVideo.muted = true;
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+      localVideo.muted = true;
+    }
 
     if (wantAudio) {
       let localAudio = document.getElementById('localAudio');
@@ -1149,15 +1423,29 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
     }
     return;
   }
+
+  if (!wantVideo && localStream.getVideoTracks().length > 0) {
+    console.log("Stopping video tracks for voice-only call");
+    localStream.getVideoTracks().forEach(track => {
+      track.stop();
+      localStream.removeTrack(track);
+    });
+    // Ensure UI mirrors this
+    if (localVideo) localVideo.srcObject = localStream;
+  }
+
   if (wantVideo && localStream.getVideoTracks().length === 0) {
     const vs = await navigator.mediaDevices.getUserMedia({ video: true });
     const videoTrack = vs.getVideoTracks()[0];
     localStream.addTrack(videoTrack);
-    localVideo.srcObject = localStream;
-    localVideo.muted = true;
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+      localVideo.muted = true;
+    }
   }
 }
 async function JoinVoiceCalls() {
+  enableAudioPlayback();
   try {
     if (!selectedServerID) {
       console.error('please select a server first before joining voice chat');
@@ -1165,7 +1453,7 @@ async function JoinVoiceCalls() {
     }
 
 
-    if (sessionStorage.getItem('UserJoined') === selectedServerID) {
+    if (sessionStorage.getItem('UserJoined') === selectedServerID && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
       console.log('you are already in this voice channel');
       return;
     }
@@ -1223,11 +1511,22 @@ async function LeaveCall() {
     if (serverPeerConnection) {
       try {
         serverPeerConnection.close();
-        serverPeerConnection = null;
       } catch (err) {
         console.error('problem disconnecting from voice server:', err);
       }
+      serverPeerConnection = null;
     }
+
+
+    for (const [user, pc] of peerConnections.entries()) {
+      try {
+        pc.close();
+      } catch (e) {
+        console.warn(`Failed to close peer connection for ${user}`, e);
+      }
+    }
+    peerConnections.clear();
+    currentVoiceUsers = [];
 
 
     const remotes = Array.from(document.querySelectorAll('[id^="remote_"]'));
@@ -1257,6 +1556,27 @@ async function LeaveCall() {
 
     document.querySelectorAll('.voice-user-list').forEach(el => el.remove());
 
+
+    isMuted = false;
+    isDeafened = false;
+    let btn = document.querySelector('button[onclick="Mute()"]');
+    if (btn) {
+      btn.textContent = "Mute";
+      btn.style.color = "white";
+    }
+    btn = document.querySelector('button[onclick="Deafen()"]');
+    if (btn) {
+      btn.textContent = "Deafen";
+      btn.style.color = "white";
+    }
+    btn = document.querySelector('button[onclick="ShareScreen()"]');
+    if (btn) {
+      btn.textContent = "Share Screen";
+      btn.style.color = "white";
+      btn.onclick = ShareScreen;
+    }
+
+
   } catch (err) {
     console.error('couldnt leave voice chat:', err);
   }
@@ -1264,6 +1584,14 @@ async function LeaveCall() {
 async function VideoOn() {
   try {
     await ensureLocalStream(true, true);
+
+
+    const localVideo = document.getElementById('localVideo');
+    if (localVideo && localStream) {
+      localVideo.srcObject = localStream;
+      localVideo.muted = true;
+    }
+
     const videoTrack = localStream.getVideoTracks()[0];
     if (!videoTrack) return;
     for (const pc of peerConnections.values()) {
@@ -1345,6 +1673,7 @@ async function VideoOff() {
       }
     }
   }
+  const localVideo = document.getElementById('localVideo');
   if (localVideo) localVideo.srcObject = localStream;
 }
 function MuteAudio() {
@@ -1371,12 +1700,170 @@ function UnmuteAudio() {
     console.log('your microphone is now unmuted');
   }
 }
+
+let isMuted = false;
+function Mute() {
+  isMuted = !isMuted;
+  if (isMuted) {
+    MuteAudio();
+    const btn = document.querySelector('button[onclick="Mute()"]');
+    if (btn) {
+      btn.textContent = "Unmute";
+      btn.style.color = "red";
+    }
+  } else {
+    UnmuteAudio();
+    const btn = document.querySelector('button[onclick="Mute()"]');
+    if (btn) {
+      btn.textContent = "Mute";
+      btn.style.color = "white";
+    }
+  }
+}
+
+let isDeafened = false;
+function Deafen() {
+  isDeafened = !isDeafened;
+  const remotes = document.querySelectorAll('audio[id^="remote_"]');
+  remotes.forEach(audio => {
+    audio.muted = isDeafened;
+  });
+
+  const btn = document.querySelector('button[onclick="Deafen()"]');
+  if (btn) {
+    if (isDeafened) {
+      btn.textContent = "Undeafen";
+      btn.style.color = "red";
+      if (!isMuted) Mute();
+    } else {
+      btn.textContent = "Deafen";
+      btn.style.color = "white";
+    }
+  }
+}
+
+let isVideoOn = false;
+function ToggleVideo() {
+  isVideoOn = !isVideoOn;
+  const btn = document.querySelector('#activeCallUI button:nth-child(2)');
+
+  if (isVideoOn) {
+    VideoOn();
+    if (btn) {
+      btn.textContent = "Stop Video";
+      btn.style.color = "red";
+    }
+  } else {
+    VideoOff();
+    if (btn) {
+      btn.textContent = "Video";
+      btn.style.color = "white";
+    }
+  }
+}
+
+async function ShareScreen() {
+  try {
+    const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    const screenTrack = screenStream.getVideoTracks()[0];
+
+
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.stop();
+        localStream.removeTrack(videoTrack);
+      }
+      localStream.addTrack(screenTrack);
+
+      const localVideo = document.getElementById('localVideo');
+      if (localVideo) {
+        localVideo.srcObject = localStream;
+        localVideo.muted = true;
+      }
+    }
+
+    const btn = document.querySelector('button[onclick="ShareScreen()"]');
+    if (btn) {
+      btn.textContent = "Stop Sharing";
+      btn.style.color = "red";
+      btn.onclick = () => {
+        screenTrack.stop();
+
+      };
+    }
+
+
+    for (const pc of peerConnections.values()) {
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) {
+        await sender.replaceTrack(screenTrack);
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+
+        let targetUser = null;
+        for (const [user, conn] of peerConnections.entries()) {
+          if (conn === pc) { targetUser = user; break; }
+        }
+
+        if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+          voiceConnection.send(JSON.stringify({
+            Type: 'peer-offer',
+            Data: JSON.stringify(offer),
+            TargetUser: targetUser
+          }));
+        }
+
+      } else {
+        pc.addTrack(screenTrack, localStream);
+
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        let targetUser = null;
+        for (const [user, conn] of peerConnections.entries()) {
+          if (conn === pc) { targetUser = user; break; }
+        }
+
+        if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+          logToScreen(`ShareScreen (New Track): Sending offer to ${targetUser}`);
+          voiceConnection.send(JSON.stringify({
+            Type: 'peer-offer',
+            Data: JSON.stringify(offer),
+            TargetUser: targetUser
+          }));
+        }
+      }
+    }
+
+    screenTrack.onended = () => {
+      VideoOff();
+      if (btn) {
+        btn.textContent = "Share Screen";
+        btn.style.color = "white";
+        btn.onclick = ShareScreen;
+      }
+    };
+
+  } catch (err) {
+    console.error("Error sharing screen:", err);
+  }
+}
+
+window.Mute = Mute;
+window.Deafen = Deafen;
+window.ShareScreen = ShareScreen;
 window.JoinVoiceCalls = JoinVoiceCalls;
 window.LeaveCall = LeaveCall;
 window.VideoOn = VideoOn;
 window.VideoOff = VideoOff;
+window.ToggleVideo = ToggleVideo;
 window.MuteAudio = MuteAudio;
 window.UnmuteAudio = UnmuteAudio;
+
 
 function logToScreen(msg) {
   let debugConsole = document.getElementById('debugConsole');
@@ -1394,20 +1881,20 @@ function logToScreen(msg) {
     debugConsole.style.zIndex = '9999';
     debugConsole.style.fontSize = '12px';
     debugConsole.style.padding = '5px';
-    debugConsole.style.pointerEvents = 'none'; 
+    debugConsole.style.pointerEvents = 'none';
     document.body.appendChild(debugConsole);
   }
   const line = document.createElement('div');
-  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] MY_CODE: ${msg}`;
   debugConsole.appendChild(line);
   debugConsole.scrollTop = debugConsole.scrollHeight;
-  console.log(msg);
+  console.log(`MY_CODE: ${msg}`);
 }
 
 async function fetchServerDetails() {
   try {
     const response = await axios.get(
-      `http://localhost:5017/api/Server/GetServerDetails?serverId=${selectedServerID}`
+      `http://localhost:5018/api/Server/GetServerDetails?serverId=${selectedServerID}`
     );
     const { categories, channels } = response.data;
     const channelsList = document.getElementById('channelsList');
@@ -1483,6 +1970,9 @@ async function fetchServerDetails() {
 
     fetchServerMembers();
 
+
+    renderVoiceUserList(currentVoiceUsers);
+
   } catch (err) {
     console.error('Failed to fetch server details:', err);
   }
@@ -1493,7 +1983,7 @@ async function fetchServerDetails() {
 async function fetchServerMembers() {
   try {
     const response = await axios.get(
-      `http://localhost:5017/api/Server/GetServerMembers?serverId=${selectedServerID}`
+      `http://localhost:5018/api/Server/GetServerMembers?serverId=${selectedServerID}`
     );
     const members = response.data;
     const membersList = document.querySelector('.viewServerAccounts');
@@ -1508,7 +1998,7 @@ async function fetchServerMembers() {
 
     members.forEach(member => {
       const memberEl = document.createElement('div');
-      memberEl.dataset.username = member.username; 
+      memberEl.dataset.username = member.username;
       memberEl.style.padding = '10px';
       memberEl.style.color = member.role === 'owner' ? '#ff7b00' : '#b9bbbe';
       memberEl.style.cursor = 'pointer';
@@ -1533,7 +2023,704 @@ async function fetchServerMembers() {
       membersList.appendChild(memberEl);
     });
 
+
+    if (typeof currentVoiceUsers !== 'undefined') {
+      renderVoiceUserList(currentVoiceUsers);
+    }
+
   } catch (err) {
     console.error('Failed to fetch members:', err);
   }
 }
+
+function renderVoiceUserList(users) {
+  if (!users) return;
+
+  document.querySelectorAll('.voice-user-list').forEach(el => el.remove());
+
+
+  const allMemberEls = document.querySelectorAll('.viewServerAccounts div[data-username]');
+  allMemberEls.forEach(el => {
+    const icon = el.querySelector('.voice-status-icon');
+    if (icon) icon.remove();
+  });
+
+  const firstVoiceChannel = document.querySelector('div[data-channel-type="voice"]');
+
+  if (firstVoiceChannel && users.length > 0) {
+    const userListContainer = document.createElement('div');
+    userListContainer.className = 'voice-user-list';
+    userListContainer.style.marginLeft = '20px';
+    userListContainer.style.marginBottom = '5px';
+
+    users.forEach(username => {
+      const userDiv = document.createElement('div');
+      userDiv.style.color = '#dbdee1';
+      userDiv.style.fontSize = '12px';
+      userDiv.style.padding = '2px 0';
+      userDiv.style.cursor = 'pointer';
+      userDiv.style.display = 'flex';
+      userDiv.style.alignItems = 'center';
+
+      const avatar = document.createElement('div');
+      avatar.style.width = '20px';
+      avatar.style.height = '20px';
+      avatar.style.borderRadius = '50%';
+      avatar.style.backgroundColor = '#5865f2';
+      avatar.style.marginRight = '5px';
+      avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+      avatar.style.backgroundSize = 'cover';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = username;
+
+      userDiv.appendChild(avatar);
+      userDiv.appendChild(nameSpan);
+      userListContainer.appendChild(userDiv);
+
+      const memberEl = document.querySelector(`.viewServerAccounts div[data-username="${username}"]`);
+      if (memberEl) {
+        const icon = document.createElement('span');
+        icon.className = 'voice-status-icon';
+        icon.textContent = ' 🔊';
+        icon.style.marginLeft = 'auto';
+        icon.style.fontSize = '12px';
+        memberEl.appendChild(icon);
+      }
+    });
+
+    firstVoiceChannel.after(userListContainer);
+  }
+}
+
+async function startSignalR() {
+  try {
+    signalRConnection = new signalR.HubConnectionBuilder()
+      .withUrl("http://localhost:5018/chatHub")
+      .withAutomaticReconnect()
+      .build();
+
+    signalRConnection.on("NewMember", (username) => {
+      console.log("New member joined:", username);
+
+      fetchServerMembers();
+    });
+
+    signalRConnection.on("UserLeft", (username) => {
+      console.log("User left:", username);
+      fetchServerMembers();
+    });
+
+    await signalRConnection.start();
+    console.log("SignalR Connected");
+
+    if (selectedServerID) {
+      await signalRConnection.invoke("JoinServer", selectedServerID, JWTusername);
+    }
+
+  } catch (err) {
+    console.error("SignalR Connection Error: ", err);
+    setTimeout(startSignalR, 5000);
+  }
+}
+
+
+startSignalR();
+
+async function startPrivateCall() {
+  const preCallUI = document.getElementById('preCallUI');
+  const activeCallUI = document.getElementById('activeCallUI');
+
+
+  if (preCallUI) preCallUI.style.display = 'none';
+  if (activeCallUI) activeCallUI.style.display = 'block';
+
+  const activeCallUsername = document.getElementById('activeCallUsername');
+  const centerCallUser = document.getElementById('centerCallUser');
+  if (activeCallUsername) activeCallUsername.textContent = currentFriend || 'Unknown User';
+  if (centerCallUser) centerCallUser.textContent = currentFriend || 'Unknown User';
+
+  console.log('Private call UI started, initiating call...');
+
+  try {
+
+    initializeVoiceConnection();
+
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    if (!voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
+      console.error("Voice connection not ready");
+      return;
+    }
+
+
+    console.log(`Identifying as ${JWTusername} for call`);
+    voiceConnection.send(JSON.stringify({
+      Type: 'identify',
+      Username: JWTusername
+    }));
+
+
+    await ensureLocalStream(true, false);
+
+
+    if (!currentFriend) {
+      console.error("No friend selected to call");
+      return;
+    }
+
+    const peerConnection = await createPeerConnection(currentFriend);
+
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    const offerPayload = {
+      type: offer.type,
+      sdp: offer.sdp,
+      isVideo: false
+    };
+
+    voiceConnection.send(JSON.stringify({
+      Type: 'peer-offer',
+      Data: JSON.stringify(offerPayload),
+      TargetUser: currentFriend,
+      IsPrivate: true
+    }));
+
+    console.log(`Offer sent to ${currentFriend}`);
+
+  } catch (err) {
+    console.error("Failed to start private call:", err);
+  }
+}
+
+async function createPeerConnection(peerName) {
+  if (peerConnections.has(peerName)) {
+    return peerConnections.get(peerName);
+  }
+
+  const pc = new RTCPeerConnection(config);
+  peerConnections.set(peerName, pc);
+
+  if (localStream) {
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+      voiceConnection.send(JSON.stringify({
+        Type: 'peer-ice-candidate',
+        Data: JSON.stringify(event.candidate),
+        TargetUser: peerName
+      }));
+    }
+  };
+
+  pc.ontrack = (event) => {
+    console.log(`Received track from ${peerName}: Kind=${event.track.kind}, ID=${event.track.id}`);
+
+    let remoteAudio = document.getElementById(`remote_${peerName}`);
+    if (!remoteAudio) {
+      remoteAudio = document.createElement('audio');
+      remoteAudio.id = `remote_${peerName}`;
+      remoteAudio.autoplay = true;
+      remoteAudio.controls = false;
+      document.body.appendChild(remoteAudio);
+    }
+    if (event.track.kind === 'audio') {
+      remoteAudio.srcObject = event.streams[0];
+    }
+
+
+    if (event.track.kind === 'video') {
+      console.log("FOUND REMOTE VIDEO TRACK! Attaching to #remoteVideo");
+      const remoteVideo = document.getElementById('remoteVideo');
+      if (remoteVideo) {
+        remoteVideo.srcObject = event.streams[0];
+        remoteVideo.play().catch(e => console.error("Remote video play failed:", e));
+        console.log("Attached remote video stream to DOM");
+      } else {
+        console.error("remoteVideo element MISSING from DOM");
+      }
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    console.log(`Connection state with ${peerName}: ${pc.connectionState}`);
+    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+      removePeerUI(peerName);
+      pc.close();
+      peerConnections.delete(peerName);
+    }
+  };
+
+  return pc;
+}
+
+
+let pendingPeer = null;
+let pendingOffer = null;
+let pendingIsVideo = false;
+
+async function handlePrivatePeerOffer(peerName, offerData, _unusedIsVideo) {
+
+  let isVideo = false;
+  try {
+    const payload = JSON.parse(offerData);
+    if (payload.isVideo) isVideo = true;
+  } catch (e) { console.warn("Failed to parse offer data for IsVideo flag", e); }
+
+  console.log(`Handling offer from ${peerName} (Video=${isVideo})`);
+
+
+  if (peerConnections.has(peerName)) {
+    console.log(`Renegotiation offer from ${peerName} detected. processing silently.`);
+    const pc = peerConnections.get(peerName);
+
+
+    const offerDesc = typeof offerData === 'string' ? JSON.parse(offerData) : offerData;
+    await pc.setRemoteDescription(new RTCSessionDescription(offerDesc));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+      voiceConnection.send(JSON.stringify({
+        Type: 'peer-answer',
+        Data: JSON.stringify(answer),
+        TargetUser: peerName
+      }));
+    }
+    return;
+  }
+
+
+  pendingPeer = peerName;
+  pendingOffer = offerData;
+  pendingIsVideo = isVideo;
+
+
+  const modal = document.getElementById('incomingCallModal');
+  const userText = document.getElementById('incomingCallUser');
+  if (modal && userText) {
+    userText.textContent = `${peerName} is calling... ` + (isVideo ? '(Video)' : '(Voice)');
+    modal.style.display = 'flex';
+    startRingtone();
+  } else {
+
+    console.warn("Incoming call modal missing");
+
+  }
+}
+
+async function AcceptCall() {
+  stopRingtone();
+  const modal = document.getElementById('incomingCallModal');
+  if (modal) modal.style.display = 'none';
+
+  if (!pendingPeer || !pendingOffer) return;
+
+  const peerName = pendingPeer;
+  const offerData = pendingOffer;
+
+
+  pendingPeer = null;
+  pendingOffer = null;
+
+
+  if (globalAudioContext) {
+    if (globalAudioContext.state === 'suspended') {
+      await globalAudioContext.resume();
+      console.log('AudioContext resumed by AcceptCall');
+    }
+  } else {
+    enableAudioPlayback();
+  }
+
+
+  await ensureLocalStream(true, pendingIsVideo);
+
+
+  const pc = await createPeerConnection(peerName);
+  await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerData)));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+    voiceConnection.send(JSON.stringify({
+      Type: 'peer-answer',
+      Data: JSON.stringify(answer),
+      TargetUser: peerName
+    }));
+  }
+
+
+  const preCallUI = document.getElementById('preCallUI');
+  const activeCallUI = document.getElementById('activeCallUI');
+
+  if (preCallUI) preCallUI.style.display = 'none';
+  if (activeCallUI) activeCallUI.style.display = 'block';
+
+  const activeCallUsername = document.getElementById('activeCallUsername');
+  const centerCallUser = document.getElementById('centerCallUser');
+
+  if (activeCallUsername) activeCallUsername.textContent = peerName;
+  if (centerCallUser) centerCallUser.textContent = `${JWTusername} & ${peerName}`;
+
+  currentFriend = peerName;
+
+
+  try {
+    clearContent();
+
+    const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
+    pendingRequests.forEach(el => el.style.cssText = 'display: none !important;');
+
+
+    InitWebSocket();
+    await GetPrivateMessage();
+
+    const nav = document.querySelector('.nav');
+    if (nav) nav.style.display = 'none';
+
+    const privateMsg = document.querySelector('.privateMessage');
+    if (privateMsg) privateMsg.style.display = 'block';
+
+    if (typeof directMessageUser !== 'undefined' && directMessageUser) {
+      directMessageUser.innerText = currentFriend;
+    }
+  } catch (e) {
+    console.error("Auto-navigation to DM failed:", e);
+  }
+}
+
+function DeclineCall() {
+  stopRingtone();
+  const modal = document.getElementById('incomingCallModal');
+  if (modal) modal.style.display = 'none';
+
+  console.log(`Declined call from ${pendingPeer}`);
+  pendingPeer = null;
+  pendingOffer = null;
+
+
+}
+
+async function handlePeerAnswer(peerName, answerData) {
+  console.log(`Handling answer from ${peerName}`);
+  const pc = peerConnections.get(peerName);
+  if (pc) {
+    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answerData)));
+
+
+    const centerCallUser = document.getElementById('centerCallUser');
+    if (centerCallUser) centerCallUser.textContent = `${JWTusername} & ${peerName}`;
+
+
+    try {
+      if (document.querySelector('.nav') && document.querySelector('.nav').style.display !== 'none') {
+        clearContent();
+        const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
+        pendingRequests.forEach(el => el.style.cssText = 'display: none !important;');
+
+        InitWebSocket();
+        await GetPrivateMessage();
+
+        const nav = document.querySelector('.nav');
+        if (nav) nav.style.display = 'none';
+
+        const privateMsg = document.querySelector('.privateMessage');
+        if (privateMsg) privateMsg.style.display = 'flex';
+
+        if (typeof directMessageUser !== 'undefined' && directMessageUser) {
+          directMessageUser.innerText = peerName;
+        }
+      }
+    } catch (e) { console.error("Auto-nav for caller failed", e); }
+  }
+}
+
+async function handlePeerIceCandidate(peerName, candidateData) {
+  console.log(`Handling candidate from ${peerName}`);
+  const pc = peerConnections.get(peerName);
+  if (pc) {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(JSON.parse(candidateData)));
+    } catch (e) {
+      console.warn(`Error adding ice candidate from ${peerName}:`, e);
+    }
+  }
+}
+
+async function endPrivateCall(notifyPeer = true) {
+  const preCallUI = document.getElementById('preCallUI');
+  const activeCallUI = document.getElementById('activeCallUI');
+
+  if (notifyPeer && currentFriend && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+    console.log(`Sending call-ended signal to ${currentFriend}`);
+    voiceConnection.send(JSON.stringify({
+      Type: 'call-ended',
+      TargetUser: currentFriend
+    }));
+  }
+
+  if (activeCallUI) activeCallUI.style.display = 'none';
+  if (preCallUI) preCallUI.style.display = 'flex';
+
+  console.log('Private call UI ended, cleaning up...');
+
+  try {
+    if (currentFriend && peerConnections.has(currentFriend)) {
+      const pc = peerConnections.get(currentFriend);
+      pc.close();
+      peerConnections.delete(currentFriend);
+      removePeerUI(currentFriend);
+    }
+
+    if (peerConnections.size === 0 && localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      localStream = null;
+      if (localVideo) localVideo.srcObject = null;
+    }
+
+  } catch (err) {
+    console.error("Error ending private call:", err);
+  }
+}
+
+
+
+async function ShowFriendsMainView() {
+  clearContent();
+
+  const viewsToHide = [
+    '.pendingRequestsDiv',
+    '.addFriendsDiv',
+    '.removeFriendsDiv',
+    '.privateMessage',
+    '#serverDetails'
+  ];
+
+  viewsToHide.forEach(selector => {
+    const el = document.querySelector(selector);
+    if (el) el.style.display = 'none';
+  });
+
+  document.querySelectorAll('.pendingRequestsDiv').forEach(el => el.style.cssText = 'display: none !important;');
+
+  const friendsView = document.querySelector('.friendsMainView');
+  if (friendsView) {
+    friendsView.style.display = 'flex';
+    document.querySelector('.nav').style.display = 'flex';
+
+    await FetchAndRenderFriendsMain();
+  }
+}
+
+async function FetchAndRenderFriendsMain() {
+  try {
+    const countEl = document.getElementById('friendsCount');
+    const listEl = document.querySelector('.friendsListMain');
+
+    if (listEl) listEl.innerHTML = '';
+
+    const res = await axios.get(
+      'http://localhost:5018/api/Account/GetFriends?username=' + JWTusername
+    );
+
+    let friends = [];
+    if (Array.isArray(res.data)) {
+      friends = res.data;
+    }
+
+    if (countEl) countEl.textContent = friends.length;
+
+    if (friends.length === 0) {
+      if (listEl) listEl.innerHTML = '<p style=\'color: #b9bbbe; padding: 20px; text-align: center;\'>No friends found.</p>';
+      return;
+    }
+
+    friends = [...new Set(friends)];
+
+    if (listEl) listEl.innerHTML = '';
+
+    friends.forEach(friendName => {
+      const item = document.createElement('div');
+      item.className = 'friend-item';
+      item.onclick = (e) => {
+        OpenDM(friendName);
+      };
+
+      const left = document.createElement('div');
+      left.className = 'friend-item-left';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'friend-item-avatar';
+      avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+
+      const info = document.createElement('div');
+      info.className = 'friend-item-info';
+
+      const name = document.createElement('span');
+      name.className = 'friend-item-name';
+      name.textContent = friendName;
+
+      const status = document.createElement('span');
+      status.className = 'friend-item-status';
+      status.textContent = 'Online';
+
+      info.appendChild(name);
+      info.appendChild(status);
+      left.appendChild(avatar);
+      left.appendChild(info);
+
+      const actions = document.createElement('div');
+      actions.className = 'friend-actions';
+
+      const msgBtn = document.createElement('div');
+      msgBtn.className = 'friend-action-btn';
+      msgBtn.innerHTML = '';
+      msgBtn.title = 'Message';
+      msgBtn.onclick = (e) => {
+        e.stopPropagation();
+        OpenDM(friendName);
+      };
+
+      actions.appendChild(msgBtn);
+
+      item.appendChild(left);
+      item.appendChild(actions);
+
+      if (listEl) listEl.appendChild(item);
+    });
+
+  } catch (err) {
+    console.error('Failed to render friends main:', err);
+  }
+}
+
+function OpenDM(friendName) {
+  clearContent();
+  const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
+  pendingRequests.forEach(el => el.style.cssText = 'display: none !important;');
+
+  const friendsView = document.querySelector('.friendsMainView');
+  if (friendsView) friendsView.style.display = 'none';
+
+  currentFriend = friendName;
+  InitWebSocket();
+  GetPrivateMessage();
+  document.querySelector('.nav').style.display = 'none';
+
+  const privateMsg = document.querySelector('.privateMessage');
+  if (privateMsg) privateMsg.style.display = 'flex';
+
+  if (typeof directMessageUser !== 'undefined') directMessageUser.innerText = currentFriend;
+}
+
+setTimeout(() => {
+  const seeFriendsBtn = document.getElementById('seeFriends');
+  if (seeFriendsBtn) {
+    seeFriendsBtn.onclick = ShowFriendsMainView;
+  }
+}, 1000);
+
+
+async function startPrivateVideoCall() {
+  const preCallUI = document.getElementById('preCallUI');
+  const activeCallUI = document.getElementById('activeCallUI');
+
+  if (preCallUI) preCallUI.style.display = 'none';
+  if (activeCallUI) activeCallUI.style.display = 'block';
+
+  const activeCallUsername = document.getElementById('activeCallUsername');
+  const centerCallUser = document.getElementById('centerCallUser');
+  if (activeCallUsername) activeCallUsername.textContent = currentFriend || 'Unknown User';
+  if (centerCallUser) centerCallUser.textContent = currentFriend || 'Unknown User';
+
+  console.log('Private VIDEO call UI started, initiating call...');
+
+  try {
+    initializeVoiceConnection();
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    if (!voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
+      console.error('Voice connection not ready');
+      return;
+    }
+
+    voiceConnection.send(JSON.stringify({
+      Type: 'identify',
+      Username: JWTusername
+    }));
+
+    await ensureLocalStream(true, true);
+
+    if (!currentFriend) {
+      console.error('No friend selected to call');
+      return;
+    }
+
+    const peerConnection = await createPeerConnection(currentFriend);
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    const offerPayload = {
+      type: offer.type,
+      sdp: offer.sdp,
+      isVideo: true
+    };
+
+    voiceConnection.send(JSON.stringify({
+      Type: 'peer-offer',
+      Data: JSON.stringify(offerPayload),
+      TargetUser: currentFriend,
+      IsPrivate: true
+    }));
+
+    console.log('Video Offer sent to ' + currentFriend);
+
+  } catch (err) {
+    console.error('Failed to start private video call:', err);
+  }
+}
+window.startPrivateVideoCall = startPrivateVideoCall;
+
+
+function updateVideoDiagnostics() {
+  const debugEl = document.getElementById('videoDebug');
+  if (!debugEl || document.getElementById('activeCallUI').style.display === 'none') return;
+
+  let localStatus = 'Local: Disconnected';
+  if (localStream) {
+    const videoTracks = localStream.getVideoTracks();
+    const audioTracks = localStream.getAudioTracks();
+    localStatus = `Local: Audio=${audioTracks.length} (En=${audioTracks[0]?.enabled}), Video=${videoTracks.length} (En=${videoTracks[0]?.enabled})`;
+  }
+
+  let remoteStatus = 'Remote: Disconnected';
+  const remoteVideo = document.getElementById('remoteVideo');
+  if (remoteVideo && remoteVideo.srcObject) {
+    const rStream = remoteVideo.srcObject;
+    const rvTracks = rStream.getVideoTracks();
+    const raTracks = rStream.getAudioTracks();
+    remoteStatus = `Remote: Audio=${raTracks.length}, Video=${rvTracks.length} (Paused=${remoteVideo.paused}, Ready=${remoteVideo.readyState})`;
+  } else {
+    remoteStatus = 'Remote: No Stream Attached';
+  }
+
+  let pcStatus = 'PC: N/A';
+  if (currentFriend && peerConnections.has(currentFriend)) {
+    const pc = peerConnections.get(currentFriend);
+    pcStatus = `PC: ${pc.connectionState}, ICE: ${pc.iceConnectionState}, Sig: ${pc.signalingState}`;
+  }
+
+  debugEl.innerHTML = `<h3>Diagnostics</h3>${localStatus}<br>${remoteStatus}<br>${pcStatus}`;
+}
+
+setInterval(updateVideoDiagnostics, 1000);
+
