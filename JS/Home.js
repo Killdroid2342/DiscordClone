@@ -17,6 +17,9 @@ let socket;
 let chatConnection = null;
 let signalRConnection = null;
 
+let currentChatHistory = [];
+let currentGroupId = null;
+
 function GetCookieToken(name) {
   let value = '; ' + document.cookie;
   let parts = value.split('; ' + name + '=');
@@ -422,11 +425,42 @@ async function fetchPendingRequests() {
       left.appendChild(avatar);
       left.appendChild(info);
 
+      const actions = document.createElement('div');
+      actions.className = 'friend-item-actions';
+      actions.style.display = 'flex';
+      actions.style.gap = '10px';
 
+      const acceptBtn = document.createElement('button');
+      acceptBtn.title = 'Accept';
+      acceptBtn.innerHTML = '✓';
+      acceptBtn.style.background = '#3ba55c';
+      acceptBtn.style.color = 'white';
+      acceptBtn.style.border = 'none';
+      acceptBtn.style.borderRadius = '50%';
+      acceptBtn.style.width = '36px';
+      acceptBtn.style.height = '36px';
+      acceptBtn.style.cursor = 'pointer';
+      acceptBtn.style.fontSize = '18px';
+      acceptBtn.onclick = () => acceptRequest(reqUser);
 
+      const declineBtn = document.createElement('button');
+      declineBtn.title = 'Decline';
+      declineBtn.innerHTML = '✕';
+      declineBtn.style.background = '#ed4245';
+      declineBtn.style.color = 'white';
+      declineBtn.style.border = 'none';
+      declineBtn.style.borderRadius = '50%';
+      declineBtn.style.width = '36px';
+      declineBtn.style.height = '36px';
+      declineBtn.style.cursor = 'pointer';
+      declineBtn.style.fontSize = '18px';
+      declineBtn.onclick = () => declineRequest(reqUser);
 
+      actions.appendChild(acceptBtn);
+      actions.appendChild(declineBtn);
 
       item.appendChild(left);
+      item.appendChild(actions);
       pendingList.appendChild(item);
     });
   } catch (err) {
@@ -537,7 +571,7 @@ async function GetFriends() {
             const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
             pendingRequests.forEach(el => {
               el.style.cssText = 'display: none !important;';
-              void el.offsetWidth; // Force reflow
+              void el.offsetWidth; 
             });
             console.log("Pending requests forced hidden");
 
@@ -553,6 +587,8 @@ async function GetFriends() {
           mainFriendsDiv.appendChild(friendsTag);
         });
       }
+
+      await GetGroups();
     }
   } catch (e) {
     console.log('private msg handling broke:', e);
@@ -587,7 +623,22 @@ function createMessageElement(sender, text, date) {
 
   const messageText = document.createElement('div');
   messageText.className = 'message-text';
-  messageText.textContent = text;
+
+  const imageMatch = text.match(/^\[Image\]\((.*)\)$/);
+
+  if (imageMatch && imageMatch[1]) {
+    const img = document.createElement('img');
+    img.src = imageMatch[1];
+    img.style.maxWidth = '300px';
+    img.style.maxHeight = '300px';
+    img.style.borderRadius = '5px';
+    img.style.marginTop = '5px';
+    img.style.cursor = 'pointer';
+    img.onclick = () => window.open(img.src, '_blank');
+    messageText.appendChild(img);
+  } else {
+    messageText.textContent = text;
+  }
 
   content.appendChild(header);
   content.appendChild(messageText);
@@ -623,17 +674,35 @@ async function PrivateMessage(event) {
     return;
   }
   const formData = new FormData(event.target);
-  const messageObject = {
-    MessagesUserSender: JWTusername,
-    MessageUserReciver: currentFriend,
-    friendMessagesData: formData.get('friendMessagesData'),
-    date: new Date().toLocaleString(),
-  };
-  socket.send(JSON.stringify(messageObject));
-  const messagesDisplay = document.querySelector('.messagesDisplay');
-  const messageElement = createMessageElement(JWTusername, messageObject.friendMessagesData, messageObject.date);
-  messagesDisplay.appendChild(messageElement);
-  messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+  const content = formData.get('friendMessagesData');
+
+  if (currentGroupId) {
+
+    const messageObject = {
+      GroupId: currentGroupId,
+      Sender: JWTusername,
+      Content: content,
+      Date: new Date().toISOString()
+    };
+    socket.send(JSON.stringify(messageObject));
+
+
+  } else {
+
+    const messageObject = {
+      MessagesUserSender: JWTusername,
+      MessageUserReciver: currentFriend,
+      friendMessagesData: content,
+      date: new Date().toISOString(),
+    };
+    socket.send(JSON.stringify(messageObject));
+    const messagesDisplay = document.querySelector('.messagesDisplay');
+    const messageElement = createMessageElement(JWTusername, messageObject.friendMessagesData, messageObject.date);
+    messagesDisplay.appendChild(messageElement);
+    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    currentChatHistory.push({ messagesUserSender: JWTusername, friendMessagesData: messageObject.friendMessagesData, date: messageObject.date });
+  }
+
   event.target.reset();
 }
 async function GetPrivateMessage() {
@@ -643,11 +712,20 @@ async function GetPrivateMessage() {
     );
     const messagesDisplay = document.querySelector('.messagesDisplay');
     messagesDisplay.innerHTML = '';
+    currentChatHistory = res.data;
     res.data.forEach((message) => {
       const messageElement = createMessageElement(message.messagesUserSender, message.friendMessagesData, message.date);
       messagesDisplay.appendChild(messageElement);
     });
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+
+
+    const searchInput = document.getElementById('dmSearchInput');
+    if (searchInput) {
+      searchInput.removeEventListener('input', handleSearchInput); 
+      searchInput.addEventListener('input', handleSearchInput);
+    }
+
     document.getElementById('home').addEventListener('click', function () {
       document.querySelector('.secondColumn').style.display = 'block';
       document.querySelector('.lastSection').style.display = 'block';
@@ -660,6 +738,82 @@ async function GetPrivateMessage() {
   } catch (e) {
     console.log('ugh something went wrong with private msgs:', e);
   }
+}
+
+
+function handleSearchInput(e) {
+  const query = e.target.value.toLowerCase();
+  const sidebar = document.getElementById('searchResultsSidebar');
+  const resultsList = document.getElementById('searchResultsList');
+  const countSpan = document.getElementById('searchResultCount');
+
+  if (!query) {
+    sidebar.style.display = 'none';
+    return;
+  }
+
+  sidebar.style.display = 'flex';
+  resultsList.innerHTML = '';
+
+  const results = currentChatHistory.filter(msg =>
+    (msg.friendMessagesData && msg.friendMessagesData.toLowerCase().includes(query)) ||
+    (msg.messagesUserSender && msg.messagesUserSender.toLowerCase().includes(query))
+  );
+
+  countSpan.textContent = `${results.length} RESULTS`;
+
+  if (results.length === 0) {
+    const noRes = document.createElement('div');
+    noRes.style.padding = '20px';
+    noRes.style.color = '#b9bbbe';
+    noRes.style.textAlign = 'center';
+    noRes.textContent = 'No results found.';
+    resultsList.appendChild(noRes);
+  } else {
+    results.forEach(msg => {
+      const el = document.createElement('div');
+      el.className = 'search-result-item';
+    
+      el.style.padding = '10px';
+      el.style.borderBottom = '1px solid #2f3136';
+      el.style.cursor = 'pointer';
+
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.marginBottom = '4px';
+
+      const name = document.createElement('span');
+      name.style.fontWeight = 'bold';
+      name.style.color = 'white';
+      name.textContent = msg.messagesUserSender;
+
+      const date = document.createElement('span');
+      date.style.fontSize = '0.8em';
+      date.style.color = '#72767d';
+      date.textContent = msg.date;
+
+      header.appendChild(name);
+      header.appendChild(date);
+
+      const content = document.createElement('div');
+      content.style.color = '#dcddde';
+      content.style.fontSize = '0.9em';
+      content.textContent = msg.friendMessagesData;
+
+      el.appendChild(header);
+      el.appendChild(content);
+
+    
+
+      resultsList.appendChild(el);
+    });
+  }
+}
+
+function closeSearchResults() {
+  document.getElementById('searchResultsSidebar').style.display = 'none';
+  document.getElementById('dmSearchInput').value = '';
 }
 GetFriends();
 
@@ -798,6 +952,214 @@ function enableAudioPlayback() {
     });
   }
 }
+
+async function openCreateDMModal() {
+  document.getElementById('createDMModal').style.display = 'flex';
+  const list = document.getElementById('dmFriendsList');
+  list.innerHTML = 'Loading...';
+
+  try {
+    let res = await axios.get(
+      `http://localhost:5018/api/Account/GetFriends?username=${JWTusername}`
+    );
+    list.innerHTML = '';
+
+    if (!Array.isArray(res.data) || res.data.length === 0) {
+      list.innerHTML = '<p style="color: #b9bbbe; padding: 10px;">No friends found.</p>';
+      return;
+    }
+
+    res.data.forEach(friend => {
+      const div = document.createElement('div');
+      div.className = 'dmFriendItem';
+      div.innerHTML = `
+              <input type="checkbox" class="dmFriendInput" value="${friend}">
+              <div style="width: 32px; height: 32px; border-radius: 50%; background-color: #5865f2; margin-right: 10px; background-image: url('/assets/img/titlePic.png'); background-size: cover;"></div>
+              <span>${friend}</span>
+          `;
+      div.onclick = (e) => {
+        if (e.target.type !== 'checkbox') {
+          const cb = div.querySelector('input');
+          cb.checked = !cb.checked;
+        }
+        div.classList.toggle('selected', div.querySelector('input').checked);
+      };
+      list.appendChild(div);
+    });
+  } catch (e) {
+    console.error(e);
+    list.innerHTML = '<p style="color: red; padding: 10px;">Failed to load friends.</p>';
+  }
+}
+
+function closeCreateDMModal() {
+  document.getElementById('createDMModal').style.display = 'none';
+}
+
+
+async function CreateDM() {
+  const selected = Array.from(document.querySelectorAll('.dmFriendInput:checked')).map(cb => cb.value);
+  if (selected.length === 0) return;
+
+  closeCreateDMModal();
+
+  if (selected.length > 1) {
+ 
+    const groupName = selected.join(', '); 
+
+    const allMembers = [...selected, JWTusername];
+    const uniqueMembers = [...new Set(allMembers)]; 
+
+    try {
+      const res = await axios.post('http://localhost:5018/api/GroupChat/CreateGroup', {
+        Name: groupName,
+        Owner: JWTusername,
+        Members: uniqueMembers
+      });
+      const group = res.data;
+
+      console.log("Created Group:", group);
+
+     
+      OpenGroupChat(group);
+
+      GetFriends(); 
+
+    } catch (e) {
+      console.error("Failed to create group", e);
+      alert("Failed to create group.");
+    }
+
+  } else {
+   
+    const friend = selected[0];
+    console.log("Creating DM with", friend);
+
+    clearContent();
+    currentFriend = friend;
+    currentGroupId = null;
+
+    
+    document.querySelector('.secondColumn').style.display = 'block';
+    document.querySelector('.lastSection').style.display = 'block';
+    document.getElementById('serverDetails').style.display = 'none';
+    document.querySelector('.nav').style.display = 'none';
+
+    const privateMsg = document.querySelector('.privateMessage');
+    if (privateMsg) privateMsg.style.display = 'flex';
+
+    if (directMessageUser) directMessageUser.innerText = currentFriend;
+
+    InitWebSocket();
+    await GetPrivateMessage();
+  }
+}
+
+async function GetGroups() {
+  try {
+    const res = await axios.get(`http://localhost:5018/api/GroupChat/GetGroups?username=${JWTusername}`);
+    const groups = res.data;
+
+  
+    document.querySelectorAll('.group-chat-item').forEach(e => e.remove());
+
+    if (Array.isArray(groups)) {
+      groups.forEach(group => {
+        const p = document.createElement('p');
+        p.textContent = `📢 ${group.name}`;
+        p.style.cursor = 'pointer';
+        p.className = 'group-chat-item';
+        p.addEventListener('click', () => {
+          OpenGroupChat(group);
+        });
+        mainFriendsDiv.appendChild(p);
+      });
+    }
+  } catch (e) {
+    console.error("Failed to load groups", e);
+  }
+}
+
+
+setInterval(() => {
+  if (document.querySelector('.nav').style.display !== 'none') {
+    GetGroups();
+  }
+}, 5000);
+
+function OpenGroupChat(group) {
+  clearContent();
+
+  const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
+  pendingRequests.forEach(el => {
+    el.style.cssText = 'display: none !important;';
+    void el.offsetWidth;
+  });
+
+  currentGroupId = group.id;
+  currentFriend = null;
+  currentServerName = null;
+
+  document.querySelector('.secondColumn').style.display = 'block';
+  document.querySelector('.lastSection').style.display = 'block';
+  document.getElementById('serverDetails').style.display = 'none';
+  document.querySelector('.nav').style.display = 'none';
+
+  const privateMsg = document.querySelector('.privateMessage');
+  if (privateMsg) privateMsg.style.display = 'flex';
+
+  if (directMessageUser) directMessageUser.innerText = group.name;
+
+  InitGroupWebSocket(); 
+  GetGroupMessages(group.id);
+}
+
+function InitGroupWebSocket() {
+  if (socket) {
+    socket.close();
+  }
+  socket = new WebSocket(
+    `ws://localhost:5018/api/GroupChat/HandleGroupWebsocket?username=${JWTusername}`
+  );
+  socket.onopen = function () {
+    console.log('connected to GROUP chat');
+  };
+  socket.onmessage = function (event) {
+    const message = JSON.parse(event.data);
+
+    if (message.GroupId !== currentGroupId) return; 
+
+
+    if (message.GroupId === currentGroupId) {
+      const messagesDisplay = document.querySelector('.messagesDisplay');
+      const messageElement = createMessageElement(message.Sender, message.Content, message.Date);
+      messagesDisplay.appendChild(messageElement);
+      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+      currentChatHistory.push({ messagesUserSender: message.Sender, friendMessagesData: message.Content, date: message.Date });
+    }
+  };
+  socket.onclose = function () {
+    console.log('group chat disconnected');
+  };
+}
+
+async function GetGroupMessages(groupId) {
+  try {
+    const res = await axios.get(`http://localhost:5018/api/GroupChat/GetGroupMessages?groupId=${groupId}`);
+    const messagesDisplay = document.querySelector('.messagesDisplay');
+    messagesDisplay.innerHTML = '';
+    currentChatHistory = res.data.map(m => ({ messagesUserSender: m.sender, friendMessagesData: m.content, date: m.date })); 
+
+    res.data.forEach((message) => {
+      const messageElement = createMessageElement(message.sender, message.content, message.date);
+      messagesDisplay.appendChild(messageElement);
+    });
+    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+  } catch (e) {
+    console.error('Failed to load group messages', e);
+  }
+}
+
 
 
 document.addEventListener('click', enableAudioPlayback, { once: true });
@@ -1213,6 +1575,39 @@ function createRemoteMediaElement(peerName, stream) {
 
   stream.getTracks().forEach((track, i) => {
     console.log(`Stream track ${i} for ${peerName}: enabled=${track.enabled}, readyState=${track.readyState}, kind=${track.kind}`);
+
+    track.onmute = () => {
+      console.log(`Track ${track.kind} muted`);
+      if (track.kind === 'video') {
+        const privateRemoteVideo = document.getElementById('remoteVideo');
+        if (privateRemoteVideo) privateRemoteVideo.srcObject = null;
+
+        const groupVideo = document.getElementById('remote_' + peerName);
+        if (groupVideo && groupVideo.tagName === 'VIDEO') groupVideo.srcObject = null;
+      }
+    };
+
+    track.onunmute = () => {
+      console.log(`Track ${track.kind} unmuted`);
+      if (track.kind === 'video') {
+        const privateRemoteVideo = document.getElementById('remoteVideo');
+        if (privateRemoteVideo) privateRemoteVideo.srcObject = stream;
+
+        const groupVideo = document.getElementById('remote_' + peerName);
+        if (groupVideo && groupVideo.tagName === 'VIDEO') groupVideo.srcObject = stream;
+      }
+    };
+
+    track.onended = () => {
+      console.log(`Track ${track.kind} ended`);
+      if (track.kind === 'video') {
+        const privateRemoteVideo = document.getElementById('remoteVideo');
+        if (privateRemoteVideo) privateRemoteVideo.srcObject = null;
+
+        const groupVideo = document.getElementById('remote_' + peerName);
+        if (groupVideo && groupVideo.tagName === 'VIDEO') groupVideo.srcObject = null;
+      }
+    };
   });
 
 
@@ -1221,6 +1616,9 @@ function createRemoteMediaElement(peerName, stream) {
     console.log(`muting your own voice to prevent echo from ${peerName}`);
     return null;
   }
+
+  const privateCallUI = document.getElementById('activeCallUI');
+  const privateRemoteVideo = document.getElementById('remoteVideo');
 
   if (privateCallUI && privateCallUI.style.display !== 'none' && privateRemoteVideo) {
     console.log(`Redirecting stream from ${peerName} to Private Call Video UI`);
@@ -1430,7 +1828,7 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
       track.stop();
       localStream.removeTrack(track);
     });
-    // Ensure UI mirrors this
+
     if (localVideo) localVideo.srcObject = localStream;
   }
 
@@ -2722,5 +3120,439 @@ function updateVideoDiagnostics() {
   debugEl.innerHTML = `<h3>Diagnostics</h3>${localStatus}<br>${remoteStatus}<br>${pcStatus}`;
 }
 
-setInterval(updateVideoDiagnostics, 1000);
 
+async function handleDMFileUpload(input) {
+  if (input.files && input.files[0]) {
+    const file = input.files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await axios.post('http://localhost:5018/api/Upload/UploadImage', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      if (res.data && res.data.url) {
+        const fileUrl = 'http://localhost:5018' + res.data.url; 
+        console.log('File uploaded:', fileUrl);
+
+        const messageText = `[Image](${fileUrl})`;
+
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          console.log('not connected to chat');
+          return;
+        }
+
+        const messageObject = {
+          MessagesUserSender: JWTusername,
+          MessageUserReciver: currentFriend,
+          friendMessagesData: messageText,
+          date: new Date().toLocaleString(),
+        };
+
+        socket.send(JSON.stringify(messageObject));
+
+        const messagesDisplay = document.querySelector('.messagesDisplay');
+        const messageElement = createMessageElement(JWTusername, messageText, messageObject.date);
+        messagesDisplay.appendChild(messageElement);
+        messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+      }
+    } catch (err) {
+      console.error('File upload failed:', err);
+      alert('Failed to upload image.');
+    }
+
+    input.value = '';
+  }
+}
+
+
+
+let currentUploadFile = null;
+
+function openUploadModal() {
+  const modal = document.getElementById('uploadModal');
+  const dropZone = document.getElementById('uploadDropZone');
+  const fileInput = document.getElementById('modalFileInput');
+
+  currentUploadFile = null;
+  document.getElementById('uploadPreview').style.display = 'none';
+  document.getElementById('uploadDropZone').style.display = 'block';
+  fileInput.value = '';
+
+  modal.style.display = 'flex';
+
+  dropZone.onclick = () => fileInput.click();
+
+  dropZone.ondragover = (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-active');
+  };
+
+  dropZone.ondragleave = () => {
+    dropZone.classList.remove('drag-active');
+  };
+
+  dropZone.ondrop = (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-active');
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileSelection(e.dataTransfer.files[0]);
+    }
+  };
+
+  fileInput.onchange = (e) => {
+    if (fileInput.files && fileInput.files[0]) {
+      handleFileSelection(fileInput.files[0]);
+    }
+  };
+}
+
+function closeUploadModal() {
+  document.getElementById('uploadModal').style.display = 'none';
+}
+
+function handleFileSelection(file) {
+  if (!file.type.startsWith('image/')) {
+    alert('Only image files are supported.');
+    return;
+  }
+
+  currentUploadFile = file;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('uploadDropZone').style.display = 'none';
+    const preview = document.getElementById('uploadPreview');
+    preview.style.display = 'block';
+
+    document.getElementById('uploadFileName').textContent = file.name;
+    const img = document.getElementById('uploadImagePreview');
+    img.src = e.target.result;
+    img.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function submitUploadModal() {
+  if (!currentUploadFile) return;
+
+  const formData = new FormData();
+  formData.append('file', currentUploadFile);
+
+  const btn = document.querySelector('#uploadModal .upload-btn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Uploading...';
+  btn.disabled = true;
+
+  try {
+    const res = await axios.post('http://localhost:5018/api/Upload/UploadImage', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+
+    if (res.data && res.data.url) {
+      const fileUrl = 'http://localhost:5018' + res.data.url;
+      console.log('File uploaded:', fileUrl);
+
+      const messageText = `[Image](${fileUrl})`;
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        console.log('not connected to chat');
+        return;
+      }
+
+      const messageObject = {
+        MessagesUserSender: JWTusername,
+        MessageUserReciver: currentFriend,
+        friendMessagesData: messageText,
+        date: new Date().toLocaleString(),
+      };
+
+      socket.send(JSON.stringify(messageObject));
+
+      const messagesDisplay = document.querySelector('.messagesDisplay');
+      const messageElement = createMessageElement(JWTusername, messageText, messageObject.date);
+      messagesDisplay.appendChild(messageElement);
+      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+
+      closeUploadModal();
+    }
+  } catch (err) {
+    console.error('File upload failed:', err);
+    alert('Failed to upload image.');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+
+
+
+function setupEmojiPicker() {
+  const container = document.getElementById('emojiGridContainer');
+  const searchInput = document.getElementById('emojiSearchInput');
+  const picker = document.getElementById('emojiPicker');
+  const tabs = document.querySelectorAll('.emoji-tab');
+
+  if (!container || !picker) return;
+
+  let currentTab = 'emoji';
+
+  const renderContent = (filterText = '') => {
+    container.innerHTML = '';
+    const safeFilter = filterText.toLowerCase();
+
+    if (currentTab === 'emoji') {
+      const title = document.createElement('div');
+      title.className = 'emoji-category-title';
+      title.textContent = 'All Emojis';
+      container.appendChild(title);
+
+      const filtered = emojiList.filter(e => {
+        if (!safeFilter) return true;
+        return e.names.some(name => name.includes(safeFilter)) || e.char.includes(safeFilter);
+      });
+
+      filtered.forEach(item => {
+        const span = document.createElement('span');
+        span.textContent = item.char;
+        span.className = 'emoji-item';
+
+        span.onmouseenter = () => {
+          const pEmoji = document.getElementById('previewEmoji');
+          const pName = document.getElementById('previewName');
+          if (pEmoji) pEmoji.textContent = item.char;
+          if (pName) pName.textContent = ':' + item.names[0] + ':';
+        };
+
+        span.onclick = () => {
+          const input = document.querySelector('.chatInput');
+          if (input) {
+            input.value += item.char;
+            input.focus();
+          }
+        };
+        container.appendChild(span);
+      });
+
+      if (filtered.length === 0) {
+        const msg = document.createElement('div');
+        msg.style.cssText = 'color: #b9bbbe; padding: 20px; text-align: center; grid-column: span 8;';
+        msg.textContent = 'No emojis found';
+        container.appendChild(msg);
+      }
+    } else if (currentTab === 'gif') {
+      const title = document.createElement('div');
+      title.className = 'emoji-category-title';
+      title.textContent = 'Trending GIFs';
+      container.appendChild(title);
+
+      const filteredGifs = gifList.filter(item => {
+        if (!safeFilter) return true;
+        return item.keywords.some(k => k.includes(safeFilter));
+      });
+
+      filteredGifs.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'gif-item';
+        div.style.cssText = `
+           background-image: url('${item.url}');
+           background-size: cover;
+           background-position: center;
+           width: 100%;
+           height: 100px;
+           border-radius: 4px;
+           cursor: pointer;
+           grid-column: span 4; 
+        `; 
+
+        div.onclick = () => {
+          const input = document.querySelector('.chatInput');
+          if (input) {
+            input.value += `[Image](${item.url})`;
+            input.focus();
+          }
+        };
+
+        div.onmouseenter = () => {
+          const pEmoji = document.getElementById('previewEmoji');
+          const pName = document.getElementById('previewName');
+          if (pEmoji) pEmoji.textContent = 'GIF';
+          if (pName) pName.textContent = 'GIF Image';
+        };
+
+        container.appendChild(div);
+      });
+
+      if (filteredGifs.length === 0) {
+        const msg = document.createElement('div');
+        msg.style.cssText = 'color: #b9bbbe; padding: 20px; text-align: center; grid-column: span 8;';
+        msg.textContent = 'No GIFs found';
+        container.appendChild(msg);
+      }
+    }
+  };
+
+  renderContent();
+
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      renderContent(e.target.value);
+    });
+  }
+
+  tabs.forEach(tab => {
+    tab.onclick = () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentTab = tab.dataset.tab;
+      console.log('Switched to tab:', currentTab);
+
+      const sidebar = document.querySelector('.emoji-sidebar');
+      if (sidebar) {
+        sidebar.style.display = currentTab === 'emoji' ? 'flex' : 'none';
+      }
+
+      if (searchInput) {
+        searchInput.value = '';
+        searchInput.placeholder = currentTab === 'emoji' ? 'Find the perfect emoji' : 'Search Tenor';
+      }
+      renderContent();
+    };
+  });
+
+  document.addEventListener('click', (e) => {
+    const btn = document.querySelector('.chat-icon-btn');
+    if (!picker.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+      picker.style.display = 'none';
+      if (searchInput) searchInput.value = '';
+    }
+  });
+}
+
+function setupMessageSearch() {
+  const form = document.querySelector('.search-form');
+  const input = document.getElementById('dmSearchInput');
+
+  if (!form || !input) return;
+
+  const newForm = form.cloneNode(true);
+  form.parentNode.replaceChild(newForm, form);
+
+  const newInput = document.getElementById('dmSearchInput');
+
+  newForm.onsubmit = (e) => {
+    e.preventDefault();
+    handleSearchSubmit(newInput.value);
+  };
+}
+
+function handleSearchSubmit(query) {
+  if (!query.trim()) return;
+
+  const sidebar = document.getElementById('searchResultsSidebar');
+  const list = document.getElementById('searchResultsList');
+  const countSpan = document.getElementById('searchResultCount');
+
+  if (!sidebar || !list) return;
+
+  list.innerHTML = ''; 
+  sidebar.style.display = 'flex';
+
+  const messages = document.querySelectorAll('.messagesDisplay p'); 
+  let matchCount = 0;
+
+  messages.forEach(msg => {
+
+    const content = msg.textContent;
+    const lowerContent = content.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+
+    if (lowerContent.includes(lowerQuery)) {
+      matchCount++;
+
+
+
+      let username = "User";
+      let messageText = content;
+      let date = "";
+
+      const firstColon = content.indexOf(':');
+      const lastParenOpen = content.lastIndexOf('(');
+      const lastParenClose = content.lastIndexOf(')');
+
+      if (firstColon > -1) {
+        username = content.substring(0, firstColon).trim();
+
+        if (lastParenOpen > firstColon && lastParenClose > lastParenOpen) {
+         
+          messageText = content.substring(firstColon + 1, lastParenOpen).trim();
+          date = content.substring(lastParenOpen + 1, lastParenClose);
+        } else {
+       
+          messageText = content.substring(firstColon + 1).trim();
+        }
+      }
+
+      const card = createSearchResultCard(username, messageText, date, query);
+      list.appendChild(card);
+    }
+  });
+
+  if (countSpan) {
+    countSpan.textContent = `${matchCount} Results`;
+  }
+}
+
+function createSearchResultCard(username, text, date, query) {
+  const card = document.createElement('div');
+  card.className = 'search-result-card';
+
+
+  const regex = new RegExp(`(${query})`, 'gi');
+  const highlightedText = text.replace(regex, '<span class="highlight">$1</span>');
+
+
+  const avatarLetter = username.charAt(0).toUpperCase();
+
+  card.innerHTML = `
+    <div class="card-header">
+      <div class="card-avatar">${avatarLetter}</div>
+      <div class="card-meta">
+        <span class="card-username">${username}</span>
+        <span class="card-date">${date}</span>
+      </div>
+    </div>
+    <div class="card-content">${highlightedText}</div>
+  `;
+
+  return card;
+}
+
+function closeSearchResults() {
+  const sidebar = document.getElementById('searchResultsSidebar');
+  if (sidebar) sidebar.style.display = 'none';
+}
+
+function toggleEmojiPicker() {
+  const picker = document.getElementById('emojiPicker');
+  if (picker.style.display === 'none') {
+    picker.style.display = 'flex'; 
+    const searchInput = document.getElementById('emojiSearchInput');
+    if (searchInput) searchInput.focus();
+  } else {
+    picker.style.display = 'none';
+  }
+}
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  setupEmojiPicker();
+  setupMessageSearch();
+});
