@@ -571,7 +571,7 @@ async function GetFriends() {
             const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
             pendingRequests.forEach(el => {
               el.style.cssText = 'display: none !important;';
-              void el.offsetWidth; 
+              void el.offsetWidth;
             });
             console.log("Pending requests forced hidden");
 
@@ -722,7 +722,7 @@ async function GetPrivateMessage() {
 
     const searchInput = document.getElementById('dmSearchInput');
     if (searchInput) {
-      searchInput.removeEventListener('input', handleSearchInput); 
+      searchInput.removeEventListener('input', handleSearchInput);
       searchInput.addEventListener('input', handleSearchInput);
     }
 
@@ -773,7 +773,7 @@ function handleSearchInput(e) {
     results.forEach(msg => {
       const el = document.createElement('div');
       el.className = 'search-result-item';
-    
+
       el.style.padding = '10px';
       el.style.borderBottom = '1px solid #2f3136';
       el.style.cursor = 'pointer';
@@ -804,7 +804,7 @@ function handleSearchInput(e) {
       el.appendChild(header);
       el.appendChild(content);
 
-    
+
 
       resultsList.appendChild(el);
     });
@@ -1004,11 +1004,11 @@ async function CreateDM() {
   closeCreateDMModal();
 
   if (selected.length > 1) {
- 
-    const groupName = selected.join(', '); 
+
+    const groupName = selected.join(', ');
 
     const allMembers = [...selected, JWTusername];
-    const uniqueMembers = [...new Set(allMembers)]; 
+    const uniqueMembers = [...new Set(allMembers)];
 
     try {
       const res = await axios.post('http://localhost:5018/api/GroupChat/CreateGroup', {
@@ -1020,10 +1020,10 @@ async function CreateDM() {
 
       console.log("Created Group:", group);
 
-     
+
       OpenGroupChat(group);
 
-      GetFriends(); 
+      GetFriends();
 
     } catch (e) {
       console.error("Failed to create group", e);
@@ -1031,7 +1031,7 @@ async function CreateDM() {
     }
 
   } else {
-   
+
     const friend = selected[0];
     console.log("Creating DM with", friend);
 
@@ -1039,7 +1039,7 @@ async function CreateDM() {
     currentFriend = friend;
     currentGroupId = null;
 
-    
+
     document.querySelector('.secondColumn').style.display = 'block';
     document.querySelector('.lastSection').style.display = 'block';
     document.getElementById('serverDetails').style.display = 'none';
@@ -1060,7 +1060,7 @@ async function GetGroups() {
     const res = await axios.get(`http://localhost:5018/api/GroupChat/GetGroups?username=${JWTusername}`);
     const groups = res.data;
 
-  
+
     document.querySelectorAll('.group-chat-item').forEach(e => e.remove());
 
     if (Array.isArray(groups)) {
@@ -1087,8 +1087,12 @@ setInterval(() => {
   }
 }, 5000);
 
+let groupPeerConnections = new Map();
+let localGroupStream = null;
+
 function OpenGroupChat(group) {
   clearContent();
+
 
   const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
   pendingRequests.forEach(el => {
@@ -1108,9 +1112,30 @@ function OpenGroupChat(group) {
   const privateMsg = document.querySelector('.privateMessage');
   if (privateMsg) privateMsg.style.display = 'flex';
 
-  if (directMessageUser) directMessageUser.innerText = group.name;
 
-  InitGroupWebSocket(); 
+  if (directMessageUser) {
+    directMessageUser.innerHTML = '';
+    const nameSpan = document.createElement('span');
+    nameSpan.innerText = group.name;
+    directMessageUser.appendChild(nameSpan);
+
+
+    const callBtn = document.createElement('button');
+    callBtn.innerText = '📞 Start Call';
+    callBtn.style.marginLeft = '10px';
+    callBtn.style.backgroundColor = '#2f3136';
+    callBtn.style.color = 'white';
+    callBtn.style.border = 'none';
+    callBtn.style.padding = '5px 10px';
+    callBtn.style.borderRadius = '5px';
+    callBtn.style.cursor = 'pointer';
+    callBtn.onclick = () => {
+      startGroupCall(group.id);
+    };
+    directMessageUser.appendChild(callBtn);
+  }
+
+  InitGroupWebSocket();
   GetGroupMessages(group.id);
 }
 
@@ -1124,13 +1149,19 @@ function InitGroupWebSocket() {
   socket.onopen = function () {
     console.log('connected to GROUP chat');
   };
-  socket.onmessage = function (event) {
+  socket.onmessage = async function (event) {
     const message = JSON.parse(event.data);
 
-    if (message.GroupId !== currentGroupId) return; 
 
+
+    if (message.Type && message.Type !== 'chat') {
+      await handleGroupSignaling(message);
+      return;
+    }
 
     if (message.GroupId === currentGroupId) {
+
+
       const messagesDisplay = document.querySelector('.messagesDisplay');
       const messageElement = createMessageElement(message.Sender, message.Content, message.Date);
       messagesDisplay.appendChild(messageElement);
@@ -1143,12 +1174,244 @@ function InitGroupWebSocket() {
   };
 }
 
+async function startGroupCall(groupId) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+  try {
+    localGroupStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    addLocalVideoToGrid(localGroupStream);
+  } catch (e) {
+    console.error("Failed to get media", e);
+    alert("Could not access camera/mic");
+    return;
+  }
+
+  socket.send(JSON.stringify({
+    Type: 'call-init',
+    GroupId: groupId,
+    Sender: JWTusername
+  }));
+
+
+  showGroupCallUI();
+}
+
+async function handleGroupSignaling(msg) {
+  console.log("Group Signal:", msg.Type, msg);
+
+  switch (msg.Type) {
+    case 'call-init':
+      if (msg.Sender !== JWTusername) {
+        if (confirm(`${msg.Sender} started a group call. Join?`)) {
+          joinGroupCall(msg.GroupId, msg.Sender);
+        }
+      }
+      break;
+    case 'user-joined-call':
+      if (msg.Sender !== JWTusername) {
+        initiatePeerConnection(msg.Sender);
+      }
+      break;
+    case 'offer':
+      handleGroupOffer(msg);
+      break;
+    case 'answer':
+      handleGroupAnswer(msg);
+      break;
+    case 'candidate':
+      handleGroupCandidate(msg);
+      break;
+  }
+}
+
+async function joinGroupCall(groupId, initiator) {
+  try {
+    localGroupStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    addLocalVideoToGrid(localGroupStream);
+    showGroupCallUI();
+
+    socket.send(JSON.stringify({
+      Type: 'user-joined-call',
+      GroupId: groupId,
+      Sender: JWTusername
+    }));
+
+
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function showGroupCallUI() {
+  let container = document.getElementById('groupVideoGrid');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'groupVideoGrid';
+    container.style.cssText = `
+            position: fixed; top: 50px; left: 240px; right: 0; bottom: 60px;
+            background: rgba(0,0,0,0.9); z-index: 1000;
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 10px; padding: 10px; overflow-y: auto;
+        `;
+    document.body.appendChild(container);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerText = "Length Call";
+    closeBtn.style.cssText = "position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; background: red; color: white; border: none; border-radius: 5px; cursor: pointer;";
+    closeBtn.onclick = leaveGroupCall;
+    container.appendChild(closeBtn);
+  }
+  container.style.display = 'grid';
+}
+
+function leaveGroupCall() {
+  const container = document.getElementById('groupVideoGrid');
+  if (container) container.style.display = 'none';
+
+  if (localGroupStream) {
+    localGroupStream.getTracks().forEach(t => t.stop());
+    localGroupStream = null;
+  }
+
+
+  groupPeerConnections.forEach(pc => pc.close());
+  groupPeerConnections.clear();
+
+  document.getElementById('groupVideoGrid').innerHTML = '';
+}
+
+function addLocalVideoToGrid(stream) {
+  const container = document.getElementById('groupVideoGrid') || document.body;
+  const vid = document.createElement('video');
+  vid.srcObject = stream;
+  vid.muted = true;
+  vid.autoplay = true;
+  vid.style.cssText = "width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 2px solid #5865f2;";
+
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'relative';
+  wrapper.appendChild(vid);
+
+
+  const label = document.createElement('span');
+  label.innerText = 'Me';
+  label.style.cssText = "position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.5); color: white; padding: 2px 5px; border-radius: 4px; font-size: 12px;";
+  wrapper.appendChild(label);
+
+  container.appendChild(wrapper);
+}
+
+function addRemoteVideoToGrid(stream, username) {
+  const container = document.getElementById('groupVideoGrid');
+  if (!container) return;
+
+  const vid = document.createElement('video');
+  vid.srcObject = stream;
+  vid.autoplay = true;
+  vid.style.cssText = "width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 2px solid #ed4245;";
+
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'relative';
+  wrapper.id = `wrapper-${username}`;
+  wrapper.appendChild(vid);
+
+  const label = document.createElement('span');
+  label.innerText = username;
+  label.style.cssText = "position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.5); color: white; padding: 2px 5px; border-radius: 4px; font-size: 12px;";
+  wrapper.appendChild(label);
+
+  container.insertBefore(wrapper, container.lastChild);
+}
+
+
+
+async function initiatePeerConnection(targetUser) {
+  console.log("Initiating connection to", targetUser);
+  const pc = createGroupPeerConnection(targetUser);
+  groupPeerConnections.set(targetUser, pc);
+
+  localGroupStream.getTracks().forEach(track => pc.addTrack(track, localGroupStream));
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  socket.send(JSON.stringify({
+    Type: 'offer',
+    TargetUser: targetUser,
+    Sender: JWTusername,
+    Data: JSON.stringify(offer)
+  }));
+}
+
+function createGroupPeerConnection(targetUser) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  });
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      socket.send(JSON.stringify({
+        Type: 'candidate',
+        TargetUser: targetUser,
+        Sender: JWTusername,
+        Data: JSON.stringify(event.candidate)
+      }));
+    }
+  };
+
+  pc.ontrack = (event) => {
+    console.log("Received remote track from", targetUser);
+    addRemoteVideoToGrid(event.streams[0], targetUser);
+  };
+
+  return pc;
+}
+
+async function handleGroupOffer(msg) {
+  const targetUser = msg.Sender;
+  console.log("Handling offer from", targetUser);
+
+  const pc = createGroupPeerConnection(targetUser);
+  groupPeerConnections.set(targetUser, pc);
+
+  if (localGroupStream) {
+    localGroupStream.getTracks().forEach(track => pc.addTrack(track, localGroupStream));
+  }
+
+  await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(msg.Data)));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  socket.send(JSON.stringify({
+    Type: 'answer',
+    TargetUser: targetUser,
+    Sender: JWTusername,
+    Data: JSON.stringify(answer)
+  }));
+}
+
+async function handleGroupAnswer(msg) {
+  const targetUser = msg.Sender;
+  const pc = groupPeerConnections.get(targetUser);
+  if (pc) {
+    await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(msg.Data)));
+  }
+}
+
+async function handleGroupCandidate(msg) {
+  const targetUser = msg.Sender;
+  const pc = groupPeerConnections.get(targetUser);
+  if (pc) {
+    await pc.addIceCandidate(new RTCIceCandidate(JSON.parse(msg.Data)));
+  }
+}
+
 async function GetGroupMessages(groupId) {
   try {
     const res = await axios.get(`http://localhost:5018/api/GroupChat/GetGroupMessages?groupId=${groupId}`);
     const messagesDisplay = document.querySelector('.messagesDisplay');
     messagesDisplay.innerHTML = '';
-    currentChatHistory = res.data.map(m => ({ messagesUserSender: m.sender, friendMessagesData: m.content, date: m.date })); 
+    currentChatHistory = res.data.map(m => ({ messagesUserSender: m.sender, friendMessagesData: m.content, date: m.date }));
 
     res.data.forEach((message) => {
       const messageElement = createMessageElement(message.sender, message.content, message.date);
@@ -3135,7 +3398,7 @@ async function handleDMFileUpload(input) {
       });
 
       if (res.data && res.data.url) {
-        const fileUrl = 'http://localhost:5018' + res.data.url; 
+        const fileUrl = 'http://localhost:5018' + res.data.url;
         console.log('File uploaded:', fileUrl);
 
         const messageText = `[Image](${fileUrl})`;
@@ -3370,7 +3633,7 @@ function setupEmojiPicker() {
            border-radius: 4px;
            cursor: pointer;
            grid-column: span 4; 
-        `; 
+        `;
 
         div.onclick = () => {
           const input = document.querySelector('.chatInput');
@@ -3462,10 +3725,10 @@ function handleSearchSubmit(query) {
 
   if (!sidebar || !list) return;
 
-  list.innerHTML = ''; 
+  list.innerHTML = '';
   sidebar.style.display = 'flex';
 
-  const messages = document.querySelectorAll('.messagesDisplay p'); 
+  const messages = document.querySelectorAll('.messagesDisplay p');
   let matchCount = 0;
 
   messages.forEach(msg => {
@@ -3491,11 +3754,11 @@ function handleSearchSubmit(query) {
         username = content.substring(0, firstColon).trim();
 
         if (lastParenOpen > firstColon && lastParenClose > lastParenOpen) {
-         
+
           messageText = content.substring(firstColon + 1, lastParenOpen).trim();
           date = content.substring(lastParenOpen + 1, lastParenClose);
         } else {
-       
+
           messageText = content.substring(firstColon + 1).trim();
         }
       }
@@ -3543,7 +3806,7 @@ function closeSearchResults() {
 function toggleEmojiPicker() {
   const picker = document.getElementById('emojiPicker');
   if (picker.style.display === 'none') {
-    picker.style.display = 'flex'; 
+    picker.style.display = 'flex';
     const searchInput = document.getElementById('emojiSearchInput');
     if (searchInput) searchInput.focus();
   } else {
@@ -3555,4 +3818,4 @@ function toggleEmojiPicker() {
 document.addEventListener('DOMContentLoaded', () => {
   setupEmojiPicker();
   setupMessageSearch();
-});
+})
