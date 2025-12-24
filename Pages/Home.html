@@ -5,8 +5,9 @@
   <meta charset="UTF-8" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../css/Home.css" />
-  <script src="../JS/Home.js?v=89" defer></script>
+  <link rel="stylesheet" href="../css/Home.css?v=2" />
+  <script src="../JS/emojis.js?v=1"></script>
+  <script src="../JS/Home.js?v=110" defer></script>
 </head>
 
 <body>
@@ -35,7 +36,7 @@
         </div>
         <div class="smallHead">
           <p>Direct Message</p>
-          <p class="plus">+</p>
+          <p class="plus" onclick="openCreateDMModal()">+</p>
         </div>
         <div class="MainFriendsDiv">
           <p class="testaddeduser"></p>
@@ -97,8 +98,8 @@
           <div class="header-controls">
             <button class="header-btn" onclick="startPrivateCall()" title="Start Voice Call">📞</button>
 
-            <form action="" class="search-form">
-              <input type="text" placeholder="Search" class="search-bar" />
+            <form action="" class="search-form" onsubmit="event.preventDefault();">
+              <input type="text" id="dmSearchInput" placeholder="Search" class="search-bar" />
               <span class="search-icon">🔍</span>
             </form>
           </div>
@@ -144,16 +145,63 @@
             </div>
           </div>
         </div>
+        <div id="searchResultsSidebar" class="search-sidebar" style="display: none;">
+          <div class="search-sidebar-header">
+            <span id="searchResultCount">0 Results</span>
+            <div class="search-header-buttons">
+              <button class="search-filter-btn">Filters</button>
+              <button class="search-sort-btn">Sort</button>
+              <button class="search-close-btn" onclick="closeSearchResults()">x</button>
+            </div>
+          </div>
+          <div id="searchResultsList" class="search-results-list">
+        
+          </div>
+        </div>
+
         <div class="messagesDisplay"></div>
         <form action="" class="privateMessageForm" onsubmit="PrivateMessage(event)">
           <div class="chat-input-container">
-            <button type="button" class="chat-attach-btn" title="Upload a file">
+            <button type="button" class="chat-attach-btn" title="Upload a file" onclick="openUploadModal()">
               <div class="plus-icon">+</div>
             </button>
             <input type="text" name="friendMessagesData" class="chatInput" placeholder="Message" autocomplete="off" />
+            <div id="emojiPicker" class="emoji-picker" style="display: none;">
+              <div class="emoji-picker-header">
+                <div class="emoji-tabs">
+                  <div class="emoji-tab active" data-tab="emoji">Emoji</div>
+                  <div class="emoji-tab" data-tab="gif">GIFs</div>
+                </div>
+                <div class="emoji-search-container">
+                  <input type="text" id="emojiSearchInput" placeholder="Find the perfect emoji" />
+                  <span class="search-icon">🔍</span>
+                </div>
+              </div>
+              <div class="emoji-picker-body">
+                <div class="emoji-sidebar">
+                  <div class="category-icon active" title="Frequently Used">🕒</div>
+                  <div class="category-icon" title="People">🙂</div>
+                  <div class="category-icon" title="Nature">🌲</div>
+                  <div class="category-icon" title="Food">🍔</div>
+                  <div class="category-icon" title="Activity">⚽</div>
+                  <div class="category-icon" title="Travel">🚗</div>
+                  <div class="category-icon" title="Objects">💡</div>
+                  <div class="category-icon" title="Symbols">💕</div>
+                  <div class="category-icon" title="Flags">🚩</div>
+                </div>
+                <div class="emoji-grid-container" id="emojiGridContainer">
+                 
+                </div>
+              </div>
+              <div class="emoji-footer">
+                <div id="emojiPreview" class="emoji-preview">
+                  <span id="previewEmoji">😀</span>
+                  <span id="previewName">:grinning:</span>
+                </div>
+              </div>
+            </div>
             <div class="chat-input-icons">
-
-              <button type="button" class="chat-icon-btn">😊</button>
+              <button type="button" class="chat-icon-btn" onclick="toggleEmojiPicker()">😊</button>
             </div>
 
             <button type="submit" style="display: none;"></button>
@@ -307,9 +355,57 @@
     </div>
   </div>
 
+  <div id="createDMModal" class="outerModal" style="display: none;">
+    <div class="innerModal" style="width: 440px; height: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px;">
+        <h2 style="color: white; font-size: 20px; font-weight: bold;">Select Friends</h2>
+        <p onclick="closeCreateDMModal()" style="color: #b9bbbe; cursor: pointer; font-size: 20px;">x</p>
+      </div>
+      <div style="padding: 0 16px 16px 16px;">
+        <p style="color: #b9bbbe; font-size: 12px; margin-bottom: 15px; text-transform: uppercase;">Friends</p>
+        <div id="dmFriendsList" style="max-height: 200px; overflow-y: auto;">
+    
+        </div>
+        <button onclick="CreateDM()"
+          style="width: 100%; background-color: #5865f2; color: white; padding: 10px; border: none; border-radius: 3px; cursor: pointer; margin-top: 15px;">Create
+          DM</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/node_modules/axios/dist/axios.min.js"></script>
   <script src="https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
   <script src="/JS/Auth.js?v=2"></script>
+
+  <div id="uploadModal" class="outerModal" style="display: none;">
+    <div class="innerModal" style="width: 440px; text-align: center;">
+      <h2 style="color: white; margin-bottom: 20px;">Upload a File</h2>
+      <div id="uploadDropZone" class="upload-drop-zone">
+        <div class="upload-icon-container">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+        </div>
+        <p class="upload-text">Upload a file</p>
+        <p class="upload-subtext">or drag and drop</p>
+      </div>
+      <input type="file" id="modalFileInput" style="display: none;" accept="image/*">
+
+      <div id="uploadPreview" style="display: none; margin-top: 15px;">
+        <p id="uploadFileName" style="color: #dcddde; font-size: 14px; margin-bottom: 10px;"></p>
+        <img id="uploadImagePreview" style="max-width: 100%; max-height: 200px; border-radius: 5px; display: none;">
+      </div>
+
+      <div class="modal-buttons" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+        <button onclick="closeUploadModal()" class="cancel-btn"
+          style="background: transparent; color: white; border: none; cursor: pointer; padding: 10px 20px;">Cancel</button>
+        <button onclick="submitUploadModal()" class="upload-btn"
+          style="background: #5865F2; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer;">Upload</button>
+      </div>
+    </div>
+  </div>
 </body>
 
 </html>
