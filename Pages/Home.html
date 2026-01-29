@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../css/Home.css?v=2" />
+  <link rel="stylesheet" href="../css/Home.css?v=3" />
   <script src="../JS/emojis.js?v=1"></script>
   <script src="../JS/Home.js?v=110" defer></script>
 </head>
@@ -47,6 +47,8 @@
         <button class="call-control-btn" onclick="Mute()">Mute</button>
         <button class="call-control-btn" onclick="Deafen()">Deafen</button>
         <button class="call-control-btn danger" onclick="LeaveCall()">Leave Call</button>
+        <button class="call-control-btn danger" onclick="openSettingsModal()">Settings</button>
+
       </div>
     </div>
     <div class="lastSection">
@@ -155,7 +157,7 @@
             </div>
           </div>
           <div id="searchResultsList" class="search-results-list">
-        
+
           </div>
         </div>
 
@@ -190,7 +192,7 @@
                   <div class="category-icon" title="Flags">🚩</div>
                 </div>
                 <div class="emoji-grid-container" id="emojiGridContainer">
-                 
+
                 </div>
               </div>
               <div class="emoji-footer">
@@ -364,7 +366,7 @@
       <div style="padding: 0 16px 16px 16px;">
         <p style="color: #b9bbbe; font-size: 12px; margin-bottom: 15px; text-transform: uppercase;">Friends</p>
         <div id="dmFriendsList" style="max-height: 200px; overflow-y: auto;">
-    
+
         </div>
         <button onclick="CreateDM()"
           style="width: 100%; background-color: #5865f2; color: white; padding: 10px; border: none; border-radius: 3px; cursor: pointer; margin-top: 15px;">Create
@@ -403,6 +405,364 @@
           style="background: transparent; color: white; border: none; cursor: pointer; padding: 10px 20px;">Cancel</button>
         <button onclick="submitUploadModal()" class="upload-btn"
           style="background: #5865F2; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer;">Upload</button>
+      </div>
+    </div>
+  </div>
+  <div id="settingsModal" class="outerModal" style="display: none;">
+    <div class="settings-container">
+      <div class="settings-sidebar custom-scroll">
+        <div class="settings-sidebar-header">
+          <div class="sidebar-search">
+            <input type="text" placeholder="Search" />
+            <span class="search-icon">🔍</span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-group-title">User Settings</div>
+          <div class="settings-item active" data-target="my-account">My Account</div>
+          <div class="settings-item" data-target="profiles">Profiles</div>
+          <div class="settings-item" data-target="privacy">Privacy & Safety</div>
+          <div class="settings-item" data-target="family">Family Center</div>
+          <div class="settings-item" data-target="authorized-apps">Authorized Apps</div>
+          <div class="settings-item" data-target="devices">Devices</div>
+          <div class="settings-item" data-target="connections">Connections</div>
+          <div class="settings-item" data-target="clips">Clips</div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-group-title">Payment Settings</div>
+          <div class="settings-item">Nitro</div>
+          <div class="settings-item">Server Boost</div>
+          <div class="settings-item">Subscriptions</div>
+          <div class="settings-item">Gift Inventory</div>
+          <div class="settings-item">Billing</div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-group-title">App Settings</div>
+          <div class="settings-item">Appearance</div>
+          <div class="settings-item">Accessibility</div>
+          <div class="settings-item">Voice & Video</div>
+          <div class="settings-item">Chat</div>
+          <div class="settings-item">Notifications</div>
+          <div class="settings-item">Keybinds</div>
+          <div class="settings-item">Language</div>
+          <div class="settings-item">Streamer Mode</div>
+          <div class="settings-item">Advanced</div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-group-title">Activity Settings</div>
+          <div class="settings-item">Activity Privacy</div>
+          <div class="settings-item">Registered Games</div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-item log-out" onclick="LogOut()">Log Out</div>
+        </div>
+      </div>
+
+      <div class="settings-content custom-scroll">
+        <div class="settings-close-btn" onclick="closeSettingsModal()">
+          <div class="close-circle">
+            <span>x</span>
+          </div>
+          <div class="close-label">ESC</div>
+        </div>
+
+        <div id="view-my-account" class="settings-view">
+          <h2 class="settings-page-title">My Account</h2>
+
+          <div class="account-profile-banner">
+            <div class="banner-color"></div>
+            <div class="user-info-bar">
+              <div class="user-avatar-upload">
+                <img src="/assets/img/titlePic.png" alt="Avatar" class="settings-avatar" />
+                <div class="avatar-status-indicator"></div>
+              </div>
+              <div class="user-name-tag">
+                <span class="display-name" id="settingsDisplayName">User</span>
+                <span class="username-tag">#0000</span>
+              </div>
+              <button class="edit-profile-btn">Edit User Profile</button>
+            </div>
+
+            <div class="account-details-card">
+              <div class="account-detail-row">
+                <div class="detail-info">
+                  <label>Display Name</label>
+                  <div class="detail-value" id="settingsDisplayNameValue">User</div>
+                </div>
+                <button class="edit-detail-btn">Edit</button>
+              </div>
+
+              <div class="account-detail-row">
+                <div class="detail-info">
+                  <label>Username</label>
+                  <div class="detail-value" id="settingsUsernameValue">user</div>
+                </div>
+                <button class="edit-detail-btn">Edit</button>
+              </div>
+
+              <div class="account-detail-row">
+                <div class="detail-info">
+                  <label>Email</label>
+                  <div class="detail-value">*********@example.com <span class="reveal-link">Reveal</span></div>
+                </div>
+                <button class="edit-detail-btn">Edit</button>
+              </div>
+
+              <div class="account-detail-row">
+                <div class="detail-info">
+                  <label>Phone Number</label>
+                  <div class="detail-value">********00 <span class="reveal-link">Reveal</span></div>
+                </div>
+                <div class="detail-actions">
+                  <span class="remove-link">Remove</span>
+                  <button class="edit-detail-btn">Edit</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Password and Authentication</h3>
+          <button class="change-password-btn">Change Password</button>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Account Removal</h3>
+          <p class="account-removal-text">Disabling your account means you can recover it at any time after taking this
+            action.</p>
+          <div class="account-removal-buttons">
+            <button class="disable-account-btn">Disable Account</button>
+            <button class="delete-account-btn">Delete Account</button>
+          </div>
+        </div>
+
+        <div id="view-profiles" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Profiles</h2>
+
+          <div class="settings-tab-bar">
+            <div class="settings-tab active">User Profile</div>
+            <div class="settings-tab">Server Profiles</div>
+          </div>
+
+          <div class="profile-preview-section">
+            <div class="profile-card-preview">
+              <div class="preview-banner" style="background-color: #0c0c0c;"></div>
+              <div class="preview-avatar">
+                <img src="/assets/img/titlePic.png" alt="Avatar" />
+                <div class="preview-status"></div>
+              </div>
+              <div class="preview-user-info">
+                <div class="preview-name">User</div>
+                <div class="preview-tag">#0000</div>
+                <div class="preview-custom-status">
+                  Click to add custom status
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="form-group">
+            <label class="form-label">About Me</label>
+            <p class="form-desc">You can use Markdown and links if you'd like.</p>
+            <textarea class="settings-textarea" placeholder="Hello, World!"></textarea>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="form-group">
+            <label class="form-label">Banner Color</label>
+            <div class="color-picker-box" style="background-color: #0c0c0c;">
+              <span class="color-hex">#0c0c0c</span>
+              <button class="edit-detail-btn">Change Color</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-privacy" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Privacy & Safety</h2>
+
+          <div class="privacy-card">
+            <h3 class="settings-section-header">Safe Direct Messaging</h3>
+            <p class="form-desc">Automatically scan and delete direct messages you receive that contain explicit media
+              content.</p>
+
+            <div class="radio-group">
+              <div class="radio-item active">
+                <div class="radio-content">
+                  <div class="radio-title">Keep me safe</div>
+                  <div class="radio-desc">Scan direct messages from everyone.</div>
+                </div>
+                <div class="radio-circle selected"></div>
+              </div>
+              <div class="radio-item">
+                <div class="radio-content">
+                  <div class="radio-title">My friends are nice</div>
+                  <div class="radio-desc">Scan direct messages from everyone unless they are a friend.</div>
+                </div>
+                <div class="radio-circle"></div>
+              </div>
+              <div class="radio-item">
+                <div class="radio-content">
+                  <div class="radio-title">Do not scan</div>
+                  <div class="radio-desc">Direct messages will not be scanned for explicit content.</div>
+                </div>
+                <div class="radio-circle"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="privacy-card">
+            <h3 class="settings-section-header">Server Privacy Defaults</h3>
+            <p class="form-desc">Allow direct messages from server members.</p>
+
+            <div class="toggle-item">
+              <div class="toggle-info">
+                <div class="toggle-label">Allow direct messages from server members</div>
+                <div class="toggle-desc">This setting is applied when you join a new server. It does not apply
+                  retroactively to your existing servers.</div>
+              </div>
+              <div class="toggle-switch active"></div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="privacy-card">
+            <h3 class="settings-section-header">Who can add you as a friend</h3>
+
+            <div class="checkbox-item block">
+              <div class="checkbox-box checked"></div>
+              <div class="checkbox-label">Everyone</div>
+            </div>
+            <div class="checkbox-item block">
+              <div class="checkbox-box checked"></div>
+              <div class="checkbox-label">Friends of Friends</div>
+            </div>
+            <div class="checkbox-item block">
+              <div class="checkbox-box checked"></div>
+              <div class="checkbox-label">Server Members</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-family" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Family Center</h2>
+          <div class="empty-state-card">
+            <div class="empty-icon">👪</div>
+            <h3>Keep your teen safe on Discord</h3>
+            <p>Family Center helps you stay informed about who your teen is friends with and what servers they join,
+              while protecting their privacy.</p>
+            <button class="settings-btn-primary">Enable Family Center</button>
+          </div>
+        </div>
+
+        <div id="view-authorized-apps" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Authorized Apps</h2>
+          <p class="form-desc" style="margin-bottom: 20px;">Apps you've authorized to access your account.</p>
+
+          <div class="apps-card">
+            <div class="app-item">
+              <div class="app-info">
+                <div class="app-name">Spotify</div>
+                <div class="app-desc">Added 2 months ago</div>
+              </div>
+              <button class="settings-btn-danger">Deauthorize</button>
+            </div>
+            <div class="app-item">
+              <div class="app-info">
+                <div class="app-name">Battle.net</div>
+                <div class="app-desc">Added 1 year ago</div>
+              </div>
+              <button class="settings-btn-danger">Deauthorize</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-devices" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Devices</h2>
+          <p class="form-desc" style="margin-bottom: 20px;">Here are all the devices that are currently logged in with
+            your account.</p>
+
+          <div class="devices-card">
+            <h3 class="settings-section-header">Current Device</h3>
+            <div class="device-card current">
+              <div class="device-icon">💻</div>
+              <div class="device-info">
+                <div class="device-name">Windows PC (Chrome)</div>
+                <div class="device-location">San Francisco, US • Active now</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="devices-card">
+            <h3 class="settings-section-header">Other Devices</h3>
+            <div class="device-card">
+              <div class="device-icon">📱</div>
+              <div class="device-info">
+                <div class="device-name">iPhone 13</div>
+                <div class="device-location">San Francisco, US • 2 hours ago</div>
+              </div>
+              <div class="device-remove">✕</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-connections" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Connections</h2>
+          <p class="form-desc" style="margin-bottom: 20px;">Connect your accounts to unlock special Discord
+            integrations.</p>
+
+          <div class="connections-card">
+            <div class="connections-grid">
+              <div class="connection-icon" style="background-color: #1ed760;">sp</div>
+              <div class="connection-icon" style="background-color: #0078d4;">xb</div>
+              <div class="connection-icon" style="background-color: #003791;">ps</div>
+              <div class="connection-icon" style="background-color: #6441a5;">tw</div>
+              <div class="connection-icon" style="background-color: #ff4500;">rd</div>
+              <div class="connection-icon" style="background-color: #333;">gh</div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="connections-card">
+            <div class="empty-state-card">
+              <p>No connections added yet.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-clips" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Clips</h2>
+
+          <div class="clips-card">
+            <div class="toggle-item">
+              <div class="toggle-info">
+                <div class="toggle-label">Enable Clips</div>
+                <div class="toggle-desc">Allow Discord to capture the last few moments of your gameplay.</div>
+              </div>
+              <div class="toggle-switch"></div>
+            </div>
+
+            <div class="settings-separator"></div>
+
+            <div class="form-group">
+              <label class="form-label">Save Clip Keybind</label>
+              <div class="keybind-input">ALT + C</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
