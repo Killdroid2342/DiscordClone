@@ -40,7 +40,7 @@ function decodeJWT(token) {
 const jwt = cookieVal;
 const decodedJWT = decodeJWT(jwt);
 let JWTusername = decodedJWT.payload.username;
-
+username.innerHTML = JWTusername;
 let ringtoneAudio = null;
 
 function startRingtone() {
@@ -113,6 +113,54 @@ function openModal() {
 function closeModal() {
   document.querySelector('.outerModal').style.display = 'none';
 }
+
+function openSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (modal) {
+    modal.style.display = 'flex';
+  
+    switchSettingsTab('my-account');
+  }
+}
+
+function closeSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function switchSettingsTab(targetId) {
+
+  document.querySelectorAll('.settings-item').forEach(item => {
+    item.classList.remove('active');
+    if (item.dataset.target === targetId) {
+      item.classList.add('active');
+    }
+  });
+
+ 
+  document.querySelectorAll('.settings-view').forEach(view => {
+    view.style.display = 'none';
+  });
+
+  const targetView = document.getElementById('view-' + targetId);
+  if (targetView) {
+    targetView.style.display = 'block';
+  }
+}
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const settingsItems = document.querySelectorAll('.settings-item[data-target]');
+  settingsItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const target = item.dataset.target;
+      if (target) {
+        switchSettingsTab(target);
+      }
+    });
+  });
+});
+
 function openSecondModal() {
   closeModal();
   document.querySelector('.outerSecondModal').style.display = 'flex';
@@ -358,8 +406,8 @@ function clearContent() {
     });
   });
 
-
-  const accountElement = document.querySelector('.account');
+  // dont need this anymore remove at end
+  // const accountElement = document.querySelector('.account');
 
 }
 
@@ -3819,3 +3867,24 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEmojiPicker();
   setupMessageSearch();
 })
+
+function openSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (modal) modal.style.display = 'flex';
+
+ 
+  if (typeof JWTusername !== 'undefined') {
+    const sName = document.getElementById('settingsDisplayName');
+    const sNameVal = document.getElementById('settingsDisplayNameValue');
+    const sUserVal = document.getElementById('settingsUsernameValue');
+
+    if (sName) sName.innerText = JWTusername;
+    if (sNameVal) sNameVal.innerText = JWTusername;
+    if (sUserVal) sUserVal.innerText = JWTusername;
+  }
+}
+
+function closeSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (modal) modal.style.display = 'none';
+}
