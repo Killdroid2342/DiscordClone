@@ -430,32 +430,25 @@
           <div class="settings-item" data-target="clips">Clips</div>
         </div>
 
-        <div class="settings-section">
-          <div class="settings-group-title">Payment Settings</div>
-          <div class="settings-item">Nitro</div>
-          <div class="settings-item">Server Boost</div>
-          <div class="settings-item">Subscriptions</div>
-          <div class="settings-item">Gift Inventory</div>
-          <div class="settings-item">Billing</div>
-        </div>
+
 
         <div class="settings-section">
           <div class="settings-group-title">App Settings</div>
-          <div class="settings-item">Appearance</div>
-          <div class="settings-item">Accessibility</div>
-          <div class="settings-item">Voice & Video</div>
-          <div class="settings-item">Chat</div>
-          <div class="settings-item">Notifications</div>
-          <div class="settings-item">Keybinds</div>
-          <div class="settings-item">Language</div>
-          <div class="settings-item">Streamer Mode</div>
-          <div class="settings-item">Advanced</div>
+          <div class="settings-item" data-target="appearance">Appearance</div>
+          <div class="settings-item" data-target="accessibility">Accessibility</div>
+          <div class="settings-item" data-target="voice-video">Voice & Video</div>
+          <div class="settings-item" data-target="chat">Chat</div>
+          <div class="settings-item" data-target="notifications">Notifications</div>
+          <div class="settings-item" data-target="keybinds">Keybinds</div>
+          <div class="settings-item" data-target="language">Language</div>
+          <div class="settings-item" data-target="streamer-mode">Streamer Mode</div>
+          <div class="settings-item" data-target="advanced">Advanced</div>
         </div>
 
         <div class="settings-section">
           <div class="settings-group-title">Activity Settings</div>
-          <div class="settings-item">Activity Privacy</div>
-          <div class="settings-item">Registered Games</div>
+          <div class="settings-item" data-target="activity-privacy">Activity Privacy</div>
+          <div class="settings-item" data-target="registered-games">Registered Games</div>
         </div>
 
         <div class="settings-section">
@@ -759,6 +752,469 @@
             <div class="form-group">
               <label class="form-label">Save Clip Keybind</label>
               <div class="keybind-input">ALT + C</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-appearance" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Appearance</h2>
+
+          <h3 class="settings-section-header">Theme</h3>
+          <div class="radio-group" style="margin-bottom: 20px;">
+            <div class="radio-item active">
+              <div class="radio-content">
+                <div class="radio-title">Dark</div>
+              </div>
+              <div class="radio-circle selected"></div>
+            </div>
+            <div class="radio-item">
+              <div class="radio-content">
+                <div class="radio-title">Light</div>
+              </div>
+              <div class="radio-circle"></div>
+            </div>
+            <div class="radio-item">
+              <div class="radio-content">
+                <div class="radio-title">Sync with computer</div>
+              </div>
+              <div class="radio-circle"></div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Message Display</h3>
+          <div class="radio-group">
+            <div class="radio-item active" style="margin-bottom: 10px;">
+              <div class="radio-content">
+                <div class="radio-title">Cozy</div>
+                <div class="radio-desc">Modern, beautiful, and easy on your eyes.</div>
+              </div>
+              <div class="radio-circle selected"></div>
+            </div>
+            <div class="radio-item">
+              <div class="radio-content">
+                <div class="radio-title">Compact</div>
+                <div class="radio-desc">Fit more messages on screen at one time. #IRC</div>
+              </div>
+              <div class="radio-circle"></div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Chat Font Scaling</h3>
+          <div class="slider-container" style="padding: 10px 0;">
+            <input type="range" min="12" max="24" value="16" class="settings-slider" id="fontScalingSlider">
+            <div
+              style="display: flex; justify-content: space-between; margin-top: 5px; color: #b9bbbe; font-size: 12px;">
+              <span>12px</span>
+              <span>16px</span>
+              <span>20px</span>
+              <span>24px</span>
+            </div>
+          </div>
+
+          <h3 class="settings-section-header" style="margin-top: 20px;">Zoom Level</h3>
+          <div class="slider-container" style="padding: 10px 0;">
+            <input type="range" min="50" max="150" value="100" class="settings-slider" id="zoomLevelSlider">
+            <div
+              style="display: flex; justify-content: space-between; margin-top: 5px; color: #b9bbbe; font-size: 12px;">
+              <span>50%</span>
+              <span>100%</span>
+              <span>150%</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-accessibility" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Accessibility</h2>
+
+          <h3 class="settings-section-header">Saturation</h3>
+          <p class="form-desc">Adjust the saturation of colors in the application.</p>
+          <div class="slider-container" style="padding: 10px 0 20px 0;">
+            <input type="range" min="0" max="100" value="100" class="settings-slider" id="saturationSlider">
+            <div
+              style="display: flex; justify-content: space-between; margin-top: 5px; color: #b9bbbe; font-size: 12px;">
+              <span>0%</span>
+              <span>100%</span>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Reduced Motion</div>
+              <div class="toggle-desc">Reduce the amount of motion and animations in the application.</div>
+            </div>
+            <div class="toggle-switch"></div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Automatically play GIFs when Discord is focused.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item" style="margin-top: 20px;">
+            <div class="toggle-info">
+              <div class="toggle-label">Play animated emoji</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Text-to-Speech</div>
+              <div class="toggle-desc">Allow playback and usage of /tts command.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+        </div>
+
+        <div id="view-voice-video" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Voice & Video</h2>
+
+          <h3 class="settings-section-header">Voice Settings</h3>
+
+          <div class="form-group">
+            <label class="form-label">Input Device</label>
+            <select class="settings-select">
+              <option>Default</option>
+              <option>Microphone (Realtek Audio)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Output Device</label>
+            <select class="settings-select">
+              <option>Default</option>
+              <option>Speakers (Realtek Audio)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Input Volume</label>
+            <div class="slider-container">
+              <input type="range" min="0" max="100" value="80" class="settings-slider">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Output Volume</label>
+            <div class="slider-container">
+              <input type="range" min="0" max="100" value="100" class="settings-slider">
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Mic Test</h3>
+          <p class="form-desc">Having trouble with your microphone? Check if we can hear you.</p>
+          <button class="settings-btn-primary" style="width: auto;">Let's Check</button>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Input Mode</h3>
+          <div class="radio-group">
+            <div class="radio-item active">
+              <div class="radio-content">
+                <div class="radio-title">Voice Activity</div>
+              </div>
+              <div class="radio-circle selected"></div>
+            </div>
+            <div class="radio-item">
+              <div class="radio-content">
+                <div class="radio-title">Push to Talk</div>
+              </div>
+              <div class="radio-circle"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-chat" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Chat</h2>
+
+          <h3 class="settings-section-header">Display</h3>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">When posting a long message</div>
+              <div class="toggle-desc">Display a warning when you send a message that is over 2000 characters.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Text & Images</h3>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Display images, videos, and lolcats</div>
+              <div class="toggle-desc">When posted as links to chat.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">When uploaded directly to Discord</div>
+              <div class="toggle-desc">Images larger than 10MB will not be previewed.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Show link previews</div>
+              <div class="toggle-desc">Generate preview info for links pasted into chat.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+        </div>
+
+        <div id="view-notifications" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Notifications</h2>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Enable Desktop Notifications</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Enable Unread Message Badge</div>
+              <div class="toggle-desc">Shows a red badge on the app icon when you have unread messages.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Enable Taskbar Flashing</div>
+              <div class="toggle-desc">Flash the app icon on the taskbar when you have a notification.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Push Notification AFK Timeout</h3>
+          <div class="form-group">
+            <select class="settings-select">
+              <option>10 minutes</option>
+              <option>1 hour</option>
+              <option>Default</option>
+            </select>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Text-to-Speech Notifications</h3>
+          <div class="radio-group">
+            <div class="radio-item">
+              <div class="radio-content">
+                <div class="radio-title">For all channels</div>
+              </div>
+              <div class="radio-circle"></div>
+            </div>
+            <div class="radio-item active">
+              <div class="radio-content">
+                <div class="radio-title">For the currently selected channel</div>
+              </div>
+              <div class="radio-circle selected"></div>
+            </div>
+            <div class="radio-item">
+              <div class="radio-content">
+                <div class="radio-title">Never</div>
+              </div>
+              <div class="radio-circle"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-keybinds" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Keybinds</h2>
+          <p class="form-desc">Add a keybind to quickly access your favorite actions.</p>
+
+          <button class="settings-btn-primary">Add a Keybind</button>
+
+          <div class="settings-separator"></div>
+
+          <div class="keybind-list">
+            <div class="keybind-row">
+              <div class="keybind-action">Push to Talk (Normal)</div>
+              <div class="keybind-keys">
+                <span class="key-box">CTRL</span> + <span class="key-box">V</span>
+              </div>
+              <button class="settings-btn-danger" style="padding: 4px 8px;">✕</button>
+            </div>
+            <div class="keybind-row">
+              <div class="keybind-action">Toggle Mute</div>
+              <div class="keybind-keys">
+                <span class="key-box">CTRL</span> + <span class="key-box">SHIFT</span> + <span class="key-box">M</span>
+              </div>
+              <button class="settings-btn-danger" style="padding: 4px 8px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-language" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Language</h2>
+
+          <div class="form-group">
+            <label class="form-label">Select Language</label>
+            <select class="settings-select">
+              <option>English (US)</option>
+              <option>English (UK)</option>
+              <option>Deutsch</option>
+              <option>Français</option>
+              <option>Español</option>
+              <option>Italiano</option>
+              <option>Português</option>
+              <option>Pусский</option>
+              <option>日本語</option>
+              <option>한국어</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="view-streamer-mode" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Streamer Mode</h2>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Enable Streamer Mode</div>
+              <div class="toggle-desc">Automatically enable/disable streamer mode when OBS or XSplit is running.</div>
+            </div>
+            <div class="toggle-switch"></div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Options</h3>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Hide Personal Information</div>
+              <div class="toggle-desc">Hide email, connected accounts, and anonymize discriminators.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Hide Invite Links</div>
+              <div class="toggle-desc">Hide invite links in the client to prevent stream sniping.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Disable Sounds</div>
+              <div class="toggle-desc">Disable all notification sounds.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Disable Notifications</div>
+              <div class="toggle-desc">Disable all desktop notifications.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+        </div>
+
+        <div id="view-advanced" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Advanced</h2>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Developer Mode</div>
+              <div class="toggle-desc">Exposes context menu items to copy IDs of servers, channels, users, and messages.
+              </div>
+            </div>
+            <div class="toggle-switch"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Hardware Acceleration</div>
+              <div class="toggle-desc">Turns on hardware acceleration which uses your GPU to make Discord smoother. Turn
+                this off if you are experiencing frame drops.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Show Game Activity</div>
+              <div class="toggle-desc">Display currently running game as a status message.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+        </div>
+
+        <div id="view-activity-privacy" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Activity Privacy</h2>
+          <p class="form-desc">How we use your activity data.</p>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Display current activity as a status message</div>
+              <div class="toggle-desc">Automatically update your status message to show the game you are playing, or
+                activity you are participating in (like listening to Spotify).</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <div class="toggle-label">Share your activity status by default when joining large servers</div>
+              <div class="toggle-desc">When you join a new server with more than 200 members, this setting will be
+                applied to that server's privacy settings.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+        </div>
+
+        <div id="view-registered-games" class="settings-view" style="display: none;">
+          <h2 class="settings-page-title">Registered Games</h2>
+          <p class="form-desc" style="margin-bottom: 20px;">If you're playing a game that we're not detecting, you can
+            add it here!</p>
+
+          <div class="empty-state-card" style="padding: 20px; border: 1px dashed #4f545c; background: transparent;">
+            <div class="empty-icon" style="font-size: 24px; margin-bottom: 10px;">🎮</div>
+            <p>No game detected</p>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Added Games</h3>
+
+          <div class="added-game-row">
+            <div class="game-info">
+              <div class="game-name">Minecraft</div>
+              <div class="game-last-played">Last played just now</div>
+            </div>
+            <div class="game-actions">
+              <div class="game-overlay-toggle" title="Toggle Overlay">
+                <span class="overlay-icon">🖥️</span>
+              </div>
+              <div class="remove-game-btn">✕</div>
             </div>
           </div>
         </div>
