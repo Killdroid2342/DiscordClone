@@ -118,7 +118,7 @@ function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
     modal.style.display = 'flex';
-  
+
     switchSettingsTab('my-account');
   }
 }
@@ -137,7 +137,7 @@ function switchSettingsTab(targetId) {
     }
   });
 
- 
+
   document.querySelectorAll('.settings-view').forEach(view => {
     view.style.display = 'none';
   });
@@ -150,8 +150,7 @@ function switchSettingsTab(targetId) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-  const settingsItems = document.querySelectorAll('.settings-item[data-target]');
-  settingsItems.forEach(item => {
+  document.querySelectorAll('.settings-item[data-target]').forEach(item => {
     item.addEventListener('click', () => {
       const target = item.dataset.target;
       if (target) {
@@ -159,7 +158,46 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+  initializeSettingsListeners();
 });
+
+function initializeSettingsListeners() {
+  document.querySelectorAll('.radio-item').forEach(item => {
+    item.addEventListener('click', function () {
+
+      const group = this.closest('.radio-group');
+      if (group) {
+  
+        group.querySelectorAll('.radio-item').forEach(r => {
+          r.classList.remove('active');
+          const circle = r.querySelector('.radio-circle');
+          if (circle) circle.classList.remove('selected');
+        });
+      }
+
+      this.classList.add('active');
+      const circle = this.querySelector('.radio-circle');
+      if (circle) circle.classList.add('selected');
+    });
+  });
+
+  document.querySelectorAll('.toggle-item').forEach(item => {
+    item.addEventListener('click', function () {
+      const toggle = this.querySelector('.toggle-switch');
+      if (toggle) {
+        toggle.classList.toggle('active');
+      }
+    });
+  });
+
+
+  document.querySelectorAll('.settings-slider').forEach(slider => {
+    slider.addEventListener('input', function () {
+
+    });
+  });
+}
 
 function openSecondModal() {
   closeModal();
@@ -3872,7 +3910,7 @@ function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) modal.style.display = 'flex';
 
- 
+
   if (typeof JWTusername !== 'undefined') {
     const sName = document.getElementById('settingsDisplayName');
     const sNameVal = document.getElementById('settingsDisplayNameValue');
