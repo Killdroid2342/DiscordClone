@@ -5,9 +5,9 @@
   <meta charset="UTF-8" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../css/Home.css?v=3" />
-  <script src="../JS/emojis.js?v=1"></script>
-  <script src="../JS/Home.js?v=110" defer></script>
+  <link rel="stylesheet" href="../css/Home.css?v=5" />
+  <script src="../JS/emojis.js?v=2"></script>
+  <script src="../JS/Home.js?v=111" defer></script>
 </head>
 
 <body>
@@ -779,6 +779,29 @@
               </div>
               <div class="radio-circle"></div>
             </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Custom Theme Colors</h3>
+          <p class="form-desc" style="margin-bottom: 20px;">Personalize your Discord experience with custom colors.
+            These override the default themes above.</p>
+
+          <div class="form-group" style="display: flex; gap: 20px; align-items: center;">
+            <div style="display: flex; flex-direction: column;">
+              <label class="form-label" for="customBgColor">Background Color</label>
+              <input type="color" id="customBgColor" value="#313338"
+                style="width: 60px; height: 40px; cursor: pointer; border: none; outline: none; background: none; padding: 0;">
+            </div>
+            <div style="display: flex; flex-direction: column;">
+              <label class="form-label" for="customTextColor">Text Color</label>
+              <input type="color" id="customTextColor" value="#dbdee1"
+                style="width: 60px; height: 40px; cursor: pointer; border: none; outline: none; background: none; padding: 0;">
+            </div>
+            <button id="saveCustomThemeBtn" class="settings-btn-primary"
+              style="margin-top: 15px; padding: 8px 16px;">Save Theme</button>
+            <button id="resetCustomThemeBtn" class="settings-btn-danger"
+              style="margin-top: 15px; padding: 8px 16px;">Reset to Default</button>
           </div>
 
           <div class="settings-separator"></div>
