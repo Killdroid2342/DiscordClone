@@ -1,4 +1,7 @@
 'use strict';
+
+
+
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let selectedChannelID;
@@ -42,6 +45,22 @@ const decodedJWT = decodeJWT(jwt);
 let JWTusername = decodedJWT.payload.username;
 username.innerHTML = JWTusername;
 let ringtoneAudio = null;
+
+
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      console.log(e)
+    }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = (Math.random() * 16) | 0,
+      v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 function startRingtone() {
   if (ringtoneAudio) return;
@@ -168,7 +187,7 @@ function initializeSettingsListeners() {
 
       const group = this.closest('.radio-group');
       if (group) {
-  
+
         group.querySelectorAll('.radio-item').forEach(r => {
           r.classList.remove('active');
           const circle = r.querySelector('.radio-circle');
@@ -227,7 +246,7 @@ async function CreateServer(event) {
   let inputElement = document.getElementById('serverNameInput');
   let ServerName = inputElement.value.trim();
   let ServerOwner = decodedJWT.payload.username;
-  let ServerID = crypto.randomUUID();
+  let ServerID = generateUUID();
   let formData = {
     ServerID: ServerID,
     ServerName: ServerName,
@@ -403,7 +422,7 @@ async function ServerChat(event) {
   if (!messageText.trim()) return;
 
   const formDataObject = {
-    MessageID: crypto.randomUUID(),
+    MessageID: generateUUID(),
     ChannelId: selectedChannelID,
     ServerName: currentServerName,
     MessagesUserSender: JWTusername,
