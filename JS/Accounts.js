@@ -47,6 +47,17 @@ async function LogInForm(event) {
     }, 1000);
   } catch (e) {
     console.log('login failed:', e);
+    if (e.response && e.response.data && e.response.data.message) {
+      const modalContent = document.querySelector('.content');
+      if (modalContent) modalContent.innerText = e.response.data.message;
+      const outerModal = document.querySelector('.outerModal');
+      if (outerModal) {
+        outerModal.style.display = 'flex';
+        setTimeout(() => {
+          outerModal.style.display = 'none';
+        }, 2000);
+      }
+    }
   }
   console.log('form validation broke:', formDataObject);
 }
@@ -92,6 +103,17 @@ async function RegisterForm(event) {
       }
     } catch (e) {
       console.log('signup failed:', e);
+      if (e.response && e.response.data && e.response.data.message) {
+        const modalContent = document.querySelector('.content');
+        if (modalContent) modalContent.innerText = e.response.data.message;
+        const outerModal = document.querySelector('.outerModal');
+        if (outerModal) {
+          outerModal.style.display = 'flex';
+          setTimeout(() => {
+            outerModal.style.display = 'none';
+          }, 2000);
+        }
+      }
     }
   }
 }
