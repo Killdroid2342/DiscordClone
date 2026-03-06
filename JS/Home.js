@@ -179,7 +179,25 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   initializeSettingsListeners();
+  loadCustomTheme();
 });
+
+async function loadCustomTheme() {
+  try {
+    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountTheme?username=${JWTusername}`);
+    const theme = res.data;
+    if (theme && theme.backgroundColor) {
+      document.documentElement.style.setProperty('--main-bg', theme.backgroundColor);
+      document.getElementById('customBgColor').value = theme.backgroundColor;
+    }
+    if (theme && theme.textColor) {
+      document.documentElement.style.setProperty('--text-main', theme.textColor);
+      document.getElementById('customTextColor').value = theme.textColor;
+    }
+  } catch (err) {
+    console.error('Failed to load custom theme', err);
+  }
+}
 
 function initializeSettingsListeners() {
   document.querySelectorAll('.radio-item').forEach(item => {
@@ -216,6 +234,37 @@ function initializeSettingsListeners() {
 
     });
   });
+
+  const saveThemeBtn = document.getElementById('saveCustomThemeBtn');
+  if (saveThemeBtn) {
+    saveThemeBtn.addEventListener('click', async () => {
+      const bgColor = document.getElementById('customBgColor').value;
+      const txtColor = document.getElementById('customTextColor').value;
+
+      try {
+        await axios.post('http://localhost:5018/api/Account/UpdateAccountTheme', {
+          Username: JWTusername,
+          BackgroundColor: bgColor,
+          TextColor: txtColor
+        });
+
+        document.documentElement.style.setProperty('--main-bg', bgColor);
+        document.documentElement.style.setProperty('--text-main', txtColor);
+        console.log('Custom theme saved and applied');
+      } catch (err) {
+        console.error('Failed to save theme', err);
+      }
+    });
+  }
+
+  const resetThemeBtn = document.getElementById('resetCustomThemeBtn');
+  if (resetThemeBtn) {
+    resetThemeBtn.addEventListener('click', async () => {
+      document.getElementById('customBgColor').value = '#313338';
+      document.getElementById('customTextColor').value = '#dbdee1';
+      saveThemeBtn.click();
+    });
+  }
 }
 
 function openSecondModal() {
