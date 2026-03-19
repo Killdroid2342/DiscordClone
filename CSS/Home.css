@@ -2370,3 +2370,64 @@
 .remove-game-btn:hover {
   color: #ed4245;
 }
+
+.profile-popout {
+  position: absolute;
+  width: 300px;
+  background-color: var(--main-bg);
+  border-radius: 8px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  overflow: hidden;
+  border: 1px solid #202225;
+}
+
+.profile-popout-header {
+  height: 60px;
+  background-color: var(--second-bg);
+  filter: brightness(1.2);
+  position: relative;
+}
+
+.profile-popout-avatar {
+  position: absolute;
+  left: 16px;
+  bottom: -24px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 6px solid var(--main-bg);
+  background-color: #313338;
+}
+
+.profile-popout-body {
+  padding: 32px 16px 16px 16px;
+}
+
+.profile-popout-username {
+  color: #fff;
+  font-size: 20px;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+.profile-popout-divider {
+  height: 1px;
+  background-color: rgba(255, 255, 255, 0.1);
+  margin: 12px 0;
+}
+
+.profile-popout-section-title {
+  color: #b9bbbe;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.profile-popout-description {
+  color: #dbdee1;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
