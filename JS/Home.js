@@ -1,7 +1,5 @@
 'use strict';
 
-
-
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let selectedChannelID;
@@ -180,6 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initializeSettingsListeners();
   loadCustomTheme();
+  loadProfileSettings();
 });
 
 async function loadCustomTheme() {
@@ -196,6 +195,23 @@ async function loadCustomTheme() {
     }
   } catch (err) {
     console.error('Failed to load custom theme', err);
+  }
+}
+
+async function loadProfileSettings() {
+  try {
+    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountProfile?username=${JWTusername}`);
+    const profile = res.data;
+    if (profile) {
+      if (profile.profilePictureUrl) {
+        document.getElementById('profilePictureUrlInput').value = profile.profilePictureUrl;
+      }
+      if (profile.description) {
+        document.getElementById('profileDescriptionInput').value = profile.description;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load custom profile', err);
   }
 }
 
@@ -253,6 +269,38 @@ function initializeSettingsListeners() {
         console.log('Custom theme saved and applied');
       } catch (err) {
         console.error('Failed to save theme', err);
+      }
+    });
+  }
+
+  const saveProfileBtn = document.getElementById('saveProfileSettingsBtn');
+  if (saveProfileBtn) {
+    saveProfileBtn.addEventListener('click', async () => {
+      const url = document.getElementById('profilePictureUrlInput').value;
+      const desc = document.getElementById('profileDescriptionInput').value;
+
+      try {
+        await axios.post('http://localhost:5018/api/Account/UpdateAccountProfile', {
+          Username: JWTusername,
+          ProfilePictureUrl: url,
+          Description: desc
+        });
+
+        const alertDiv = document.createElement('div');
+        alertDiv.style.position = 'fixed';
+        alertDiv.style.top = '10px';
+        alertDiv.style.left = '50%';
+        alertDiv.style.transform = 'translateX(-50%)';
+        alertDiv.style.backgroundColor = '#43b581';
+        alertDiv.style.color = 'white';
+        alertDiv.style.padding = '10px 20px';
+        alertDiv.style.borderRadius = '4px';
+        alertDiv.style.zIndex = '999999';
+        alertDiv.innerText = 'Profile saved!';
+        document.body.appendChild(alertDiv);
+        setTimeout(() => alertDiv.remove(), 3000);
+      } catch (err) {
+        console.error('Error saving profile', err);
       }
     });
   }
@@ -562,6 +610,7 @@ async function fetchPendingRequests() {
       const avatar = document.createElement('div');
       avatar.className = 'friend-item-avatar';
       avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+      avatar.onclick = (e) => openProfilePopout(reqUser, e.pageX, e.pageY);
 
       const info = document.createElement('div');
       info.className = 'friend-item-info';
@@ -569,6 +618,7 @@ async function fetchPendingRequests() {
       const name = document.createElement('span');
       name.className = 'friend-item-name';
       name.textContent = reqUser;
+      name.onclick = (e) => openProfilePopout(reqUser, e.pageX, e.pageY);
 
       const status = document.createElement('span');
       status.className = 'friend-item-status';
@@ -756,8 +806,7 @@ function createMessageElement(sender, text, date) {
 
   const avatar = document.createElement('div');
   avatar.className = 'message-avatar';
-
-
+  avatar.onclick = (e) => openProfilePopout(sender, e.pageX, e.pageY);
   const content = document.createElement('div');
   content.className = 'message-content';
 
@@ -767,7 +816,7 @@ function createMessageElement(sender, text, date) {
   const username = document.createElement('span');
   username.className = 'message-username';
   username.textContent = sender;
-
+  username.onclick = (e) => openProfilePopout(sender, e.pageX, e.pageY);
   const timestamp = document.createElement('span');
   timestamp.className = 'message-timestamp';
   timestamp.textContent = date;
@@ -2828,9 +2877,11 @@ async function fetchServerMembers() {
       avatar.style.marginRight = '10px';
       avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
       avatar.style.backgroundSize = 'cover';
+      avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
 
       const name = document.createElement('span');
       name.textContent = member.username;
+      name.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
 
       memberEl.appendChild(avatar);
       memberEl.appendChild(name);
@@ -3374,6 +3425,7 @@ async function FetchAndRenderFriendsMain() {
       const avatar = document.createElement('div');
       avatar.className = 'friend-item-avatar';
       avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+      avatar.onclick = (e) => openProfilePopout(friendName, e.pageX, e.pageY);
 
       const info = document.createElement('div');
       info.className = 'friend-item-info';
@@ -3381,6 +3433,7 @@ async function FetchAndRenderFriendsMain() {
       const name = document.createElement('span');
       name.className = 'friend-item-name';
       name.textContent = friendName;
+      name.onclick = (e) => openProfilePopout(friendName, e.pageX, e.pageY);
 
       const status = document.createElement('span');
       status.className = 'friend-item-status';
@@ -3966,6 +4019,66 @@ function toggleEmojiPicker() {
   } else {
     picker.style.display = 'none';
   }
+}
+
+const profilePopout = document.getElementById('profilePopout');
+
+function closeProfilePopout() {
+  if (profilePopout) {
+    profilePopout.style.display = 'none';
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (profilePopout && profilePopout.style.display === 'block') {
+    if (!profilePopout.contains(e.target) && !e.target.closest('.message-avatar') && !e.target.closest('.friend-item-avatar') && !e.target.closest('.message-username') && !e.target.closest('.card-avatar')) {
+      closeProfilePopout();
+    }
+  }
+});
+
+window.openProfilePopout = async function (username, x, y) {
+  if (!profilePopout) return;
+
+  document.getElementById('popoutUsername').innerText = username;
+  document.getElementById('popoutDescription').innerText = "Loading...";
+  document.getElementById('popoutAvatar').src = "/assets/img/titlePic.png";
+
+  try {
+    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountProfile?username=${username}`);
+    const profile = res.data;
+
+    if (profile) {
+      if (profile.description) {
+        document.getElementById('popoutDescription').innerText = profile.description;
+      } else {
+        document.getElementById('popoutDescription').innerText = "No description provided.";
+      }
+
+      if (profile.profilePictureUrl) {
+        document.getElementById('popoutAvatar').src = profile.profilePictureUrl;
+      }
+    }
+  } catch (err) {
+    console.error("Failed to load profile for popout", err);
+    document.getElementById('popoutDescription').innerText = "Failed to load profile.";
+  }
+
+  profilePopout.style.display = 'block';
+
+  const rect = profilePopout.getBoundingClientRect();
+  let finalX = x;
+  let finalY = y;
+
+  if (finalX + rect.width > window.innerWidth) {
+    finalX = window.innerWidth - rect.width - 20;
+  }
+  if (finalY + rect.height > window.innerHeight) {
+    finalY = window.innerHeight - rect.height - 20;
+  }
+
+  profilePopout.style.left = `${finalX}px`;
+  profilePopout.style.top = `${finalY}px`;
 }
 
 
