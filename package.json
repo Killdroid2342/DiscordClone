@@ -13,9 +13,11 @@
   "devDependencies": {
     "electron": "^29.1.2",
     "nodemon": "^3.1.0",
-    "webpack": "^5.92.1"
+    "webpack": "^5.92.1",
+    "webpack-cli": "^7.0.2"
   },
   "dependencies": {
+    "@microsoft/signalr": "^10.0.0",
     "axios": "^1.6.8",
     "babel": "^6.23.0",
     "ws": "^8.18.3"
