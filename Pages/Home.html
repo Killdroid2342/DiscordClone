@@ -5,9 +5,10 @@
   <meta charset="UTF-8" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../css/Home.css?v=5" />
+  <link rel="stylesheet" href="../CSS/Home.css?v=6" />
+  <script src="../JS/AppPaths.js?v=1"></script>
   <script src="../JS/emojis.js?v=2"></script>
-  <script src="../JS/Home.js?v=111" defer></script>
+  <script src="../JS/Home.js?v=112" defer></script>
 </head>
 
 <body>
@@ -23,7 +24,7 @@
 
   <div id="profilePopout" class="profile-popout" style="display: none;">
     <div class="profile-popout-header" id="popoutHeaderColor">
-      <img id="popoutAvatar" class="profile-popout-avatar" src="/assets/img/titlePic.png" alt="User Avatar" />
+      <img id="popoutAvatar" class="profile-popout-avatar" src="../assets/img/titlePic.png" alt="User Avatar" />
     </div>
     <div class="profile-popout-body">
       <div class="profile-popout-username" id="popoutUsername">Username</div>
@@ -135,8 +136,7 @@
           <div style="
                 display: flex;
                 flex-direction: row;
-                border: 1px solid red;
-                justify-content: space-between;
+              justify-content: space-between;
               ">
             <div style="
                   display: flex;
@@ -156,10 +156,6 @@
               <video id="localVideo" autoplay playsinline muted
                 style="width: 48%; height: 100%; background: #222; margin: 5px; object-fit: cover;"></video>
 
-              <div id="videoDebug"
-                style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: lime; padding: 10px; pointer-events: none; font-family: monospace; font-size: 12px; z-index: 1000; border-radius: 4px;">
-                Waiting for diagnostics...
-              </div>
             </div>
 
             <div
@@ -399,9 +395,9 @@
     </div>
   </div>
 
-  <script src="/node_modules/axios/dist/axios.min.js"></script>
-  <script src="https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js"></script>
-  <script src="/JS/Auth.js?v=2"></script>
+  <script src="../node_modules/axios/dist/axios.min.js"></script>
+  <script src="../node_modules/@microsoft/signalr/dist/browser/signalr.min.js"></script>
+  <script src="../JS/Auth.js?v=3"></script>
 
   <div id="uploadModal" class="outerModal" style="display: none;">
     <div class="innerModal" style="width: 440px; text-align: center;">
@@ -495,7 +491,7 @@
             <div class="banner-color"></div>
             <div class="user-info-bar">
               <div class="user-avatar-upload">
-                <img src="/assets/img/titlePic.png" alt="Avatar" class="settings-avatar" />
+                <img src="../assets/img/titlePic.png" alt="Avatar" class="settings-avatar" />
                 <div class="avatar-status-indicator"></div>
               </div>
               <div class="user-name-tag">
@@ -569,9 +565,9 @@
 
           <div class="profile-preview-section">
             <div class="profile-card-preview">
-              <div class="preview-banner" style="background-color: #0c0c0c;"></div>
+              <div class="preview-banner"></div>
               <div class="preview-avatar">
-                <img src="/assets/img/titlePic.png" alt="Avatar" />
+                <img src="../assets/img/titlePic.png" alt="Avatar" />
                 <div class="preview-status"></div>
               </div>
               <div class="preview-user-info">
@@ -606,7 +602,7 @@
 
           <div class="form-group">
             <label class="form-label">Banner Color</label>
-            <div class="color-picker-box" style="background-color: #0c0c0c;">
+              <div class="color-picker-box">
               <span class="color-hex">#0c0c0c</span>
               <button class="edit-detail-btn">Change Color</button>
             </div>

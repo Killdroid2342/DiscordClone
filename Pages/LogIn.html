@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Discord</title>
     <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-    <link rel="stylesheet" href="../css/LogIn.css">
+    <link rel="stylesheet" href="../CSS/LogIn.css?v=2">
 </head>
-<body>
-    <div class="outerModal">
+<body class="auth-page login-page">
+    <div class="outerModal" aria-live="polite" role="status">
         <div class="innerModal">
             <p class="content"></p>
         </div>
@@ -18,17 +18,17 @@
     <p class="headMessage">We're so excited to see you again!</p>
     <form class="outContent"  onsubmit="LogInForm(event)" method="post">
         <label class="usernameLogInLabel">USERNAME</label>
-        <input type="text" class="usernameInput" name="username" /> 
+        <input type="text" class="usernameInput" name="username" autocomplete="username" required /> 
         <label class="passwordLogInLabel">PASSWORD</label>
-        <input type="password" class="LogInpasswordInput" name="password" autocomplete="on"/>
+        <input type="password" class="LogInpasswordInput" name="password" autocomplete="current-password" required />
         <input type="submit" class="logInButton" value="Log In" />
         <p class="switchToRegisterInfo">Need an account? <a href="Register.html" class="switchToRegister">Register</a></p>
     </form>
 </div>
 </div>
-<script src="/node_modules/axios/dist/axios.min.js"></script>
-<script src="../index.js"></script>
-<script type="text/javascript" src="../JS/Accounts.js?v=2"></script>
+<script src="../node_modules/axios/dist/axios.min.js"></script>
+<script src="../JS/AppPaths.js?v=1"></script>
+<script src="../JS/Accounts.js?v=3"></script>
 
 </body>
 </html>
