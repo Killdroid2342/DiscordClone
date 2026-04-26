@@ -1,119 +1,146 @@
 'use strict';
 
-const usernameInput = document.getElementsByClassName('usernameInput')[0];
-const passwordInput = document.getElementsByClassName('passwordInput')[0];
-const confirmPasswordInput = document.getElementsByClassName(
-  'confirmPasswordInput'
-)[0];
+const accountsAppPaths = window.APP_PATHS || {};
+const accountsApiBase = accountsAppPaths.apiBase || 'http://localhost:5018';
+const accountsRedirectToPage =
+  typeof accountsAppPaths.pageUrl === 'function'
+    ? accountsAppPaths.pageUrl
+    : (pageName) => `./${pageName}`;
+
+const usernameInput = document.querySelector('.usernameInput');
+const loginPasswordInput = document.querySelector('.LogInpasswordInput');
+const passwordInput = document.querySelector('.passwordInput');
+const confirmPasswordInput = document.querySelector('.confirmPasswordInput');
+const modalContent = document.querySelector('.content');
+const outerModal = document.querySelector('.outerModal');
+
+function showStatusMessage(message, duration = 2200) {
+  if (!modalContent || !outerModal) return;
+
+  modalContent.innerText = message;
+  outerModal.style.display = 'flex';
+
+  window.clearTimeout(showStatusMessage.timeoutId);
+  showStatusMessage.timeoutId = window.setTimeout(() => {
+    outerModal.style.display = 'none';
+  }, duration);
+}
+
+function setButtonState(form, isLoading, label) {
+  const submitButton = form.querySelector('input[type="submit"]');
+  if (!submitButton) return;
+
+  submitButton.disabled = isLoading;
+  submitButton.value = label;
+}
 
 async function LogInForm(event) {
   event.preventDefault();
 
-  const formData = new FormData(event.target);
-  console.log('login stuff:', formData);
-  const formDataObject = { Friends: [] };
-  formData.forEach((value, key) => {
-    formDataObject[key] = value;
-  });
+  const form = event.target;
+  const username = usernameInput?.value.trim();
+  const password = loginPasswordInput?.value;
+
+  if (!username || !password) {
+    showStatusMessage('Enter both your username and password.');
+    return;
+  }
+
+  const payload = {
+    UserName: username,
+    PassWord: password,
+    Friends: [],
+  };
+
+  setButtonState(form, true, 'Logging In...');
+
   try {
-    const response = await axios.post(
-      'http://localhost:5018/api/Account/LogIn',
-      formDataObject
-    );
-    console.log('login response:', response);
+    const response = await axios.post(`${accountsApiBase}/api/Account/LogIn`, payload);
+    const token = response?.data?.token;
 
-    const token = response.data.token;
-    document.cookie = `token=${token}; path=/`;
+    if (!token) {
+      showStatusMessage(response?.data?.message || 'Login failed.');
+      return;
+    }
 
+    document.cookie = `token=${token}; path=/; max-age=1209600; SameSite=Lax`;
     const jwtRes = await axios.post(
-      `http://localhost:5018/api/Account/VerifyToken?token=${token}`
+      `${accountsApiBase}/api/Account/VerifyToken?token=${encodeURIComponent(token)}`
     );
-    console.log('token check result:', jwtRes);
 
     if (response.data.message) {
-      const modalContent = document.querySelector('.content');
-      modalContent.innerText = response.data.message;
-      const outerModal = document.querySelector('.outerModal');
-      outerModal.style.display = 'flex';
+      showStatusMessage(response.data.message);
+    }
 
-      setTimeout(() => {
-        outerModal.style.display = 'none';
-      }, 2000);
+    if (jwtRes?.data?.message === 'Token is correct.') {
+      window.setTimeout(() => {
+        window.location.replace(accountsRedirectToPage('Home.html'));
+      }, 500);
+      return;
     }
-    setTimeout(() => {
-      if (jwtRes.data.message === 'Token is correct.') {
-        window.location.replace('/Pages/Home.html');
-      }
-    }, 1000);
+
+    showStatusMessage('Your session could not be verified.');
   } catch (e) {
-    console.log('login failed:', e);
-    if (e.response && e.response.data && e.response.data.message) {
-      const modalContent = document.querySelector('.content');
-      if (modalContent) modalContent.innerText = e.response.data.message;
-      const outerModal = document.querySelector('.outerModal');
-      if (outerModal) {
-        outerModal.style.display = 'flex';
-        setTimeout(() => {
-          outerModal.style.display = 'none';
-        }, 2000);
-      }
-    }
+    const message =
+      e?.response?.data?.message ||
+      'The server could not be reached. Make sure the API is running on port 5018.';
+    showStatusMessage(message);
+  } finally {
+    setButtonState(form, false, 'Log In');
   }
-  console.log('form validation broke:', formDataObject);
 }
 
 async function RegisterForm(event) {
   event.preventDefault();
 
-  const formData = new FormData(event.target);
-  const formDataObject = { Friends: [] };
-  formData.forEach((value, key) => {
-    formDataObject[key] = value;
-  });
+  const form = event.target;
+  const username = usernameInput?.value.trim();
+  const password = passwordInput?.value;
+  const confirmPassword = confirmPasswordInput?.value;
 
-  const password = passwordInput.value;
-  const confirmPassword = confirmPasswordInput.value;
+  if (!username || !password || !confirmPassword) {
+    showStatusMessage('Fill out every required field.');
+    return;
+  }
 
   if (password !== confirmPassword) {
-    console.log('passwords dont match');
-  } else {
-    console.log('passwords match');
-    console.log('signup data being sent:', formDataObject);
+    showStatusMessage('Passwords do not match.');
+    confirmPasswordInput?.focus();
+    return;
+  }
 
-    try {
-      const response = await axios.post(
-        'http://localhost:5018/api/Account/CreateAccount',
-        formDataObject
-      );
-      console.log('signup response:', response);
-      console.log('signup msg:', response.data.message);
+  const payload = {
+    UserName: username,
+    PassWord: password,
+    Friends: [],
+  };
 
-      if (response.data.message) {
-        const modalContent = document.querySelector('.content');
-        modalContent.innerText = response.data.message;
-        const outerModal = document.querySelector('.outerModal');
-        outerModal.style.display = 'flex';
+  setButtonState(form, true, 'Creating Account...');
 
-        setTimeout(() => {
-          outerModal.style.display = 'none';
-          if (response.data.message.includes('Account Created') || response.status === 200) {
-            window.location.href = 'LogIn.html';
-          }
-        }, 2000);
-      }
-    } catch (e) {
-      console.log('signup failed:', e);
-      if (e.response && e.response.data && e.response.data.message) {
-        const modalContent = document.querySelector('.content');
-        if (modalContent) modalContent.innerText = e.response.data.message;
-        const outerModal = document.querySelector('.outerModal');
-        if (outerModal) {
-          outerModal.style.display = 'flex';
-          setTimeout(() => {
-            outerModal.style.display = 'none';
-          }, 2000);
-        }
-      }
+  try {
+    const response = await axios.post(
+      `${accountsApiBase}/api/Account/CreateAccount`,
+      payload
+    );
+    const message = response?.data?.message || 'Account created.';
+
+    showStatusMessage(message);
+
+    if (
+      response.status === 200 &&
+      typeof message === 'string' &&
+      message.toLowerCase().includes('created')
+    ) {
+      window.setTimeout(() => {
+        window.location.replace(accountsRedirectToPage('LogIn.html'));
+      }, 700);
     }
+  } catch (e) {
+    const message =
+      e?.response?.data?.message ||
+      'The server could not be reached. Make sure the API is running on port 5018.';
+    showStatusMessage(message);
+  } finally {
+    setButtonState(form, false, 'Continue');
   }
 }
