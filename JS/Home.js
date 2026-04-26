@@ -1,5 +1,14 @@
 'use strict';
 
+const homeAppPaths = window.APP_PATHS || {
+  assetUrl: (path) => `../${String(path || '').replace(/^\/+/, '')}`,
+  pageUrl: (pageName) => `./${pageName}`,
+};
+const homeDefaultAvatarUrl = homeAppPaths.assetUrl('assets/img/titlePic.png');
+const homeDefaultAvatarBackground = `url("${homeDefaultAvatarUrl}")`;
+const homeRingtoneUrl = homeAppPaths.assetUrl('assets/audio/ringtone.mp3');
+const homeLoginPageUrl = homeAppPaths.pageUrl('LogIn.html');
+
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let selectedChannelID;
@@ -9,7 +18,10 @@ let chatMessages = document.querySelector('.chatMessages');
 let userJoined = document.querySelector('.UserJoined');
 let mainFriendsDiv = document.querySelector('.MainFriendsDiv');
 let directMessageUser = document.querySelector('.messageUser');
-document.getElementById('serverDetails').style.display = 'none';
+const serverDetailsPanel = document.getElementById('serverDetails');
+if (serverDetailsPanel) {
+  serverDetailsPanel.style.display = 'none';
+}
 const messageModalContent = document.querySelector('.ContentMessage');
 const messageOuterModal = document.querySelector('.outerModalMessage');
 const username = document.getElementById('username');
@@ -30,18 +42,33 @@ function GetCookieToken(name) {
 let cookieVal = GetCookieToken('token');
 
 function decodeJWT(token) {
+  if (!token) return null;
+
   const parts = token.split('.');
-  const header = JSON.parse(atob(parts[0]));
-  const payload = JSON.parse(atob(parts[1]));
-  return {
-    header: header,
-    payload: payload,
-  };
+  if (parts.length < 2) return null;
+
+  try {
+    const header = JSON.parse(atob(parts[0]));
+    const payload = JSON.parse(atob(parts[1]));
+    return {
+      header,
+      payload,
+    };
+  } catch (error) {
+    console.error('Failed to decode JWT', error);
+    return null;
+  }
 }
-const jwt = cookieVal;
-const decodedJWT = decodeJWT(jwt);
-let JWTusername = decodedJWT.payload.username;
-username.innerHTML = JWTusername;
+const decodedJWT = decodeJWT(cookieVal);
+let JWTusername = decodedJWT?.payload?.username || '';
+
+if (!JWTusername) {
+  window.location.replace(homeLoginPageUrl);
+}
+
+if (username) {
+  username.textContent = JWTusername || 'Guest';
+}
 let ringtoneAudio = null;
 
 
@@ -65,7 +92,7 @@ function startRingtone() {
   console.log("Starting Ringtone");
 
   try {
-    ringtoneAudio = new Audio('/assets/audio/ringtone.mp3');
+    ringtoneAudio = new Audio(homeRingtoneUrl);
     ringtoneAudio.loop = true;
     ringtoneAudio.volume = 0.5;
 
@@ -122,7 +149,9 @@ function stopRingtone() {
   }
 }
 
-inServerUsername.innerHTML = JWTusername;
+if (inServerUsername) {
+  inServerUsername.textContent = JWTusername || 'Guest';
+}
 
 function openModal() {
   document.querySelector('.outerModal').style.display = 'flex';
@@ -135,8 +164,23 @@ function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
     modal.style.display = 'flex';
-
     switchSettingsTab('my-account');
+
+    // Populate username fields
+    if (typeof JWTusername !== 'undefined') {
+      const sName = document.getElementById('settingsDisplayName');
+      const sNameVal = document.getElementById('settingsDisplayNameValue');
+      const sUserVal = document.getElementById('settingsUsernameValue');
+      if (sName) sName.innerText = JWTusername;
+      if (sNameVal) sNameVal.innerText = JWTusername;
+      if (sUserVal) sUserVal.innerText = JWTusername;
+
+      // Update profile preview card
+      const previewName = document.querySelector('.preview-name');
+      const previewTag = document.querySelector('.preview-tag');
+      if (previewName) previewName.textContent = JWTusername;
+      if (previewTag) previewTag.textContent = '#' + Math.floor(Math.random() * 9999).toString().padStart(4, '0');
+    }
   }
 }
 
@@ -186,12 +230,11 @@ async function loadCustomTheme() {
     const res = await axios.get(`http://localhost:5018/api/Account/GetAccountTheme?username=${JWTusername}`);
     const theme = res.data;
     if (theme && theme.backgroundColor) {
-      document.documentElement.style.setProperty('--main-bg', theme.backgroundColor);
+      applyTheme(theme.backgroundColor, theme.textColor || DEFAULT_THEME.text);
       document.getElementById('customBgColor').value = theme.backgroundColor;
-    }
-    if (theme && theme.textColor) {
-      document.documentElement.style.setProperty('--text-main', theme.textColor);
-      document.getElementById('customTextColor').value = theme.textColor;
+      if (theme.textColor) {
+        document.getElementById('customTextColor').value = theme.textColor;
+      }
     }
   } catch (err) {
     console.error('Failed to load custom theme', err);
@@ -250,69 +293,6 @@ function initializeSettingsListeners() {
 
     });
   });
-
-  const saveThemeBtn = document.getElementById('saveCustomThemeBtn');
-  if (saveThemeBtn) {
-    saveThemeBtn.addEventListener('click', async () => {
-      const bgColor = document.getElementById('customBgColor').value;
-      const txtColor = document.getElementById('customTextColor').value;
-
-      try {
-        await axios.post('http://localhost:5018/api/Account/UpdateAccountTheme', {
-          Username: JWTusername,
-          BackgroundColor: bgColor,
-          TextColor: txtColor
-        });
-
-        document.documentElement.style.setProperty('--main-bg', bgColor);
-        document.documentElement.style.setProperty('--text-main', txtColor);
-        console.log('Custom theme saved and applied');
-      } catch (err) {
-        console.error('Failed to save theme', err);
-      }
-    });
-  }
-
-  const saveProfileBtn = document.getElementById('saveProfileSettingsBtn');
-  if (saveProfileBtn) {
-    saveProfileBtn.addEventListener('click', async () => {
-      const url = document.getElementById('profilePictureUrlInput').value;
-      const desc = document.getElementById('profileDescriptionInput').value;
-
-      try {
-        await axios.post('http://localhost:5018/api/Account/UpdateAccountProfile', {
-          Username: JWTusername,
-          ProfilePictureUrl: url,
-          Description: desc
-        });
-
-        const alertDiv = document.createElement('div');
-        alertDiv.style.position = 'fixed';
-        alertDiv.style.top = '10px';
-        alertDiv.style.left = '50%';
-        alertDiv.style.transform = 'translateX(-50%)';
-        alertDiv.style.backgroundColor = '#43b581';
-        alertDiv.style.color = 'white';
-        alertDiv.style.padding = '10px 20px';
-        alertDiv.style.borderRadius = '4px';
-        alertDiv.style.zIndex = '999999';
-        alertDiv.innerText = 'Profile saved!';
-        document.body.appendChild(alertDiv);
-        setTimeout(() => alertDiv.remove(), 3000);
-      } catch (err) {
-        console.error('Error saving profile', err);
-      }
-    });
-  }
-
-  const resetThemeBtn = document.getElementById('resetCustomThemeBtn');
-  if (resetThemeBtn) {
-    resetThemeBtn.addEventListener('click', async () => {
-      document.getElementById('customBgColor').value = '#313338';
-      document.getElementById('customTextColor').value = '#dbdee1';
-      saveThemeBtn.click();
-    });
-  }
 }
 
 function openSecondModal() {
@@ -509,7 +489,7 @@ function stopServerMessagePolling() {
 }
 function LogOut() {
   document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-  window.location.href = '/Pages/LogIn.html';
+  window.location.href = homeLoginPageUrl;
 }
 async function ServerChat(event) {
   event.preventDefault();
@@ -609,7 +589,7 @@ async function fetchPendingRequests() {
 
       const avatar = document.createElement('div');
       avatar.className = 'friend-item-avatar';
-      avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+      avatar.style.backgroundImage = homeDefaultAvatarBackground;
       avatar.onclick = (e) => openProfilePopout(reqUser, e.pageX, e.pageY);
 
       const info = document.createElement('div');
@@ -1177,7 +1157,7 @@ async function openCreateDMModal() {
       div.className = 'dmFriendItem';
       div.innerHTML = `
               <input type="checkbox" class="dmFriendInput" value="${friend}">
-              <div style="width: 32px; height: 32px; border-radius: 50%; background-color: #5865f2; margin-right: 10px; background-image: url('/assets/img/titlePic.png'); background-size: cover;"></div>
+              <div style="width: 32px; height: 32px; border-radius: 50%; background-color: #5865f2; margin-right: 10px; background-image: ${homeDefaultAvatarBackground}; background-size: cover;"></div>
               <span>${friend}</span>
           `;
       div.onclick = (e) => {
@@ -1459,7 +1439,7 @@ function showGroupCallUI() {
     document.body.appendChild(container);
 
     const closeBtn = document.createElement('button');
-    closeBtn.innerText = "Length Call";
+    closeBtn.innerText = "Leave Call";
     closeBtn.style.cssText = "position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; background: red; color: white; border: none; border-radius: 5px; cursor: pointer;";
     closeBtn.onclick = leaveGroupCall;
     container.appendChild(closeBtn);
@@ -1906,15 +1886,14 @@ async function initializeVoiceConnection() {
 
         const remoteDesc = new RTCSessionDescription(JSON.parse(offer));
         if (peerConnection.signalingState === 'have-local-offer') {
-          if (platform === 'browser') {
-            if (JWTusername > fromUser) {
-              console.log("I am impolite (initiator), ignoring colliding offer from", fromUser);
-              return;
-            }
+          // Polite peer logic: lower username yields
+          if (JWTusername > fromUser) {
+            console.log("I am impolite (initiator), ignoring colliding offer from", fromUser);
+            return;
           }
 
           await peerConnection.setRemoteDescription(remoteDesc);
-          logToScreen(`RX SDP: hasVideo=${offer.includes('m=video')}, State=${peerConnection.signalingState}`);
+          console.log(`RX SDP: hasVideo=${offer.includes('m=video')}, State=${peerConnection.signalingState}`);
 
           if (peerConnection.signalingState === 'have-remote-offer') {
             const answer = await peerConnection.createAnswer();
@@ -1937,7 +1916,7 @@ async function initializeVoiceConnection() {
     }
 
     async function handlePeerAnswer(fromUser, answer) {
-      logToScreen(`RX Answer from ${fromUser}`);
+      console.log(`RX Answer from ${fromUser}`);
 
 
       const isServerPeer = currentVoiceUsers && currentVoiceUsers.includes(fromUser);
@@ -2469,7 +2448,7 @@ async function VideoOn() {
       }
 
       const offer = await pc.createOffer();
-      logToScreen(`SDP content: hasVideo=${offer.sdp.includes('m=video')}`);
+      console.log(`SDP content: hasVideo=${offer.sdp.includes('m=video')}`);
       await pc.setLocalDescription(offer);
 
       let targetUser = null;
@@ -2481,7 +2460,7 @@ async function VideoOn() {
       }
 
       if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
-        logToScreen(`VideoOn: Sending offer to ${targetUser}`);
+        console.log(`VideoOn: Sending offer to ${targetUser}`);
         voiceConnection.send(JSON.stringify({
           Type: 'peer-offer',
           Data: JSON.stringify(offer),
@@ -2693,7 +2672,7 @@ async function ShareScreen() {
         }
 
         if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
-          logToScreen(`ShareScreen (New Track): Sending offer to ${targetUser}`);
+          console.log(`ShareScreen (New Track): Sending offer to ${targetUser}`);
           voiceConnection.send(JSON.stringify({
             Type: 'peer-offer',
             Data: JSON.stringify(offer),
@@ -2730,29 +2709,7 @@ window.UnmuteAudio = UnmuteAudio;
 
 
 function logToScreen(msg) {
-  let debugConsole = document.getElementById('debugConsole');
-  if (!debugConsole) {
-    debugConsole = document.createElement('div');
-    debugConsole.id = 'debugConsole';
-    debugConsole.style.position = 'fixed';
-    debugConsole.style.bottom = '0';
-    debugConsole.style.left = '0';
-    debugConsole.style.width = '100%';
-    debugConsole.style.height = '150px';
-    debugConsole.style.backgroundColor = 'rgba(0,0,0,0.8)';
-    debugConsole.style.color = '#00ff00';
-    debugConsole.style.overflowY = 'scroll';
-    debugConsole.style.zIndex = '9999';
-    debugConsole.style.fontSize = '12px';
-    debugConsole.style.padding = '5px';
-    debugConsole.style.pointerEvents = 'none';
-    document.body.appendChild(debugConsole);
-  }
-  const line = document.createElement('div');
-  line.textContent = `[${new Date().toLocaleTimeString()}] MY_CODE: ${msg}`;
-  debugConsole.appendChild(line);
-  debugConsole.scrollTop = debugConsole.scrollHeight;
-  console.log(`MY_CODE: ${msg}`);
+  console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
 }
 
 async function fetchServerDetails() {
@@ -2875,7 +2832,7 @@ async function fetchServerMembers() {
       avatar.style.borderRadius = '50%';
       avatar.style.backgroundColor = '#' + Math.floor(Math.random() * 16777215).toString(16);
       avatar.style.marginRight = '10px';
-      avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+      avatar.style.backgroundImage = homeDefaultAvatarBackground;
       avatar.style.backgroundSize = 'cover';
       avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
 
@@ -2934,7 +2891,7 @@ function renderVoiceUserList(users) {
       avatar.style.borderRadius = '50%';
       avatar.style.backgroundColor = '#5865f2';
       avatar.style.marginRight = '5px';
-      avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+      avatar.style.backgroundImage = homeDefaultAvatarBackground;
       avatar.style.backgroundSize = 'cover';
 
       const nameSpan = document.createElement('span');
@@ -3424,7 +3381,7 @@ async function FetchAndRenderFriendsMain() {
 
       const avatar = document.createElement('div');
       avatar.className = 'friend-item-avatar';
-      avatar.style.backgroundImage = 'url(/assets/img/titlePic.png)';
+      avatar.style.backgroundImage = homeDefaultAvatarBackground;
       avatar.onclick = (e) => openProfilePopout(friendName, e.pageX, e.pageY);
 
       const info = document.createElement('div');
@@ -4042,7 +3999,7 @@ window.openProfilePopout = async function (username, x, y) {
 
   document.getElementById('popoutUsername').innerText = username;
   document.getElementById('popoutDescription').innerText = "Loading...";
-  document.getElementById('popoutAvatar').src = "/assets/img/titlePic.png";
+  document.getElementById('popoutAvatar').src = homeDefaultAvatarUrl;
 
   try {
     const res = await axios.get(`http://localhost:5018/api/Account/GetAccountProfile?username=${username}`);
@@ -4085,25 +4042,390 @@ window.openProfilePopout = async function (username, x, y) {
 document.addEventListener('DOMContentLoaded', () => {
   setupEmojiPicker();
   setupMessageSearch();
-})
+  setupSettingsInteractivity();
+  loadUserTheme();
+  loadUserProfile();
+});
 
-function openSettingsModal() {
-  const modal = document.getElementById('settingsModal');
-  if (modal) modal.style.display = 'flex';
+// ===== Settings Tab Switching =====
+function switchSettingsTab(target) {
+  // Hide all settings views
+  document.querySelectorAll('.settings-view').forEach(v => v.style.display = 'none');
+  
+  // Show the target view
+  const view = document.getElementById('view-' + target);
+  if (view) view.style.display = 'block';
+  
+  // Update sidebar active state
+  document.querySelectorAll('.settings-item').forEach(item => {
+    item.classList.remove('active');
+    if (item.dataset.target === target) item.classList.add('active');
+  });
+}
+window.switchSettingsTab = switchSettingsTab;
 
+function setupSettingsInteractivity() {
+  // --- Sidebar tab clicking ---
+  document.querySelectorAll('.settings-item[data-target]').forEach(item => {
+    item.addEventListener('click', () => {
+      switchSettingsTab(item.dataset.target);
+    });
+  });
 
-  if (typeof JWTusername !== 'undefined') {
-    const sName = document.getElementById('settingsDisplayName');
-    const sNameVal = document.getElementById('settingsDisplayNameValue');
-    const sUserVal = document.getElementById('settingsUsernameValue');
+  // --- Toggle switches ---
+  document.querySelectorAll('.toggle-switch').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      toggle.classList.toggle('active');
+    });
+  });
 
-    if (sName) sName.innerText = JWTusername;
-    if (sNameVal) sNameVal.innerText = JWTusername;
-    if (sUserVal) sUserVal.innerText = JWTusername;
+  // --- Radio groups ---
+  document.querySelectorAll('.radio-group').forEach(group => {
+    group.querySelectorAll('.radio-item').forEach(item => {
+      item.addEventListener('click', () => {
+        group.querySelectorAll('.radio-item').forEach(i => {
+          i.classList.remove('active');
+          i.querySelector('.radio-circle')?.classList.remove('selected');
+        });
+        item.classList.add('active');
+        item.querySelector('.radio-circle')?.classList.add('selected');
+      });
+    });
+  });
+
+  // --- Checkbox toggles ---
+  document.querySelectorAll('.checkbox-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const box = item.querySelector('.checkbox-box');
+      if (box) box.classList.toggle('checked');
+    });
+  });
+
+  // --- ESC key closes settings ---
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const modal = document.getElementById('settingsModal');
+      if (modal && modal.style.display === 'flex') {
+        closeSettingsModal();
+      }
+    }
+  });
+
+  // --- Save Profile Button ---
+  const saveProfileBtn = document.getElementById('saveProfileSettingsBtn');
+  if (saveProfileBtn) {
+    saveProfileBtn.addEventListener('click', async () => {
+      const profilePicUrl = document.getElementById('profilePictureUrlInput')?.value || '';
+      const description = document.getElementById('profileDescriptionInput')?.value || '';
+      
+      try {
+        saveProfileBtn.textContent = 'Saving...';
+        saveProfileBtn.disabled = true;
+        
+        await axios.post('http://localhost:5018/api/Account/UpdateAccountProfile', {
+          username: JWTusername,
+          profilePictureUrl: profilePicUrl,
+          description: description
+        });
+        
+        saveProfileBtn.textContent = 'Saved!';
+        setTimeout(() => {
+          saveProfileBtn.textContent = 'Save Profile';
+          saveProfileBtn.disabled = false;
+        }, 2000);
+        
+        // Update avatar previews if URL provided
+        if (profilePicUrl) {
+          document.querySelectorAll('.settings-avatar, .preview-avatar img, #popoutAvatar').forEach(img => {
+            if (img.tagName === 'IMG') img.src = profilePicUrl;
+          });
+        }
+      } catch (err) {
+        console.error('Failed to save profile:', err);
+        saveProfileBtn.textContent = 'Error - Try Again';
+        saveProfileBtn.disabled = false;
+      }
+    });
+  }
+
+  // --- Save Custom Theme Button ---
+  const saveThemeBtn = document.getElementById('saveCustomThemeBtn');
+  if (saveThemeBtn) {
+    saveThemeBtn.addEventListener('click', async () => {
+      const bgColor = document.getElementById('customBgColor')?.value || DEFAULT_THEME.background;
+      const textColor = document.getElementById('customTextColor')?.value || DEFAULT_THEME.text;
+      
+      try {
+        saveThemeBtn.textContent = 'Saving...';
+        saveThemeBtn.disabled = true;
+        
+        await axios.post('http://localhost:5018/api/Account/UpdateAccountTheme', {
+          username: JWTusername,
+          backgroundColor: bgColor,
+          textColor: textColor
+        });
+        
+        // Apply theme immediately
+        applyTheme(bgColor, textColor);
+        
+        saveThemeBtn.textContent = 'Saved!';
+        setTimeout(() => {
+          saveThemeBtn.textContent = 'Save Theme';
+          saveThemeBtn.disabled = false;
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to save theme:', err);
+        saveThemeBtn.textContent = 'Error - Try Again';
+        saveThemeBtn.disabled = false;
+      }
+    });
+  }
+
+  // --- Reset Theme Button ---
+  const resetThemeBtn = document.getElementById('resetCustomThemeBtn');
+  if (resetThemeBtn) {
+    resetThemeBtn.addEventListener('click', async () => {
+      try {
+        await axios.post('http://localhost:5018/api/Account/UpdateAccountTheme', {
+          username: JWTusername,
+          backgroundColor: DEFAULT_THEME.background,
+          textColor: DEFAULT_THEME.text
+        });
+        
+        applyTheme(DEFAULT_THEME.background, DEFAULT_THEME.text);
+        
+        const bgInput = document.getElementById('customBgColor');
+        const textInput = document.getElementById('customTextColor');
+        if (bgInput) bgInput.value = DEFAULT_THEME.background;
+        if (textInput) textInput.value = DEFAULT_THEME.text;
+        
+      } catch (err) {
+        console.error('Failed to reset theme:', err);
+      }
+    });
+  }
+
+  const bgInput = document.getElementById('customBgColor');
+  const textInput = document.getElementById('customTextColor');
+  const previewTheme = () => {
+    if (!bgInput || !textInput) return;
+    applyTheme(
+      bgInput.value || DEFAULT_THEME.background,
+      textInput.value || DEFAULT_THEME.text
+    );
+  };
+  if (bgInput) bgInput.addEventListener('input', previewTheme);
+  if (textInput) textInput.addEventListener('input', previewTheme);
+
+  // --- Font Scaling Slider ---
+  const fontSlider = document.getElementById('fontScalingSlider');
+  if (fontSlider) {
+    fontSlider.addEventListener('input', (e) => {
+      const size = e.target.value + 'px';
+      document.querySelectorAll('.message-text, .messagesDisplay p').forEach(el => {
+        el.style.fontSize = size;
+      });
+      localStorage.setItem('discordClone_fontSize', e.target.value);
+    });
+
+    // Load saved font size
+    const savedSize = localStorage.getItem('discordClone_fontSize');
+    if (savedSize) {
+      fontSlider.value = savedSize;
+    }
+  }
+
+  // --- Edit Profile button in My Account tab ---
+  const editProfileBtn = document.querySelector('.edit-profile-btn');
+  if (editProfileBtn) {
+    editProfileBtn.addEventListener('click', () => {
+      switchSettingsTab('profiles');
+    });
   }
 }
 
-function closeSettingsModal() {
-  const modal = document.getElementById('settingsModal');
-  if (modal) modal.style.display = 'none';
+const DEFAULT_THEME = {
+  background: '#313338',
+  text: '#dbdee1',
+};
+
+function clampColorChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function normalizeHexColor(color, fallback = DEFAULT_THEME.background) {
+  if (typeof color !== 'string') return fallback;
+
+  const trimmed = color.trim();
+  const raw = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
+
+  if (/^[0-9a-fA-F]{3}$/.test(raw)) {
+    return `#${raw
+      .split('')
+      .map((char) => char + char)
+      .join('')
+      .toLowerCase()}`;
+  }
+
+  if (/^[0-9a-fA-F]{6}$/.test(raw)) {
+    return `#${raw.toLowerCase()}`;
+  }
+
+  return fallback;
+}
+
+function hexToRgb(color) {
+  const normalized = normalizeHexColor(color);
+  return {
+    r: parseInt(normalized.slice(1, 3), 16),
+    g: parseInt(normalized.slice(3, 5), 16),
+    b: parseInt(normalized.slice(5, 7), 16),
+  };
+}
+
+function rgbToHex({ r, g, b }) {
+  return `#${[r, g, b]
+    .map((value) => clampColorChannel(value).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+function mixColors(startColor, endColor, amount) {
+  const start = hexToRgb(startColor);
+  const end = hexToRgb(endColor);
+  const mixAmount = Math.max(0, Math.min(1, amount));
+
+  return rgbToHex({
+    r: start.r + (end.r - start.r) * mixAmount,
+    g: start.g + (end.g - start.g) * mixAmount,
+    b: start.b + (end.b - start.b) * mixAmount,
+  });
+}
+
+function getRelativeLuminance(color) {
+  const { r, g, b } = hexToRgb(color);
+  const channels = [r, g, b].map((value) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+
+  return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+}
+
+function getContrastRatio(colorA, colorB) {
+  const luminanceA = getRelativeLuminance(colorA);
+  const luminanceB = getRelativeLuminance(colorB);
+  const lighter = Math.max(luminanceA, luminanceB);
+  const darker = Math.min(luminanceA, luminanceB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function getReadableTextColor(backgroundColor, preferredTextColor) {
+  const background = normalizeHexColor(backgroundColor, DEFAULT_THEME.background);
+  const preferred = normalizeHexColor(
+    preferredTextColor,
+    DEFAULT_THEME.text
+  );
+
+  if (getContrastRatio(background, preferred) >= 4.5) {
+    return preferred;
+  }
+
+  const whiteContrast = getContrastRatio(background, '#ffffff');
+  const blackContrast = getContrastRatio(background, '#000000');
+
+  return whiteContrast >= blackContrast ? '#ffffff' : '#000000';
+}
+
+function buildThemePalette(backgroundColor, textColor) {
+  const background = normalizeHexColor(
+    backgroundColor,
+    DEFAULT_THEME.background
+  );
+  const mainText = getReadableTextColor(background, textColor);
+  const isDarkTheme = getRelativeLuminance(background) < 0.35;
+  const referenceColor = isDarkTheme ? '#ffffff' : '#000000';
+
+  return {
+    background,
+    secondBackground: mixColors(background, referenceColor, isDarkTheme ? 0.07 : 0.05),
+    raisedSurface: mixColors(background, referenceColor, isDarkTheme ? 0.13 : 0.1),
+    floatingSurface: mixColors(background, referenceColor, isDarkTheme ? 0.18 : 0.15),
+    inputSurface: mixColors(background, referenceColor, isDarkTheme ? 0.15 : 0.11),
+    inputStrongSurface: mixColors(background, referenceColor, isDarkTheme ? 0.22 : 0.18),
+    borderSubtle: mixColors(background, mainText, 0.16),
+    borderStrong: mixColors(background, mainText, 0.26),
+    mainText,
+    mutedText: mixColors(mainText, background, 0.3),
+    softText: mixColors(mainText, background, 0.48),
+    inverseText: getReadableTextColor(mainText, background),
+    shadowColor: isDarkTheme ? 'rgba(0, 0, 0, 0.38)' : 'rgba(0, 0, 0, 0.18)',
+  };
+}
+
+function applyTheme(bgColor, textColor) {
+  const theme = buildThemePalette(bgColor, textColor);
+  const rootStyle = document.documentElement.style;
+
+  rootStyle.setProperty('--main-bg', theme.background);
+  rootStyle.setProperty('--second-bg', theme.secondBackground);
+  rootStyle.setProperty('--surface-raised', theme.raisedSurface);
+  rootStyle.setProperty('--surface-floating', theme.floatingSurface);
+  rootStyle.setProperty('--input-bg', theme.inputSurface);
+  rootStyle.setProperty('--input-strong', theme.inputStrongSurface);
+  rootStyle.setProperty('--border-subtle', theme.borderSubtle);
+  rootStyle.setProperty('--border-strong', theme.borderStrong);
+  rootStyle.setProperty('--text-main', theme.mainText);
+  rootStyle.setProperty('--text-muted', theme.mutedText);
+  rootStyle.setProperty('--text-soft', theme.softText);
+  rootStyle.setProperty('--text-inverse', theme.inverseText);
+  rootStyle.setProperty('--theme-shadow', theme.shadowColor);
+
+  return theme;
+}
+
+async function loadUserTheme() {
+  try {
+    if (typeof JWTusername === 'undefined' || !JWTusername) return;
+    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountTheme?username=${JWTusername}`);
+    if (res.data && res.data.backgroundColor) {
+      applyTheme(res.data.backgroundColor, res.data.textColor || '#dbdee1');
+      
+      const bgInput = document.getElementById('customBgColor');
+      const textInput = document.getElementById('customTextColor');
+      if (bgInput) bgInput.value = res.data.backgroundColor;
+      if (textInput && res.data.textColor) textInput.value = res.data.textColor;
+    }
+  } catch (err) {
+    console.log('Could not load theme, using defaults');
+  }
+}
+
+async function loadUserProfile() {
+  try {
+    if (typeof JWTusername === 'undefined' || !JWTusername) return;
+    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountProfile?username=${JWTusername}`);
+    if (res.data) {
+      const picInput = document.getElementById('profilePictureUrlInput');
+      const descInput = document.getElementById('profileDescriptionInput');
+      
+      if (picInput && res.data.profilePictureUrl) picInput.value = res.data.profilePictureUrl;
+      if (descInput && res.data.description) descInput.value = res.data.description;
+      
+      // Update preview
+      if (res.data.profilePictureUrl) {
+        document.querySelectorAll('.settings-avatar, .preview-avatar img').forEach(img => {
+          if (img.tagName === 'IMG') img.src = res.data.profilePictureUrl;
+        });
+      }
+      
+      if (res.data.description) {
+        const customStatus = document.querySelector('.preview-custom-status');
+        if (customStatus) customStatus.textContent = res.data.description;
+      }
+    }
+  } catch (err) {
+    console.log('Could not load profile, using defaults');
+  }
 }
