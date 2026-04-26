@@ -1,0 +1,259 @@
+@font-face {
+  font-family: 'headMessage';
+  src: url('../assets/fonts/headMessage.woff2');
+}
+
+@font-face {
+  font-family: 'headerFont';
+  src: url('../assets/fonts/headFont.woff2');
+}
+
+@font-face {
+  font-family: 'formLabels';
+  src: url('../assets/fonts/labelInputs.woff2');
+}
+
+@font-face {
+  font-family: 'formButton';
+  src: url('../assets/fonts/labelInputs.woff2');
+}
+
+@font-face {
+  font-family: 'belowFormButton';
+  src: url('../assets/fonts/belowFormButton.woff2');
+}
+
+:root {
+  --auth-panel: #313338;
+  --auth-panel-border: rgba(255, 255, 255, 0.08);
+  --auth-field: #1e1f22;
+  --auth-field-border: rgba(255, 255, 255, 0.08);
+  --auth-text: #f2f3f5;
+  --auth-muted: #b5bac1;
+  --auth-link: #00a8fb;
+  --auth-link-hover: #0dc1f5;
+  --auth-primary: #5865f2;
+  --auth-primary-hover: #4752c4;
+  --auth-overlay: rgba(17, 18, 20, 0.42);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body.auth-page {
+  background-color: #1e1f22;
+  color: var(--auth-muted);
+}
+
+.background {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-image: url('../assets/img/SignInBackground.png');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.background::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(17, 18, 20, 0.08), var(--auth-overlay));
+}
+
+.logInFormDiv {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 480px);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid var(--auth-panel-border);
+  background-color: var(--auth-panel);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
+body.register-page .logInFormDiv {
+  width: min(100%, 520px);
+}
+
+.logInHeader {
+  color: var(--auth-text);
+  text-align: center;
+  padding: 10px 0 6px;
+  font-family: 'headerFont', sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.headMessage {
+  margin-bottom: 20px;
+  color: var(--auth-muted);
+  text-align: center;
+  font-family: 'headMessage', sans-serif;
+}
+
+.outContent {
+  display: flex;
+  flex-direction: column;
+}
+
+.usernameLogInLabel,
+.passwordLogInLabel {
+  padding: 15px 0 8px;
+  color: var(--auth-muted);
+  font-family: 'formLabels', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.usernameInput,
+.LogInpasswordInput,
+.passwordInput,
+.confirmPasswordInput,
+.displayname {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px;
+  border: 1px solid var(--auth-field-border);
+  border-radius: 6px;
+  background-color: var(--auth-field);
+  color: #dbdee1;
+  font-size: 16px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.usernameInput:focus,
+.LogInpasswordInput:focus,
+.passwordInput:focus,
+.confirmPasswordInput:focus,
+.displayname:focus {
+  border-color: var(--auth-primary);
+  box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.18);
+  outline: none;
+}
+
+.logInButton {
+  margin-top: 24px;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 6px;
+  background-color: var(--auth-primary);
+  color: #ffffff;
+  font-family: 'formButton', sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.17s ease, transform 0.1s ease, opacity 0.17s ease;
+}
+
+.logInButton:hover {
+  background-color: var(--auth-primary-hover);
+}
+
+.logInButton:active {
+  transform: scale(0.98);
+}
+
+.logInButton:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.switchToRegisterInfo,
+.switchToRegister {
+  font-family: 'belowFormButton', sans-serif;
+  font-size: 14px;
+}
+
+.switchToRegisterInfo {
+  padding-top: 10px;
+  color: var(--auth-muted);
+}
+
+.switchToRegister,
+.labelLinks {
+  color: var(--auth-link);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.switchToRegister:hover,
+.labelLinks:hover {
+  color: var(--auth-link-hover);
+  text-decoration: underline;
+}
+
+.aroundCheckbox {
+  margin: 12px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.labelCheckbox {
+  color: #d6d9dd;
+  font-family: 'formLabels', sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  accent-color: var(--auth-primary);
+  cursor: pointer;
+}
+
+.outerModal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+.innerModal {
+  min-width: min(100%, 320px);
+  padding: 20px 24px;
+  border-radius: 10px;
+  background-color: var(--auth-panel);
+  border: 1px solid var(--auth-panel-border);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.content {
+  color: var(--auth-text);
+  text-align: center;
+  font-family: 'headerFont', sans-serif;
+  line-height: 1.4;
+}
+
+@media (max-width: 560px) {
+  .background {
+    padding: 16px;
+  }
+
+  .logInFormDiv {
+    padding: 24px;
+  }
+}
