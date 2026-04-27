@@ -5,10 +5,10 @@
   <meta charset="UTF-8" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../CSS/Home.css?v=6" />
+  <link rel="stylesheet" href="../CSS/Home.css?v=9" />
   <script src="../JS/AppPaths.js?v=1"></script>
   <script src="../JS/emojis.js?v=2"></script>
-  <script src="../JS/Home.js?v=112" defer></script>
+  <script src="../JS/Home.js?v=118" defer></script>
 </head>
 
 <body>
@@ -276,7 +276,7 @@
       <div class="chatSection">
         <p class="chatHeader">Text Channel</p>
         <div class="videoBox">
-          <video class="videos" id="localVideo" autoplay muted></video>
+          <video class="videos" id="serverLocalVideo" autoplay muted playsinline></video>
           <div id="remoteVideosContainer"></div>
         </div>
 
@@ -433,7 +433,7 @@
       <div class="settings-sidebar custom-scroll">
         <div class="settings-sidebar-header">
           <div class="sidebar-search">
-            <input type="text" placeholder="Search" />
+            <input id="settingsSearchInput" type="text" placeholder="Search settings" />
             <span class="search-icon">🔍</span>
           </div>
         </div>
@@ -521,24 +521,35 @@
               <div class="account-detail-row">
                 <div class="detail-info">
                   <label>Email</label>
-                  <div class="detail-value">*********@example.com <span class="reveal-link">Reveal</span></div>
+                  <div class="detail-value" id="settingsEmailValue">Not added</div>
                 </div>
-                <button class="edit-detail-btn">Edit</button>
+                <button class="edit-detail-btn" id="editContactInfoBtn">Edit</button>
               </div>
 
               <div class="account-detail-row">
                 <div class="detail-info">
                   <label>Phone Number</label>
-                  <div class="detail-value">********00 <span class="reveal-link">Reveal</span></div>
+                  <div class="detail-value" id="settingsPhoneValue">Not added</div>
                 </div>
                 <div class="detail-actions">
-                  <span class="remove-link">Remove</span>
-                  <button class="edit-detail-btn">Edit</button>
+                  <span class="remove-link" id="removePhoneNumberBtn">Remove</span>
+                  <button class="edit-detail-btn" id="editContactInfoBtnSecondary">Edit</button>
                 </div>
               </div>
             </div>
           </div>
+          <div class="settings-separator"></div>
 
+          <h3 class="settings-section-header">Status</h3>
+          <div class="form-group">
+            <label class="form-label" for="presenceStatusSelect">Presence</label>
+            <select class="settings-select" id="presenceStatusSelect" data-settings-select="presenceStatus">
+              <option value="online">Online</option>
+              <option value="idle">Idle</option>
+              <option value="do-not-disturb">Do Not Disturb</option>
+              <option value="invisible">Invisible</option>
+            </select>
+          </div>
           <div class="settings-separator"></div>
 
           <h3 class="settings-section-header">Password and Authentication</h3>
@@ -558,35 +569,48 @@
         <div id="view-profiles" class="settings-view" style="display: none;">
           <h2 class="settings-page-title">Profiles</h2>
 
-          <div class="settings-tab-bar">
-            <div class="settings-tab active">User Profile</div>
-            <div class="settings-tab">Server Profiles</div>
+          <div class="settings-tab-bar" data-settings-tab-bar="profileView">
+            <div class="settings-tab active" data-tab="user-profile">User Profile</div>
+            <div class="settings-tab" data-tab="server-profiles">Server Profiles</div>
           </div>
 
-          <div class="profile-preview-section">
-            <div class="profile-card-preview">
-              <div class="preview-banner"></div>
-              <div class="preview-avatar">
-                <img src="../assets/img/titlePic.png" alt="Avatar" />
-                <div class="preview-status"></div>
-              </div>
-              <div class="preview-user-info">
-                <div class="preview-name">User</div>
-                <div class="preview-tag">#0000</div>
-                <div class="preview-custom-status">
-                  Click to add custom status
+          <div class="settings-tab-panel" data-tab-panel="user-profile">
+            <div class="profile-preview-section">
+              <div class="profile-card-preview">
+                <div class="preview-banner"></div>
+                <div class="preview-avatar">
+                  <img src="../assets/img/titlePic.png" alt="Avatar" />
+                  <div class="preview-status"></div>
+                </div>
+                <div class="preview-user-info">
+                  <div class="preview-name">User</div>
+                  <div class="preview-tag">#0000</div>
+                  <div class="preview-custom-status">
+                    Click to add custom status
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-
           <div class="settings-separator"></div>
 
           <div class="form-group">
-            <label class="form-label">Profile Picture URL</label>
-            <p class="form-desc">Provide a direct link to an image to use as your avatar.</p>
+            <label class="form-label">Profile Picture</label>
+            <p class="form-desc">Upload an avatar or provide a direct image URL.</p>
             <input type="text" id="profilePictureUrlInput" class="textInput"
               style="width: 100%; margin: 0; margin-top: 10px;" placeholder="https://..." />
+            <input type="file" id="profileAvatarFileInput" accept="image/*" style="display: none;" />
+            <button type="button" id="uploadProfileAvatarBtn" class="settings-btn-primary"
+              style="margin-top: 10px; width: auto;">Upload Avatar</button>
+          </div>
+
+          <div class="form-group" style="margin-top: 20px;">
+            <label class="form-label">Profile Banner</label>
+            <p class="form-desc">Upload a banner image, or leave it blank and use a color.</p>
+            <input type="text" id="profileBannerUrlInput" class="textInput"
+              style="width: 100%; margin: 0; margin-top: 10px;" placeholder="https://..." />
+            <input type="file" id="profileBannerFileInput" accept="image/*" style="display: none;" />
+            <button type="button" id="uploadProfileBannerBtn" class="settings-btn-primary"
+              style="margin-top: 10px; width: auto;">Upload Banner</button>
           </div>
 
           <div class="form-group" style="margin-top: 20px;">
@@ -602,9 +626,17 @@
 
           <div class="form-group">
             <label class="form-label">Banner Color</label>
-              <div class="color-picker-box">
+            <div class="color-picker-box">
               <span class="color-hex">#0c0c0c</span>
-              <button class="edit-detail-btn">Change Color</button>
+              <button class="edit-detail-btn" id="profileBannerColorBtn">Change Color</button>
+            </div>
+          </div>
+          </div>
+
+          <div class="settings-tab-panel" data-tab-panel="server-profiles" style="display: none;">
+            <div class="empty-state-card" style="padding: 20px; border: 1px dashed #4f545c; background: transparent;">
+              <div class="empty-icon" style="font-size: 24px; margin-bottom: 10px;">SVR</div>
+              <p>Open a server to manage server-specific profile settings here.</p>
             </div>
           </div>
         </div>
@@ -617,22 +649,22 @@
             <p class="form-desc">Automatically scan and delete direct messages you receive that contain explicit media
               content.</p>
 
-            <div class="radio-group">
-              <div class="radio-item active">
+            <div class="radio-group" data-settings-radio="safeDmMode">
+              <div class="radio-item active" data-setting-value="keep-safe">
                 <div class="radio-content">
                   <div class="radio-title">Keep me safe</div>
                   <div class="radio-desc">Scan direct messages from everyone.</div>
                 </div>
                 <div class="radio-circle selected"></div>
               </div>
-              <div class="radio-item">
+              <div class="radio-item" data-setting-value="friends-exempt">
                 <div class="radio-content">
                   <div class="radio-title">My friends are nice</div>
                   <div class="radio-desc">Scan direct messages from everyone unless they are a friend.</div>
                 </div>
                 <div class="radio-circle"></div>
               </div>
-              <div class="radio-item">
+              <div class="radio-item" data-setting-value="off">
                 <div class="radio-content">
                   <div class="radio-title">Do not scan</div>
                   <div class="radio-desc">Direct messages will not be scanned for explicit content.</div>
@@ -645,10 +677,41 @@
           <div class="settings-separator"></div>
 
           <div class="privacy-card">
+            <h3 class="settings-section-header">Direct Message Privacy</h3>
+            <p class="form-desc">Choose who is allowed to start direct messages with you.</p>
+
+            <div class="radio-group" data-settings-radio="privacyDmPolicy">
+              <div class="radio-item active" data-setting-value="friends">
+                <div class="radio-content">
+                  <div class="radio-title">Friends only</div>
+                  <div class="radio-desc">Only people on your friends list can DM you.</div>
+                </div>
+                <div class="radio-circle selected"></div>
+              </div>
+              <div class="radio-item" data-setting-value="everyone">
+                <div class="radio-content">
+                  <div class="radio-title">Everyone</div>
+                  <div class="radio-desc">Anyone can start a direct message.</div>
+                </div>
+                <div class="radio-circle"></div>
+              </div>
+              <div class="radio-item" data-setting-value="none">
+                <div class="radio-content">
+                  <div class="radio-title">No one</div>
+                  <div class="radio-desc">Block new direct messages from everyone.</div>
+                </div>
+                <div class="radio-circle"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="privacy-card">
             <h3 class="settings-section-header">Server Privacy Defaults</h3>
             <p class="form-desc">Allow direct messages from server members.</p>
 
-            <div class="toggle-item">
+            <div class="toggle-item" data-setting-key="privacyAllowServerDms">
               <div class="toggle-info">
                 <div class="toggle-label">Allow direct messages from server members</div>
                 <div class="toggle-desc">This setting is applied when you join a new server. It does not apply
@@ -663,15 +726,15 @@
           <div class="privacy-card">
             <h3 class="settings-section-header">Who can add you as a friend</h3>
 
-            <div class="checkbox-item block">
+            <div class="checkbox-item block" data-setting-key="privacyFriendRequestsEveryone">
               <div class="checkbox-box checked"></div>
               <div class="checkbox-label">Everyone</div>
             </div>
-            <div class="checkbox-item block">
+            <div class="checkbox-item block" data-setting-key="privacyFriendRequestsFriendsOfFriends">
               <div class="checkbox-box checked"></div>
               <div class="checkbox-label">Friends of Friends</div>
             </div>
-            <div class="checkbox-item block">
+            <div class="checkbox-item block" data-setting-key="privacyFriendRequestsServerMembers">
               <div class="checkbox-box checked"></div>
               <div class="checkbox-label">Server Members</div>
             </div>
@@ -718,7 +781,7 @@
 
           <div class="devices-card">
             <h3 class="settings-section-header">Current Device</h3>
-            <div class="device-card current">
+            <div class="device-card current" id="currentSessionsList">
               <div class="device-icon">💻</div>
               <div class="device-info">
                 <div class="device-name">Windows PC (Chrome)</div>
@@ -729,7 +792,7 @@
 
           <div class="devices-card">
             <h3 class="settings-section-header">Other Devices</h3>
-            <div class="device-card">
+            <div class="device-card" id="otherSessionsList">
               <div class="device-icon">📱</div>
               <div class="device-info">
                 <div class="device-name">iPhone 13</div>
@@ -790,20 +853,20 @@
           <h2 class="settings-page-title">Appearance</h2>
 
           <h3 class="settings-section-header">Theme</h3>
-          <div class="radio-group" style="margin-bottom: 20px;">
-            <div class="radio-item active">
+          <div class="radio-group" data-settings-radio="themeMode" style="margin-bottom: 20px;">
+            <div class="radio-item active" data-setting-value="dark">
               <div class="radio-content">
                 <div class="radio-title">Dark</div>
               </div>
               <div class="radio-circle selected"></div>
             </div>
-            <div class="radio-item">
+            <div class="radio-item" data-setting-value="light">
               <div class="radio-content">
                 <div class="radio-title">Light</div>
               </div>
               <div class="radio-circle"></div>
             </div>
-            <div class="radio-item">
+            <div class="radio-item" data-setting-value="sync-with-computer">
               <div class="radio-content">
                 <div class="radio-title">Sync with computer</div>
               </div>
@@ -837,15 +900,15 @@
           <div class="settings-separator"></div>
 
           <h3 class="settings-section-header">Message Display</h3>
-          <div class="radio-group">
-            <div class="radio-item active" style="margin-bottom: 10px;">
+          <div class="radio-group" data-settings-radio="messageDisplay">
+            <div class="radio-item active" data-setting-value="cozy" style="margin-bottom: 10px;">
               <div class="radio-content">
                 <div class="radio-title">Cozy</div>
                 <div class="radio-desc">Modern, beautiful, and easy on your eyes.</div>
               </div>
               <div class="radio-circle selected"></div>
             </div>
-            <div class="radio-item">
+            <div class="radio-item" data-setting-value="compact">
               <div class="radio-content">
                 <div class="radio-title">Compact</div>
                 <div class="radio-desc">Fit more messages on screen at one time. #IRC</div>
@@ -896,7 +959,7 @@
 
           <div class="settings-separator"></div>
 
-          <div class="toggle-item">
+          <div class="toggle-item" data-setting-key="privacyShowActivity">
             <div class="toggle-info">
               <div class="toggle-label">Reduced Motion</div>
               <div class="toggle-desc">Reduce the amount of motion and animations in the application.</div>
@@ -938,7 +1001,7 @@
 
           <div class="form-group">
             <label class="form-label">Input Device</label>
-            <select class="settings-select">
+            <select class="settings-select" id="settingsInputDeviceSelect" data-settings-select="inputDevice">
               <option>Default</option>
               <option>Microphone (Realtek Audio)</option>
             </select>
@@ -946,7 +1009,7 @@
 
           <div class="form-group">
             <label class="form-label">Output Device</label>
-            <select class="settings-select">
+            <select class="settings-select" id="settingsOutputDeviceSelect" data-settings-select="outputDevice">
               <option>Default</option>
               <option>Speakers (Realtek Audio)</option>
             </select>
@@ -955,14 +1018,14 @@
           <div class="form-group">
             <label class="form-label">Input Volume</label>
             <div class="slider-container">
-              <input type="range" min="0" max="100" value="80" class="settings-slider">
+              <input type="range" min="0" max="100" value="80" class="settings-slider" id="inputVolumeSlider" data-settings-slider="inputVolume">
             </div>
           </div>
 
           <div class="form-group">
             <label class="form-label">Output Volume</label>
             <div class="slider-container">
-              <input type="range" min="0" max="100" value="100" class="settings-slider">
+              <input type="range" min="0" max="100" value="100" class="settings-slider" id="outputVolumeSlider" data-settings-slider="outputVolume">
             </div>
           </div>
 
@@ -970,7 +1033,8 @@
 
           <h3 class="settings-section-header">Mic Test</h3>
           <p class="form-desc">Having trouble with your microphone? Check if we can hear you.</p>
-          <button class="settings-btn-primary" style="width: auto;">Let's Check</button>
+          <button class="settings-btn-primary" id="settingsMicTestBtn" style="width: auto;">Let's Check</button>
+          <p class="form-desc" id="settingsMicTestStatus" style="margin-top: 10px;"></p>
 
           <div class="settings-separator"></div>
 
@@ -989,6 +1053,69 @@
               <div class="radio-circle"></div>
             </div>
           </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Voice Changer</h3>
+          <div class="toggle-item" data-setting-key="voiceChangerEnabled">
+            <div class="toggle-info">
+              <div class="toggle-label">Enable Voice Changer</div>
+              <div class="toggle-desc">Apply the selected voice effect to calls.</div>
+            </div>
+            <div class="toggle-switch"></div>
+          </div>
+
+          <div class="form-group" style="margin-top: 20px;">
+            <label class="form-label" for="voiceChangerPresetSelect">Preset</label>
+            <select class="settings-select" id="voiceChangerPresetSelect" data-settings-select="voiceChangerPreset">
+              <option value="normal">Normal</option>
+              <option value="deep">Deep</option>
+              <option value="higher-pitch">Higher Pitch</option>
+              <option value="robot">Robot</option>
+              <option value="radio">Radio</option>
+              <option value="echo">Echo</option>
+              <option value="whisper">Whisper</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Pitch</label>
+            <div class="slider-container">
+              <input type="range" min="-12" max="12" value="0" class="settings-slider" id="voicePitchSlider" data-settings-slider="voicePitch">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Formant / Tone</label>
+            <div class="slider-container">
+              <input type="range" min="-12" max="12" value="0" class="settings-slider" id="voiceFormantSlider" data-settings-slider="voiceFormant">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Distortion / Robot</label>
+            <div class="slider-container">
+              <input type="range" min="0" max="100" value="0" class="settings-slider" id="voiceDistortionSlider" data-settings-slider="voiceDistortion">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Reverb / Echo</label>
+            <div class="slider-container">
+              <input type="range" min="0" max="100" value="0" class="settings-slider" id="voiceEchoSlider" data-settings-slider="voiceEcho">
+            </div>
+          </div>
+
+          <div class="toggle-item" data-setting-key="voiceChangerPerCallEnabled">
+            <div class="toggle-info">
+              <div class="toggle-label">Use Voice Changer In Calls</div>
+              <div class="toggle-desc">Send processed microphone audio to voice and video peers.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <button class="settings-btn-primary" id="voicePreviewBtn" style="width: auto; margin-top: 12px;">Test Voice</button>
+          <p class="form-desc" id="voicePreviewStatus" style="margin-top: 10px;"></p>
         </div>
 
         <div id="view-chat" class="settings-view" style="display: none;">
@@ -1099,7 +1226,7 @@
           <h2 class="settings-page-title">Keybinds</h2>
           <p class="form-desc">Add a keybind to quickly access your favorite actions.</p>
 
-          <button class="settings-btn-primary">Add a Keybind</button>
+          <button class="settings-btn-primary" id="addKeybindBtn">Add a Keybind</button>
 
           <div class="settings-separator"></div>
 
