@@ -3,15 +3,17 @@ const path = require('node:path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    minWidth: 940,
-    minHeight: 600,
+    minWidth: 420,
+    minHeight: 560,
     width: 1280,
     height: 800,
     backgroundColor: '#313338',
     icon: path.join(__dirname, 'assets/img/titlePic.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: true,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
     },
   });
 
