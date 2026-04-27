@@ -1,25 +1,49 @@
 {
   "name": "discordclone",
   "version": "1.0.0",
-  "description": "",
+  "description": "Electron client for the MyDiscord chat app.",
   "main": "index.js",
   "scripts": {
     "start": "nodemon --exec electron .",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "webpack"
+    "test": "npm run build",
+    "build": "webpack",
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^29.1.2",
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
     "nodemon": "^3.1.0",
     "webpack": "^5.92.1",
     "webpack-cli": "^7.0.2"
   },
   "dependencies": {
     "@microsoft/signalr": "^10.0.0",
-    "axios": "^1.6.8",
+    "axios": "^1.15.2",
     "babel": "^6.23.0",
     "ws": "^8.18.3"
+  },
+  "build": {
+    "appId": "local.discordclone",
+    "productName": "MyDiscord",
+    "files": [
+      "index.js",
+      "preload.js",
+      "Pages/**/*",
+      "CSS/**/*",
+      "JS/**/*",
+      "assets/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    }
   }
 }
