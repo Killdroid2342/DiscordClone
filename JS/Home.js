@@ -8,6 +8,8 @@ const homeDefaultAvatarUrl = homeAppPaths.assetUrl('assets/img/titlePic.png');
 const homeDefaultAvatarBackground = `url("${homeDefaultAvatarUrl}")`;
 const homeRingtoneUrl = homeAppPaths.assetUrl('assets/audio/ringtone.mp3');
 const homeLoginPageUrl = homeAppPaths.pageUrl('LogIn.html');
+const homeApiBase = homeAppPaths.apiBase || 'http://localhost:5018';
+const homeWsBase = homeApiBase.replace(/^http/i, 'ws');
 
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
@@ -41,6 +43,25 @@ function GetCookieToken(name) {
 
 let cookieVal = GetCookieToken('token');
 
+if (typeof axios !== 'undefined') {
+  axios.defaults.withCredentials = true;
+  if (cookieVal) {
+    axios.defaults.headers.common.Authorization = `Bearer ${cookieVal}`;
+  }
+}
+
+function getAuthHeaders(extraHeaders = {}) {
+  return {
+    ...extraHeaders,
+    ...(cookieVal ? { Authorization: `Bearer ${cookieVal}` } : {}),
+  };
+}
+
+function withAccessToken(url) {
+  if (!cookieVal) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(cookieVal)}`;
+}
+
 function decodeJWT(token) {
   if (!token) return null;
 
@@ -70,6 +91,48 @@ if (username) {
   username.textContent = JWTusername || 'Guest';
 }
 let ringtoneAudio = null;
+
+function getApiErrorMessage(error, fallback = 'Something went wrong.') {
+  const data = error?.response?.data;
+  if (typeof data === 'string') return data;
+  return data?.message || data?.error || error?.message || fallback;
+}
+
+function showAppMessage(message, variant = 'info', duration = 2600) {
+  if (!messageModalContent || !messageOuterModal) {
+    if (variant === 'error') {
+      console.error(message);
+    } else {
+      console.log(message);
+    }
+    return;
+  }
+
+  messageModalContent.textContent = message;
+  messageOuterModal.dataset.variant = variant;
+  messageOuterModal.style.display = 'flex';
+
+  window.clearTimeout(showAppMessage.timeoutId);
+  showAppMessage.timeoutId = window.setTimeout(() => {
+    messageOuterModal.style.display = 'none';
+  }, duration);
+}
+
+function setBusyState(element, isBusy, label) {
+  if (!element) return;
+  if (isBusy) {
+    element.dataset.originalText = element.textContent;
+    element.disabled = true;
+    element.textContent = label || 'Working...';
+    return;
+  }
+
+  element.disabled = false;
+  if (element.dataset.originalText) {
+    element.textContent = element.dataset.originalText;
+    delete element.dataset.originalText;
+  }
+}
 
 
 function generateUUID() {
@@ -164,135 +227,18 @@ function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
     modal.style.display = 'flex';
-    switchSettingsTab('my-account');
-
-    // Populate username fields
-    if (typeof JWTusername !== 'undefined') {
-      const sName = document.getElementById('settingsDisplayName');
-      const sNameVal = document.getElementById('settingsDisplayNameValue');
-      const sUserVal = document.getElementById('settingsUsernameValue');
-      if (sName) sName.innerText = JWTusername;
-      if (sNameVal) sNameVal.innerText = JWTusername;
-      if (sUserVal) sUserVal.innerText = JWTusername;
-
-      // Update profile preview card
-      const previewName = document.querySelector('.preview-name');
-      const previewTag = document.querySelector('.preview-tag');
-      if (previewName) previewName.textContent = JWTusername;
-      if (previewTag) previewTag.textContent = '#' + Math.floor(Math.random() * 9999).toString().padStart(4, '0');
-    }
+    refreshSettingsModal();
   }
 }
 
 function closeSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) modal.style.display = 'none';
-}
-
-function switchSettingsTab(targetId) {
-
-  document.querySelectorAll('.settings-item').forEach(item => {
-    item.classList.remove('active');
-    if (item.dataset.target === targetId) {
-      item.classList.add('active');
-    }
-  });
-
-
-  document.querySelectorAll('.settings-view').forEach(view => {
-    view.style.display = 'none';
-  });
-
-  const targetView = document.getElementById('view-' + targetId);
-  if (targetView) {
-    targetView.style.display = 'block';
+  const searchInput = document.getElementById('settingsSearchInput');
+  if (searchInput) {
+    searchInput.value = '';
+    filterSettingsSidebarItems('');
   }
-}
-
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.settings-item[data-target]').forEach(item => {
-    item.addEventListener('click', () => {
-      const target = item.dataset.target;
-      if (target) {
-        switchSettingsTab(target);
-      }
-    });
-  });
-
-  initializeSettingsListeners();
-  loadCustomTheme();
-  loadProfileSettings();
-});
-
-async function loadCustomTheme() {
-  try {
-    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountTheme?username=${JWTusername}`);
-    const theme = res.data;
-    if (theme && theme.backgroundColor) {
-      applyTheme(theme.backgroundColor, theme.textColor || DEFAULT_THEME.text);
-      document.getElementById('customBgColor').value = theme.backgroundColor;
-      if (theme.textColor) {
-        document.getElementById('customTextColor').value = theme.textColor;
-      }
-    }
-  } catch (err) {
-    console.error('Failed to load custom theme', err);
-  }
-}
-
-async function loadProfileSettings() {
-  try {
-    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountProfile?username=${JWTusername}`);
-    const profile = res.data;
-    if (profile) {
-      if (profile.profilePictureUrl) {
-        document.getElementById('profilePictureUrlInput').value = profile.profilePictureUrl;
-      }
-      if (profile.description) {
-        document.getElementById('profileDescriptionInput').value = profile.description;
-      }
-    }
-  } catch (err) {
-    console.error('Failed to load custom profile', err);
-  }
-}
-
-function initializeSettingsListeners() {
-  document.querySelectorAll('.radio-item').forEach(item => {
-    item.addEventListener('click', function () {
-
-      const group = this.closest('.radio-group');
-      if (group) {
-
-        group.querySelectorAll('.radio-item').forEach(r => {
-          r.classList.remove('active');
-          const circle = r.querySelector('.radio-circle');
-          if (circle) circle.classList.remove('selected');
-        });
-      }
-
-      this.classList.add('active');
-      const circle = this.querySelector('.radio-circle');
-      if (circle) circle.classList.add('selected');
-    });
-  });
-
-  document.querySelectorAll('.toggle-item').forEach(item => {
-    item.addEventListener('click', function () {
-      const toggle = this.querySelector('.toggle-switch');
-      if (toggle) {
-        toggle.classList.toggle('active');
-      }
-    });
-  });
-
-
-  document.querySelectorAll('.settings-slider').forEach(slider => {
-    slider.addEventListener('input', function () {
-
-    });
-  });
 }
 
 function openSecondModal() {
@@ -318,6 +264,104 @@ function BackLastModal() {
   openSecondModal();
 }
 
+function buildServerRoleBadge(role = 'user') {
+  const normalizedRole = role || 'user';
+  const roleBadge = document.createElement('span');
+  roleBadge.classList.add('role-badge');
+  roleBadge.dataset.role = normalizedRole;
+  roleBadge.textContent = normalizedRole === 'owner' ? 'O' : 'M';
+  roleBadge.title = normalizedRole;
+  return roleBadge;
+}
+
+async function openServer(server, fallbackRole = 'user') {
+  const role = server.role || fallbackRole || 'user';
+
+  selectedServerID = server.serverID;
+  currentServerName = server.serverName;
+
+  document.querySelector('.secondColumn').style.display = 'none';
+  document.querySelector('.lastSection').style.display = 'none';
+  document.getElementById('serverDetails').style.display = 'flex';
+
+  const serverTitle = document.querySelector('.currentServerName');
+  if (serverTitle) {
+    serverTitle.textContent = `${server.serverName} (${role})`;
+  }
+
+  chatMessages.innerHTML = '';
+
+  watchVoiceServer(server.serverID).catch((err) => {
+    console.error('Voice roster watch failed:', err);
+  });
+  startVoiceRosterRefresh();
+
+  await fetchServerDetails();
+
+  if (signalRConnection && signalRConnection.state === 'Connected') {
+    try {
+      await signalRConnection.invoke('JoinServer', server.serverID, JWTusername);
+    } catch (err) {
+      console.error('SignalR Join failed', err);
+    }
+  } else {
+    console.log('SignalR not connected yet, skipping join group...');
+  }
+
+  startServerMessagePolling();
+
+  const joinedServer = sessionStorage.getItem('UserJoined');
+  if (joinedServer && joinedServer === selectedServerID) {
+    console.log('Auto-rejoining voice for', selectedServerID);
+    JoinVoiceCalls();
+  }
+}
+
+function createServerListItem(server, fallbackRole = 'user') {
+  const newServerElement = document.createElement('div');
+  newServerElement.classList.add('servers');
+  newServerElement.dataset.serverId = server.serverID;
+  newServerElement.title = `${server.serverName} (${server.role || fallbackRole || 'user'})`;
+  newServerElement.setAttribute('aria-label', newServerElement.title);
+
+  const serverNameSpan = document.createElement('span');
+  serverNameSpan.classList.add('server-name');
+  serverNameSpan.textContent = String(server.serverName || '?').trim().slice(0, 1).toUpperCase();
+
+  newServerElement.appendChild(serverNameSpan);
+  newServerElement.appendChild(
+    buildServerRoleBadge(server.role || fallbackRole || 'user')
+  );
+
+  newServerElement.addEventListener('click', async function () {
+    await openServer(server, fallbackRole);
+  });
+
+  return newServerElement;
+}
+
+function upsertServerListItem(server, fallbackRole = 'user') {
+  const allServersDiv = document.querySelector('.allservers');
+  const serverId = server.serverID;
+
+  if (!allServersDiv || !serverId) {
+    return null;
+  }
+
+  const existingServerElement = allServersDiv.querySelector(
+    `[data-server-id="${serverId}"]`
+  );
+  const nextServerElement = createServerListItem(server, fallbackRole);
+
+  if (existingServerElement) {
+    existingServerElement.replaceWith(nextServerElement);
+  } else {
+    allServersDiv.appendChild(nextServerElement);
+  }
+
+  return nextServerElement;
+}
+
 async function CreateServer(event) {
   event.preventDefault();
   let inputElement = document.getElementById('serverNameInput');
@@ -331,43 +375,29 @@ async function CreateServer(event) {
   };
   try {
     const response = await axios.post(
-      'http://localhost:5018/api/Server/CreateServer',
+      `${homeApiBase}/api/Server/CreateServer`,
       formData
     );
     const createdServer = response.data;
-    let newServerElement = document.createElement('div');
-    newServerElement.classList.add('servers');
-    newServerElement.textContent = createdServer.serverName;
-    newServerElement.addEventListener('click', async function () {
-      document.querySelector('.secondColumn').style.display = 'none';
-      document.querySelector('.lastSection').style.display = 'none';
-      document.getElementById('serverDetails').style.display = 'flex';
-      document.querySelector('.currentServerName').textContent =
-        createdServer.serverName;
-      selectedServerID = createdServer.serverID;
-
-      await fetchServerDetails();
-      startServerMessagePolling();
-    });
-    document.querySelector('.allservers').appendChild(newServerElement);
+    const newServerElement = upsertServerListItem(
+      { ...createdServer, role: createdServer.role || 'owner' },
+      'owner'
+    );
     inputElement.value = '';
     CloseCreationModal();
-    newServerElement.click();
-    document.getElementById('home').addEventListener('click', function () {
-      document.querySelector('.secondColumn').style.display = 'block';
-      document.querySelector('.lastSection').style.display = 'block';
-      document.getElementById('serverDetails').style.display = 'none';
-
-    });
+    if (newServerElement) {
+      newServerElement.click();
+    }
   } catch (err) {
-    console.log('couldnt make server:', err);
+    console.error('couldnt make server:', err);
+    showAppMessage(getApiErrorMessage(err, 'Could not create that server.'), 'error');
   }
 }
 
 async function GetServer() {
   try {
     const response = await axios.get(
-      `http://localhost:5018/api/Server/GetServer?username=${JWTusername}`
+      `${homeApiBase}/api/Server/GetServer`
     );
     let serverData = response.data;
     let allServersDiv = document.querySelector('.allservers');
@@ -376,69 +406,17 @@ async function GetServer() {
       return;
     }
 
+    allServersDiv.querySelectorAll('[data-server-id]').forEach((serverEl) => {
+      serverEl.remove();
+    });
+
     const joinedServer = sessionStorage.getItem('UserJoined');
     let serverToSelect = null;
 
     serverData.forEach((server) => {
-      let newServerElement = document.createElement('div');
-      newServerElement.classList.add('servers');
+      const newServerElement = upsertServerListItem(server);
 
-      let serverNameSpan = document.createElement('span');
-      serverNameSpan.textContent = server.serverName;
-
-      let roleBadge = document.createElement('span');
-      roleBadge.classList.add('role-badge');
-      roleBadge.textContent = server.role || 'user';
-      roleBadge.style.fontSize = '10px';
-      roleBadge.style.padding = '2px 5px';
-      roleBadge.style.borderRadius = '10px';
-      roleBadge.style.marginLeft = '5px';
-      roleBadge.style.display = 'inline-block';
-
-      if (server.role === 'owner') {
-        roleBadge.style.backgroundColor = '#ff7b00';
-        roleBadge.style.color = 'white';
-      } else {
-        roleBadge.style.backgroundColor = '#3498db';
-        roleBadge.style.color = 'white';
-      }
-
-      newServerElement.appendChild(serverNameSpan);
-      newServerElement.appendChild(roleBadge);
-
-      newServerElement.addEventListener('click', async function () {
-        selectedServerID = server.serverID;
-        document.querySelector('.secondColumn').style.display = 'none';
-        document.querySelector('.lastSection').style.display = 'none';
-        document.getElementById('serverDetails').style.display = 'flex';
-        document
-          .getElementById('serverDetails')
-          .querySelector('h1').textContent =
-          server.serverName + ' (' + (server.role || 'user') + ')';
-        currentServerName = server.serverName;
-        chatMessages.innerHTML = '';
-
-
-        await fetchServerDetails();
-        if (signalRConnection && signalRConnection.state === "Connected") {
-          try {
-            await signalRConnection.invoke("JoinServer", server.serverID, JWTusername);
-          } catch (err) { console.error("SignalR Join failed", err); }
-        } else {
-          console.log("SignalR not connected yet, skipping join group...");
-        }
-        startServerMessagePolling();
-
-
-        const joinedServer = sessionStorage.getItem('UserJoined');
-        if (joinedServer && joinedServer === selectedServerID) {
-          console.log("Auto-rejoining voice for", selectedServerID);
-          JoinVoiceCalls();
-        }
-      });
-      allServersDiv.appendChild(newServerElement);
-
-      if (joinedServer && server.serverID === joinedServer) {
+      if (joinedServer && server.serverID === joinedServer && newServerElement) {
         serverToSelect = newServerElement;
       }
     });
@@ -457,23 +435,162 @@ async function GetServer() {
         stopServerMessagePolling();
       });
   } catch (e) {
-    console.log('couldnt load servers:', e);
+    console.error('couldnt load servers:', e);
+    showAppMessage(getApiErrorMessage(e, 'Could not load your servers.'), 'error');
   }
 }
 GetServer();
+function buildMessageAttachmentNode(attachmentUrl, contentType = '') {
+  if (!attachmentUrl) return null;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-attachment';
+
+  const normalizedType = String(contentType || '').toLowerCase();
+  const isImage =
+    normalizedType.startsWith('image/') ||
+    /\.(png|jpe?g|gif|webp)$/i.test(attachmentUrl);
+
+  if (isImage) {
+    const image = document.createElement('img');
+    image.src = attachmentUrl.startsWith('/uploads/')
+      ? `${homeApiBase}${attachmentUrl}`
+      : attachmentUrl;
+    image.alt = 'Attachment preview';
+    image.loading = 'lazy';
+    wrapper.appendChild(image);
+    return wrapper;
+  }
+
+  const link = document.createElement('a');
+  link.href = attachmentUrl.startsWith('/uploads/')
+    ? `${homeApiBase}${attachmentUrl}`
+    : attachmentUrl;
+  link.target = '_blank';
+  link.rel = 'noreferrer';
+  link.textContent = 'Open attachment';
+  wrapper.appendChild(link);
+  return wrapper;
+}
+
+function renderCompactMessage(message, scope = 'server') {
+  const messageEl = document.createElement('div');
+  messageEl.className = 'compact-message';
+  messageEl.dataset.messageId =
+    message.messageID ||
+    message.privateMessageID ||
+    message.id ||
+    '';
+
+  const header = document.createElement('div');
+  header.className = 'compact-message-header';
+  const sender =
+    message.messagesUserSender ||
+    message.sender ||
+    'Unknown';
+  header.textContent = `${sender} · ${formatMessageDate(message.date)}`;
+  messageEl.appendChild(header);
+
+  if (message.replyToMessageId) {
+    const reply = document.createElement('div');
+    reply.className = 'compact-message-reply';
+    reply.textContent = `Replying to ${message.replyToMessageId}`;
+    messageEl.appendChild(reply);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'compact-message-body';
+  body.textContent =
+    message.userText ||
+    message.friendMessagesData ||
+    message.content ||
+    '';
+  if (message.editedAt) {
+    const edited = document.createElement('span');
+    edited.className = 'compact-message-edited';
+    edited.textContent = ' edited';
+    body.appendChild(edited);
+  }
+  messageEl.appendChild(body);
+
+  const attachment = buildMessageAttachmentNode(
+    message.attachmentUrl,
+    message.attachmentContentType
+  );
+  if (attachment) {
+    messageEl.appendChild(attachment);
+  }
+
+  if (Array.isArray(message.reactions) && message.reactions.length > 0) {
+    const reactions = document.createElement('div');
+    reactions.className = 'message-reactions';
+    message.reactions.forEach((reaction) => {
+      const reactionEl = document.createElement('span');
+      reactionEl.className = 'message-reaction';
+      reactionEl.textContent = `${reaction.emoji} ${reaction.count}`;
+      reactions.appendChild(reactionEl);
+    });
+    messageEl.appendChild(reactions);
+  }
+
+  return messageEl;
+}
+
+function formatMessageDate(rawDate) {
+  const parsed = new Date(rawDate);
+  if (Number.isNaN(parsed.getTime())) return rawDate || '';
+  return parsed.toLocaleString();
+}
+
+async function markSelectedChannelRead(messages = []) {
+  if (!selectedChannelID || !messages.length) return;
+
+  const lastMessage = messages[messages.length - 1];
+  try {
+    await axios.post(`${homeApiBase}/api/ServerMessages/MarkChannelRead`, {
+      scopeId: selectedChannelID,
+      lastReadMessageId: lastMessage.messageID || lastMessage.messageId,
+      lastReadAt: new Date().toISOString(),
+    });
+    await refreshUnreadIndicators();
+  } catch (error) {
+    console.warn('Could not mark channel read:', error);
+  }
+}
+
+async function refreshUnreadIndicators() {
+  if (!selectedServerID) return;
+
+  try {
+    const res = await axios.get(
+      `${homeApiBase}/api/ServerMessages/GetUnreadState?serverId=${encodeURIComponent(selectedServerID)}`
+    );
+    const unreadByChannel = new Map(
+      (Array.isArray(res.data) ? res.data : []).map((item) => [item.channelId, item.unread || 0])
+    );
+
+    document.querySelectorAll('[data-channel-id]').forEach((channelEl) => {
+      const unread = unreadByChannel.get(channelEl.dataset.channelId) || 0;
+      channelEl.classList.toggle('has-unread', unread > 0);
+      channelEl.dataset.unread = unread > 0 ? String(unread) : '';
+    });
+  } catch (error) {
+    console.warn('Could not refresh unread indicators:', error);
+  }
+}
+
 async function fetchServerMessages() {
   try {
     const messageRes = await axios.get(
-      `http://localhost:5018/api/ServerMessages/GetServerMessages?channelId=${selectedChannelID}`
+      `${homeApiBase}/api/ServerMessages/GetServerMessages?channelId=${encodeURIComponent(selectedChannelID)}`
     );
     chatMessages.innerHTML = '';
     messageRes.data.forEach((message) => {
-      const userMessageServer = document.createElement('p');
-      userMessageServer.textContent = `${message.messagesUserSender}: ${message.userText} (${message.date})`;
-      chatMessages.appendChild(userMessageServer);
+      chatMessages.appendChild(renderCompactMessage(message, 'server'));
     });
+    await markSelectedChannelRead(messageRes.data);
   } catch (e) {
-    console.log('couldnt join server:', e);
+    console.error('couldnt fetch channel messages:', e);
   }
 }
 
@@ -488,18 +605,25 @@ function stopServerMessagePolling() {
   serverMessageInterval = null;
 }
 function LogOut() {
-  document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-  window.location.href = homeLoginPageUrl;
+  axios.post(`${homeApiBase}/api/Account/Logout`).catch((err) => {
+    console.warn('Server logout failed:', err);
+  }).finally(() => {
+    localStorage.removeItem('refreshToken');
+    document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    window.location.href = homeLoginPageUrl;
+  });
 }
 async function ServerChat(event) {
   event.preventDefault();
+  const form = event.target;
   const formData = new FormData(event.target);
   const messageText = formData.get('userText');
 
   if (!messageText.trim()) return;
 
+  const messageId = generateUUID();
   const formDataObject = {
-    MessageID: generateUUID(),
+    MessageID: messageId,
     ChannelId: selectedChannelID,
     ServerName: currentServerName,
     MessagesUserSender: JWTusername,
@@ -507,15 +631,40 @@ async function ServerChat(event) {
     userText: messageText,
   };
 
+  const pendingMessage = renderCompactMessage({
+    ...formDataObject,
+    messagesUserSender: JWTusername,
+    userText: messageText,
+    date: formDataObject.Date,
+  });
+  pendingMessage.classList.add('message-pending');
+  chatMessages.appendChild(pendingMessage);
+  form.querySelector('.chatInput').value = '';
+
   try {
     await axios.post(
-      'http://localhost:5018/api/ServerMessages/ServerMessages',
+      `${homeApiBase}/api/ServerMessages/ServerMessages`,
       formDataObject
     );
 
-    event.target.querySelector('.chatInput').value = '';
+    pendingMessage.classList.remove('message-pending');
+    pendingMessage.classList.add('message-delivered');
+    await fetchServerMessages();
   } catch (e) {
-    console.log('msg send failed:', e);
+    console.error('msg send failed:', e);
+    pendingMessage.classList.remove('message-pending');
+    pendingMessage.classList.add('message-failed');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'message-retry-btn';
+    retry.textContent = 'Retry';
+    retry.addEventListener('click', () => {
+      form.querySelector('.chatInput').value = messageText;
+      pendingMessage.remove();
+      ServerChat({ preventDefault() {}, target: form });
+    });
+    pendingMessage.appendChild(retry);
+    showAppMessage(getApiErrorMessage(e, 'Message failed to send.'), 'error');
   }
 }
 function showAddFriends() {
@@ -571,7 +720,7 @@ async function fetchPendingRequests() {
   const pendingList = document.querySelector('.pendingList');
   pendingList.innerHTML = 'Loading...';
   try {
-    const res = await axios.get(`http://localhost:5018/api/Account/GetFriendRequests?username=${JWTusername}`);
+    const res = await axios.get(`${homeApiBase}/api/Account/GetFriendRequests`);
     pendingList.innerHTML = '';
 
     if (!Array.isArray(res.data) || res.data.length === 0) {
@@ -649,28 +798,28 @@ async function fetchPendingRequests() {
     });
   } catch (err) {
     console.error('Error fetching requests:', err);
-    pendingList.innerHTML = '<p style="color:red; padding:20px;">Error loading requests</p>';
+    pendingList.innerHTML = '<p class="error-state">Error loading requests.</p>';
   }
 }
 async function acceptRequest(friendUsername) {
   try {
-    const res = await axios.post(`http://localhost:5018/api/Account/AcceptFriendRequest?username=${JWTusername}&friendUsername=${friendUsername}`);
-    alert(res.data.message);
+    const res = await axios.post(`${homeApiBase}/api/Account/AcceptFriendRequest?friendUsername=${encodeURIComponent(friendUsername)}`);
+    showAppMessage(res.data.message || 'Friend request accepted.', 'success');
     fetchPendingRequests();
     GetFriends();
   } catch (err) {
     console.error(err);
-    alert('Failed to accept request');
+    showAppMessage(getApiErrorMessage(err, 'Failed to accept request.'), 'error');
   }
 }
 async function declineRequest(friendUsername) {
   try {
-    const res = await axios.post(`http://localhost:5018/api/Account/DeclineFriendRequest?username=${JWTusername}&friendUsername=${friendUsername}`);
-    alert(res.data.message);
+    const res = await axios.post(`${homeApiBase}/api/Account/DeclineFriendRequest?friendUsername=${encodeURIComponent(friendUsername)}`);
+    showAppMessage(res.data.message || 'Friend request declined.', 'success');
     fetchPendingRequests();
   } catch (err) {
     console.error(err);
-    alert('Failed to decline request');
+    showAppMessage(getApiErrorMessage(err, 'Failed to decline request.'), 'error');
   }
 }
 async function SearchFriends(event) {
@@ -683,19 +832,16 @@ async function SearchFriends(event) {
   let friendUsername = formDataObject.friendUsername;
   try {
     const res = await axios.post(
-      `http://localhost:5018/api/Account/AddFriend?username=${JWTusername}&friendUsername=${friendUsername}`,
+      `${homeApiBase}/api/Account/AddFriend?friendUsername=${encodeURIComponent(friendUsername)}`,
       formDataObject
     );
     if (res.data.message) {
-      messageModalContent.innerText = res.data.message;
-      messageOuterModal.style.display = 'flex';
-      setTimeout(() => {
-        messageOuterModal.style.display = 'none';
-      }, 2000);
+      showAppMessage(res.data.message, 'success');
     }
     await GetFriends();
   } catch (e) {
-    console.log('server creation broke:', e);
+    console.error('friend request failed:', e);
+    showAppMessage(getApiErrorMessage(e, 'Could not send friend request.'), 'error');
   }
 }
 
@@ -716,27 +862,24 @@ async function RemoveFriends(event) {
     });
     let friendUsername = formDataObject.friendUsername;
     let res = await axios.post(
-      `http://localhost:5018/api/Account/RemoveFriend?username=${JWTusername}&friendUsername=${friendUsername}`
+      `${homeApiBase}/api/Account/RemoveFriend?friendUsername=${encodeURIComponent(friendUsername)}`
     );
     if (res.data.message) {
-      messageModalContent.innerText = res.data.message;
-      messageOuterModal.style.display = 'flex';
-      setTimeout(() => {
-        messageOuterModal.style.display = 'none';
-      }, 2000);
+      showAppMessage(res.data.message, 'success');
     }
     await GetFriends();
   } catch (e) {
-    console.log('couldnt load friends:', e);
+    console.error('couldnt remove friend:', e);
+    showAppMessage(getApiErrorMessage(e, 'Could not remove friend.'), 'error');
   }
 }
 async function GetFriends() {
   mainFriendsDiv.innerHTML = '';
   try {
     let res = await axios.get(
-      `http://localhost:5018/api/Account/GetFriends?username=${JWTusername}`
+      `${homeApiBase}/api/Account/GetFriends`
     );
-    if (res.data === 'No Friends Added!') {
+    if (res.data === 'No Friends Added!' || (Array.isArray(res.data) && res.data.length === 0)) {
       let noFriendsTag = document.createElement('p');
       noFriendsTag.textContent = 'No Friends Added!';
       mainFriendsDiv.appendChild(noFriendsTag);
@@ -834,7 +977,7 @@ function createMessageElement(sender, text, date) {
 
 function InitWebSocket() {
   socket = new WebSocket(
-    `ws://localhost:5018/api/PrivateMessageFriend/HandlePrivateWebsocket?username=${JWTusername}`
+      withAccessToken(`${homeWsBase}/api/PrivateMessageFriend/HandlePrivateWebsocket`)
   );
   socket.onopen = function () {
     console.log('connected to chat');
@@ -860,16 +1003,14 @@ async function PrivateMessage(event) {
   const content = formData.get('friendMessagesData');
 
   if (currentGroupId) {
-
-    const messageObject = {
-      GroupId: currentGroupId,
-      Sender: JWTusername,
-      Content: content,
-      Date: new Date().toISOString()
-    };
-    socket.send(JSON.stringify(messageObject));
-
-
+    try {
+      await axios.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
+        groupId: currentGroupId,
+        content,
+      });
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Group message failed to send.'), 'error');
+    }
   } else {
 
     const messageObject = {
@@ -891,16 +1032,23 @@ async function PrivateMessage(event) {
 async function GetPrivateMessage() {
   try {
     const res = await axios.get(
-      `http://localhost:5018/api/PrivateMessageFriend/GetPrivateMessage?currentUsername=${JWTusername}&targetUsername=${currentFriend}`
+      `${homeApiBase}/api/PrivateMessageFriend/GetPrivateMessage?targetUsername=${encodeURIComponent(currentFriend)}`
     );
     const messagesDisplay = document.querySelector('.messagesDisplay');
     messagesDisplay.innerHTML = '';
     currentChatHistory = res.data;
     res.data.forEach((message) => {
-      const messageElement = createMessageElement(message.messagesUserSender, message.friendMessagesData, message.date);
-      messagesDisplay.appendChild(messageElement);
+      messagesDisplay.appendChild(renderCompactMessage(message, 'dm'));
     });
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    if (res.data.length > 0) {
+      const lastMessage = res.data[res.data.length - 1];
+      await axios.post(`${homeApiBase}/api/PrivateMessageFriend/MarkDmRead`, {
+        targetUsername: currentFriend,
+        lastReadMessageId: lastMessage.privateMessageID,
+        lastReadAt: new Date().toISOString(),
+      }).catch((error) => console.warn('Could not mark DM read:', error));
+    }
 
 
     const searchInput = document.getElementById('dmSearchInput');
@@ -919,7 +1067,8 @@ async function GetPrivateMessage() {
 
     });
   } catch (e) {
-    console.log('ugh something went wrong with private msgs:', e);
+    console.error('ugh something went wrong with private msgs:', e);
+    showAppMessage(getApiErrorMessage(e, 'Could not load this conversation.'), 'error');
   }
 }
 
@@ -1001,7 +1150,11 @@ function closeSearchResults() {
 GetFriends();
 
 if (JWTusername) {
-  setTimeout(initializeVoiceConnection, 500);
+  setTimeout(() => {
+    initializeVoiceConnection().catch((err) => {
+      console.error('Voice bootstrap failed:', err);
+    });
+  }, 500);
 }
 
 
@@ -1016,18 +1169,21 @@ function closeJoinModal() {
 async function getInviteLink(serverId) {
   try {
     let res = await fetch(
-      `http://localhost:5018/api/Server/GetInviteLink?serverId=${serverId}`
+      `${homeApiBase}/api/Server/GetInviteLink?serverId=${encodeURIComponent(serverId)}`,
+      {
+        headers: getAuthHeaders(),
+      }
     );
     if (res.ok) {
       let data = await res.json();
       navigator.clipboard.writeText(data.inviteLink);
-      alert('invite link copied: ' + data.inviteLink);
+      showAppMessage('Invite link copied.', 'success');
     } else {
-      alert('Failed to copy invite link');
+      showAppMessage('Failed to copy invite link.', 'error');
     }
   } catch (err) {
     console.error('couldnt get invite link:', err);
-    alert('Unable to get invite link');
+    showAppMessage(getApiErrorMessage(err, 'Unable to get invite link.'), 'error');
   }
 }
 
@@ -1036,79 +1192,265 @@ async function JoinServer(event) {
   event.preventDefault();
   let serverLink = document.getElementById('serverLinkInput').value.trim();
   try {
-    let res = await fetch('http://localhost:5018/api/Server/JoinServer', {
+    let res = await fetch(`${homeApiBase}/api/Server/JoinServer`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         Username: JWTusername,
         InviteLink: serverLink,
       }),
     });
     if (res.ok) {
-      let server = await res.json();
+      const joinedServerResponse = await res.json();
       closeJoinModal();
       closeModal();
-      document.querySelector('.currentServerName').innerText =
-        server.serverName;
-      selectedServerID = server.serverID;
-      currentServerName = server.serverName;
 
-      let newServerElement = document.createElement('div');
-      newServerElement.classList.add('servers');
-
-      let serverNameSpan = document.createElement('span');
-      serverNameSpan.textContent = server.serverName;
-
-      let roleBadge = document.createElement('span');
-      roleBadge.classList.add('role-badge');
-      roleBadge.textContent = 'user';
-      roleBadge.style.fontSize = '10px';
-      roleBadge.style.padding = '2px 5px';
-      roleBadge.style.borderRadius = '10px';
-      roleBadge.style.marginLeft = '5px';
-      roleBadge.style.display = 'inline-block';
-      roleBadge.style.backgroundColor = '#3498db';
-      roleBadge.style.color = 'white';
-
-      newServerElement.appendChild(serverNameSpan);
-      newServerElement.appendChild(roleBadge);
-
-      newServerElement.addEventListener('click', async function () {
-        document.querySelector('.secondColumn').style.display = 'none';
-        document.querySelector('.lastSection').style.display = 'none';
-        document.getElementById('serverDetails').style.display = 'flex';
-        document.querySelector('.currentServerName').textContent =
-          server.serverName + ' (user)';
-        selectedServerID = server.serverID;
-        currentServerName = server.serverName;
-        chatMessages.innerHTML = '';
-        await fetchServerDetails();
-        startServerMessagePolling();
-      });
-      document.querySelector('.allservers').appendChild(newServerElement);
-
-      newServerElement.click();
+      const existingServerElement = upsertServerListItem(
+        joinedServerResponse,
+        joinedServerResponse.role || 'user'
+      );
+      if (existingServerElement) {
+        existingServerElement.click();
+      }
+      return;
     } else {
       const err = await res.json();
-      alert('❌ Unable to join server: ' + (err.message || res.statusText));
+      showAppMessage('Unable to join server: ' + (err.message || res.statusText), 'error');
+      return;
     }
   } catch (err) {
     console.error('couldnt join server:', err);
-    alert('Could not join server');
+    showAppMessage(getApiErrorMessage(err, 'Could not join server.'), 'error');
   }
 }
 
 
 
 let localStream = null;
-let localVideo = document.getElementById('localVideo');
+function getLocalPreviewVideo() {
+  const privateCallUI = document.getElementById('activeCallUI');
+  const isPrivateCallOpen = privateCallUI && privateCallUI.style.display !== 'none';
+  return isPrivateCallOpen
+    ? document.getElementById('localVideo')
+    : document.getElementById('serverLocalVideo') || document.getElementById('localVideo');
+}
+let localVideo = getLocalPreviewVideo();
 let serverPeerConnection = null;
 let voiceConnection = null;
 let currentVoiceUsers = [];
+let currentVoiceServerId = sessionStorage.getItem('UserJoined') || null;
+let watchedVoiceServerId = null;
+let voiceRosterPollInterval = null;
+let voiceConnectionOpenPromise = null;
+const voiceUsersByServer = new Map();
 let peerConnections = new Map();
+let voiceProcessingState = null;
+function buildIceServers() {
+  const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  const configuredServers =
+    homeAppPaths.turnServers ||
+    parseSettingsJson(localStorage.getItem('discordClone_turnServers'), []);
+
+  if (Array.isArray(configuredServers)) {
+    configuredServers.forEach((server) => {
+      if (server && server.urls) {
+        iceServers.push(server);
+      }
+    });
+  }
+
+  return iceServers;
+}
+
 const config = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  iceServers: buildIceServers(),
 };
+
+async function refreshIceServersConfig() {
+  try {
+    const res = await axios.get(`${homeApiBase}/api/VoiceConfig/GetIceServers`);
+    const nextIceServers = res.data?.iceServers;
+    if (Array.isArray(nextIceServers) && nextIceServers.length > 0) {
+      config.iceServers = nextIceServers;
+      homeAppPaths.turnServers = nextIceServers.filter((server) =>
+        String(Array.isArray(server.urls) ? server.urls[0] : server.urls || '').startsWith('turn:')
+      );
+    }
+  } catch (error) {
+    console.warn('Could not load TURN/STUN config:', error);
+  }
+}
+
+function normalizeVoiceUserList(users) {
+  return Array.from(new Set((users || []).filter(Boolean)));
+}
+
+function getVoiceUsersForServer(serverId) {
+  if (!serverId) {
+    return [];
+  }
+
+  return [...(voiceUsersByServer.get(serverId) || [])];
+}
+
+function setVoiceUsersForServer(serverId, users) {
+  if (!serverId) {
+    return;
+  }
+
+  const normalizedUsers = normalizeVoiceUserList(users);
+  if (normalizedUsers.length > 0) {
+    voiceUsersByServer.set(serverId, normalizedUsers);
+  } else {
+    voiceUsersByServer.delete(serverId);
+  }
+
+  if (currentVoiceServerId === serverId) {
+    currentVoiceUsers = normalizedUsers;
+  }
+
+  if (selectedServerID === serverId) {
+    renderVoiceUserList(normalizedUsers);
+  }
+}
+
+function addVoiceUserToServer(serverId, username) {
+  if (!serverId || !username) {
+    return;
+  }
+
+  const users = getVoiceUsersForServer(serverId);
+  if (!users.includes(username)) {
+    users.push(username);
+  }
+
+  setVoiceUsersForServer(serverId, users);
+}
+
+function removeVoiceUserFromServer(serverId, username) {
+  if (!serverId || !username) {
+    return;
+  }
+
+  const remainingUsers = getVoiceUsersForServer(serverId).filter(
+    (user) => user !== username
+  );
+  setVoiceUsersForServer(serverId, remainingUsers);
+}
+
+function renderSelectedServerVoiceUsers() {
+  renderVoiceUserList(getVoiceUsersForServer(selectedServerID));
+}
+
+async function fetchActiveVoiceUsers(serverId = selectedServerID) {
+  if (!serverId) {
+    return;
+  }
+
+  try {
+    const response = await axios.get(
+      `${homeApiBase}/api/Signaling/GetActiveUsers?serverId=${encodeURIComponent(serverId)}`
+    );
+    setVoiceUsersForServer(serverId, normalizeVoiceUserList(response.data));
+  } catch (err) {
+    console.error('Failed to fetch active voice users:', err);
+  }
+}
+
+function sendVoiceSocketMessage(message) {
+  if (!voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+
+  voiceConnection.send(JSON.stringify(message));
+  return true;
+}
+
+function sendVoiceRosterWatch(serverId) {
+  if (!serverId) {
+    return false;
+  }
+
+  const didSend = sendVoiceSocketMessage({
+    Type: 'watch',
+    ServerId: serverId,
+    Username: JWTusername,
+  });
+
+  if (didSend) {
+    watchedVoiceServerId = serverId;
+  }
+
+  return didSend;
+}
+
+function sendVoiceRosterUnwatch(serverId) {
+  if (!serverId) {
+    return false;
+  }
+
+  const didSend = sendVoiceSocketMessage({
+    Type: 'unwatch',
+    ServerId: serverId,
+    Username: JWTusername,
+  });
+
+  if (didSend && watchedVoiceServerId === serverId) {
+    watchedVoiceServerId = null;
+  }
+
+  return didSend;
+}
+
+async function watchVoiceServer(serverId) {
+  if (!serverId) {
+    return;
+  }
+
+  try {
+    await initializeVoiceConnection();
+
+    if (watchedVoiceServerId && watchedVoiceServerId !== serverId) {
+      sendVoiceRosterUnwatch(watchedVoiceServerId);
+    }
+
+    if (!sendVoiceRosterWatch(serverId)) {
+      await fetchActiveVoiceUsers(serverId);
+    }
+  } catch (err) {
+    console.error('Failed to watch voice roster:', err);
+    await fetchActiveVoiceUsers(serverId);
+  }
+}
+
+function isServerViewOpen() {
+  return Boolean(
+    selectedServerID &&
+    serverDetailsPanel &&
+    serverDetailsPanel.style.display !== 'none'
+  );
+}
+
+function startVoiceRosterRefresh() {
+  if (voiceRosterPollInterval) {
+    return;
+  }
+
+  voiceRosterPollInterval = setInterval(() => {
+    if (!isServerViewOpen()) {
+      return;
+    }
+
+    if (watchedVoiceServerId !== selectedServerID) {
+      watchVoiceServer(selectedServerID).catch((err) => {
+        console.error('Voice roster watch refresh failed:', err);
+      });
+      return;
+    }
+
+    fetchActiveVoiceUsers(selectedServerID);
+  }, 2000);
+}
 
 console.log("%c HOME.JS RELOADED - VERSION 26", "background: red; color: white; font-size: 20px");
 
@@ -1143,7 +1485,7 @@ async function openCreateDMModal() {
 
   try {
     let res = await axios.get(
-      `http://localhost:5018/api/Account/GetFriends?username=${JWTusername}`
+      `${homeApiBase}/api/Account/GetFriends`
     );
     list.innerHTML = '';
 
@@ -1194,7 +1536,7 @@ async function CreateDM() {
     const uniqueMembers = [...new Set(allMembers)];
 
     try {
-      const res = await axios.post('http://localhost:5018/api/GroupChat/CreateGroup', {
+      const res = await axios.post(`${homeApiBase}/api/GroupChat/CreateGroup`, {
         Name: groupName,
         Owner: JWTusername,
         Members: uniqueMembers
@@ -1210,7 +1552,7 @@ async function CreateDM() {
 
     } catch (e) {
       console.error("Failed to create group", e);
-      alert("Failed to create group.");
+      showAppMessage(getApiErrorMessage(e, 'Failed to create group.'), 'error');
     }
 
   } else {
@@ -1240,7 +1582,7 @@ async function CreateDM() {
 
 async function GetGroups() {
   try {
-    const res = await axios.get(`http://localhost:5018/api/GroupChat/GetGroups?username=${JWTusername}`);
+    const res = await axios.get(`${homeApiBase}/api/GroupChat/GetGroups`);
     const groups = res.data;
 
 
@@ -1316,10 +1658,90 @@ function OpenGroupChat(group) {
       startGroupCall(group.id);
     };
     directMessageUser.appendChild(callBtn);
+    renderGroupManagementButtons(directMessageUser, group.id);
   }
 
   InitGroupWebSocket();
   GetGroupMessages(group.id);
+}
+
+function renderGroupManagementButtons(container, groupId) {
+  [
+    ['Rename', () => renameCurrentGroup(groupId)],
+    ['Avatar', () => updateCurrentGroupAvatar(groupId)],
+    ['Add', () => addMembersToCurrentGroup(groupId)],
+    ['Leave', () => leaveCurrentGroup(groupId)],
+  ].forEach(([label, handler]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'group-header-btn';
+    button.textContent = label;
+    button.addEventListener('click', handler);
+    container.appendChild(button);
+  });
+}
+
+async function renameCurrentGroup(groupId) {
+  const name = prompt('Group name')?.trim();
+  if (!name) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/GroupChat/RenameGroup`, {
+      groupId,
+      name,
+    });
+    await GetGroups();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not rename group.'), 'error');
+  }
+}
+
+async function updateCurrentGroupAvatar(groupId) {
+  const avatarUrl = prompt('Group avatar URL or uploaded /uploads path', '')?.trim();
+
+  try {
+    await axios.post(`${homeApiBase}/api/GroupChat/UpdateGroupAvatar`, {
+      groupId,
+      avatarUrl: avatarUrl || null,
+    });
+    await GetGroups();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not update group avatar.'), 'error');
+  }
+}
+
+async function addMembersToCurrentGroup(groupId) {
+  const membersText = prompt('Usernames to add, comma separated', '')?.trim();
+  if (!membersText) return;
+
+  const members = membersText
+    .split(',')
+    .map((member) => member.trim())
+    .filter(Boolean);
+
+  try {
+    await axios.post(`${homeApiBase}/api/GroupChat/AddGroupMembers`, {
+      groupId,
+      members,
+    });
+    await GetGroups();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not add group members.'), 'error');
+  }
+}
+
+async function leaveCurrentGroup(groupId) {
+  if (!confirm('Leave this group DM?')) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/GroupChat/LeaveGroup`, { groupId });
+    currentGroupId = null;
+    clearContent();
+    ShowFriendsMainView();
+    await GetGroups();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not leave group.'), 'error');
+  }
 }
 
 function InitGroupWebSocket() {
@@ -1327,7 +1749,7 @@ function InitGroupWebSocket() {
     socket.close();
   }
   socket = new WebSocket(
-    `ws://localhost:5018/api/GroupChat/HandleGroupWebsocket?username=${JWTusername}`
+      withAccessToken(`${homeWsBase}/api/GroupChat/HandleGroupWebsocket`)
   );
   socket.onopen = function () {
     console.log('connected to GROUP chat');
@@ -1365,7 +1787,7 @@ async function startGroupCall(groupId) {
     addLocalVideoToGrid(localGroupStream);
   } catch (e) {
     console.error("Failed to get media", e);
-    alert("Could not access camera/mic");
+    showAppMessage('Could not access camera or microphone.', 'error');
     return;
   }
 
@@ -1527,9 +1949,7 @@ async function initiatePeerConnection(targetUser) {
 }
 
 function createGroupPeerConnection(targetUser) {
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-  });
+  const pc = new RTCPeerConnection(config);
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -1591,18 +2011,26 @@ async function handleGroupCandidate(msg) {
 
 async function GetGroupMessages(groupId) {
   try {
-    const res = await axios.get(`http://localhost:5018/api/GroupChat/GetGroupMessages?groupId=${groupId}`);
+    const res = await axios.get(`${homeApiBase}/api/GroupChat/GetGroupMessages?groupId=${encodeURIComponent(groupId)}`);
     const messagesDisplay = document.querySelector('.messagesDisplay');
     messagesDisplay.innerHTML = '';
     currentChatHistory = res.data.map(m => ({ messagesUserSender: m.sender, friendMessagesData: m.content, date: m.date }));
 
     res.data.forEach((message) => {
-      const messageElement = createMessageElement(message.sender, message.content, message.date);
-      messagesDisplay.appendChild(messageElement);
+      messagesDisplay.appendChild(renderCompactMessage(message, 'group'));
     });
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    if (res.data.length > 0) {
+      const lastMessage = res.data[res.data.length - 1];
+      await axios.post(`${homeApiBase}/api/GroupChat/MarkGroupRead`, {
+        groupId,
+        lastReadMessageId: lastMessage.id,
+        lastReadAt: new Date().toISOString(),
+      }).catch((error) => console.warn('Could not mark group read:', error));
+    }
   } catch (e) {
     console.error('Failed to load group messages', e);
+    showAppMessage(getApiErrorMessage(e, 'Failed to load group messages.'), 'error');
   }
 }
 
@@ -1615,15 +2043,55 @@ document.addEventListener('touchstart', enableAudioPlayback, { once: true });
 
 async function initializeVoiceConnection() {
   try {
-    if (voiceConnection && (voiceConnection.readyState === WebSocket.OPEN || voiceConnection.readyState === WebSocket.CONNECTING)) {
-      console.log("Voice connection already active or connecting");
-      return;
+    if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+      console.log("Voice connection already active");
+      return voiceConnectionOpenPromise || Promise.resolve();
     }
-    voiceConnection = new WebSocket('ws://localhost:5018/voice-ws');
+
+    if (voiceConnection && voiceConnection.readyState === WebSocket.CONNECTING) {
+      console.log("Voice connection already connecting");
+      return voiceConnectionOpenPromise || Promise.resolve();
+    }
+
+    voiceConnection = new WebSocket(withAccessToken(`${homeWsBase}/voice-ws`));
+    const pendingVoiceConnection = voiceConnection;
+
+    voiceConnectionOpenPromise = new Promise((resolve, reject) => {
+      if (pendingVoiceConnection.readyState === WebSocket.OPEN) {
+        resolve();
+        return;
+      }
+
+      const cleanup = () => {
+        pendingVoiceConnection.removeEventListener('open', handleOpen);
+        pendingVoiceConnection.removeEventListener('error', handleError);
+        pendingVoiceConnection.removeEventListener('close', handleCloseBeforeOpen);
+      };
+
+      const handleOpen = () => {
+        cleanup();
+        resolve();
+      };
+
+      const handleError = (error) => {
+        cleanup();
+        reject(error);
+      };
+
+      const handleCloseBeforeOpen = () => {
+        cleanup();
+        reject(new Error('Voice connection closed before opening'));
+      };
+
+      pendingVoiceConnection.addEventListener('open', handleOpen);
+      pendingVoiceConnection.addEventListener('error', handleError);
+      pendingVoiceConnection.addEventListener('close', handleCloseBeforeOpen);
+    });
 
     voiceConnection.onopen = () => {
       console.log('voice chat connected');
 
+      watchedVoiceServerId = null;
 
 
       voiceConnection.send(JSON.stringify({
@@ -1633,12 +2101,17 @@ async function initializeVoiceConnection() {
 
       const joinedServer = sessionStorage.getItem('UserJoined');
       if (joinedServer) {
+        currentVoiceServerId = joinedServer;
         console.log(`Re-joining voice for server ${joinedServer} as ${JWTusername}`);
         voiceConnection.send(JSON.stringify({
           Type: 'join',
           ServerId: joinedServer,
           Username: JWTusername
         }));
+      }
+
+      if (selectedServerID) {
+        sendVoiceRosterWatch(selectedServerID);
       }
     };
 
@@ -1648,10 +2121,11 @@ async function initializeVoiceConnection() {
 
         switch (message.Type) {
           case 'user-joined':
-            console.log(`${message.Username} joined voice chat`);
-            if (!currentVoiceUsers.includes(message.Username)) {
-              currentVoiceUsers.push(message.Username);
-              renderVoiceUserList(currentVoiceUsers);
+            {
+              const serverId =
+                message.ServerId || currentVoiceServerId || selectedServerID;
+              console.log(`${message.Username} joined voice chat in ${serverId}`);
+              addVoiceUserToServer(serverId, message.Username);
             }
 
             if (JWTusername < message.Username) {
@@ -1674,9 +2148,12 @@ async function initializeVoiceConnection() {
             break;
 
           case 'user-left':
-            console.log(`${message.Username} left the voice channel`);
-            currentVoiceUsers = currentVoiceUsers.filter(u => u !== message.Username);
-            renderVoiceUserList(currentVoiceUsers);
+            {
+              const serverId =
+                message.ServerId || currentVoiceServerId || selectedServerID;
+              console.log(`${message.Username} left the voice channel in ${serverId}`);
+              removeVoiceUserFromServer(serverId, message.Username);
+            }
 
             removePeerUI(message.Username);
 
@@ -1688,41 +2165,47 @@ async function initializeVoiceConnection() {
             break;
 
           case 'existing-users':
-            const users = JSON.parse(message.Data);
-            console.log('users already in voice chat:', users);
-            currentVoiceUsers = users;
-            renderVoiceUserList(currentVoiceUsers);
+            {
+              const users = normalizeVoiceUserList(JSON.parse(message.Data));
+              const serverId =
+                message.ServerId || currentVoiceServerId || selectedServerID;
+              console.log(`users already in voice chat for ${serverId}:`, users);
+              setVoiceUsersForServer(serverId, users);
 
-            if (!serverPeerConnection && users.length > 0) {
-              await establishServerConnection();
-            }
+              if (!serverPeerConnection && users.length > 0) {
+                await establishServerConnection();
+              }
 
-            for (const existingUser of users) {
-              if (existingUser !== JWTusername && JWTusername < existingUser) {
-                try {
-                  const peerConnection = await createPeerConnection(existingUser);
-                  const offer = await peerConnection.createOffer();
-                  await peerConnection.setLocalDescription(offer);
+              for (const existingUser of users) {
+                if (existingUser !== JWTusername && JWTusername < existingUser) {
+                  try {
+                    const peerConnection = await createPeerConnection(existingUser);
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
 
-                  if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
-                    voiceConnection.send(JSON.stringify({
-                      Type: 'peer-offer',
-                      Data: JSON.stringify(offer),
-                      TargetUser: existingUser
-                    }));
+                    if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+                      voiceConnection.send(JSON.stringify({
+                        Type: 'peer-offer',
+                        Data: JSON.stringify(offer),
+                        TargetUser: existingUser
+                      }));
+                    }
+                  } catch (err) {
+                    console.error(`Failed to connect to ${existingUser}:`, err);
                   }
-                } catch (err) {
-                  console.error(`Failed to connect to ${existingUser}:`, err);
                 }
               }
             }
             break;
 
           case 'users-updated':
-            const updatedUsers = JSON.parse(message.Data);
-            console.log('voice channel updated:', updatedUsers);
-            currentVoiceUsers = updatedUsers;
-            renderVoiceUserList(currentVoiceUsers);
+            {
+              const updatedUsers = normalizeVoiceUserList(JSON.parse(message.Data));
+              const serverId =
+                message.ServerId || currentVoiceServerId || selectedServerID;
+              console.log(`voice channel updated for ${serverId}:`, updatedUsers);
+              setVoiceUsersForServer(serverId, updatedUsers);
+            }
             break;
           case 'server-offer':
             await handleServerOffer(message.Data);
@@ -1775,15 +2258,21 @@ async function initializeVoiceConnection() {
     voiceConnection.onclose = () => {
       console.log('voice disconnected');
       voiceConnection = null;
+      voiceConnectionOpenPromise = null;
+      watchedVoiceServerId = null;
 
       const joinedServer = sessionStorage.getItem('UserJoined');
       if (joinedServer) {
         console.log("Attempting to reconnect voice in 3 seconds...");
         setTimeout(() => {
-          initializeVoiceConnection();
+          initializeVoiceConnection().catch((err) => {
+            console.error('Voice reconnect failed:', err);
+          });
         }, 3000);
       }
     };
+
+    return voiceConnectionOpenPromise;
 
 
     async function handleServerOffer(offer) {
@@ -1956,9 +2445,7 @@ async function initializeVoiceConnection() {
     async function createPeerConnection(userId) {
       console.log(`connecting to ${userId}`);
 
-      const peerConnection = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
+      const peerConnection = new RTCPeerConnection(config);
 
 
       if (localStream) {
@@ -2002,6 +2489,8 @@ async function initializeVoiceConnection() {
     console.log('voice chat system ready');
   } catch (err) {
     console.error('voice chat connection failed:', err);
+    voiceConnectionOpenPromise = null;
+    throw err;
   }
 }
 
@@ -2216,14 +2705,153 @@ async function establishServerConnection() {
   }
 }
 
+function createDistortionCurve(amount = 0) {
+  const samples = 44100;
+  const curve = new Float32Array(samples);
+  const drive = Number(amount) * 4;
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = ((3 + drive) * x * 20 * (Math.PI / 180)) /
+      (Math.PI + drive * Math.abs(x));
+  }
+  return curve;
+}
+
+function getAudioConstraints(wantAudio) {
+  if (!wantAudio) return false;
+  const state = readSettingsState();
+  const deviceId = state.selects?.inputDevice;
+  return {
+    deviceId: deviceId && deviceId !== 'default' ? { exact: deviceId } : undefined,
+    echoCancellation: state.toggles?.echoCancellation !== false,
+    noiseSuppression: state.toggles?.noiseSuppression !== false,
+    autoGainControl: true,
+  };
+}
+
+function cleanupVoiceProcessing({ restoreRaw = false } = {}) {
+  if (!voiceProcessingState) return;
+
+  const { stream, rawTrack, processedTrack, sourceContext } = voiceProcessingState;
+  if (stream && restoreRaw && rawTrack?.readyState === 'live') {
+    stream.getAudioTracks().forEach((track) => stream.removeTrack(track));
+    stream.addTrack(rawTrack);
+  }
+
+  if (processedTrack && processedTrack.readyState === 'live') {
+    processedTrack.stop();
+  }
+
+  if (!restoreRaw && rawTrack?.readyState === 'live') {
+    rawTrack.stop();
+  }
+
+  sourceContext?.close?.().catch?.(() => {});
+  voiceProcessingState = null;
+}
+
+function connectVoiceEffectNodes(audioContext, source, destination, settings) {
+  const inputGain = audioContext.createGain();
+  inputGain.gain.value = normalizeSettingsNumber(readSettingsState().sliders?.inputVolume, 80, 0, 100) / 100;
+
+  const tone = audioContext.createBiquadFilter();
+  const formant = Number(settings.formant || 0);
+  tone.type = formant >= 0 ? 'highshelf' : 'lowshelf';
+  tone.frequency.value = formant >= 0 ? 1400 : 520;
+  tone.gain.value = Math.max(-18, Math.min(18, formant * 1.5));
+
+  const pitch = Number(settings.pitch || 0);
+  const pitchFilter = audioContext.createBiquadFilter();
+  pitchFilter.type = pitch >= 0 ? 'highpass' : 'lowpass';
+  pitchFilter.frequency.value = pitch >= 0
+    ? 120 + Math.abs(pitch) * 45
+    : 3200 - Math.abs(pitch) * 140;
+
+  const shaper = audioContext.createWaveShaper();
+  shaper.curve = createDistortionCurve(Number(settings.distortion || 0) / 100);
+  shaper.oversample = '4x';
+
+  source.connect(inputGain);
+  inputGain.connect(tone);
+  tone.connect(pitchFilter);
+  pitchFilter.connect(shaper);
+
+  const echoAmount = normalizeSettingsNumber(settings.echo, 0, 0, 100) / 100;
+  if (echoAmount > 0.01) {
+    const dry = audioContext.createGain();
+    dry.gain.value = 1 - echoAmount * 0.35;
+    const delay = audioContext.createDelay(0.7);
+    delay.delayTime.value = 0.08 + echoAmount * 0.35;
+    const wet = audioContext.createGain();
+    wet.gain.value = echoAmount * 0.55;
+
+    shaper.connect(dry);
+    dry.connect(destination);
+    shaper.connect(delay);
+    delay.connect(wet);
+    wet.connect(destination);
+    return;
+  }
+
+  shaper.connect(destination);
+}
+
+async function applyConfiguredAudioProcessing(stream) {
+  const state = readSettingsState();
+  const settings = state.voiceChanger || createDefaultSettingsState().voiceChanger;
+  const audioTrack = stream.getAudioTracks()[0];
+
+  cleanupVoiceProcessing({ restoreRaw: true });
+
+  if (!audioTrack || !settings.enabled || !settings.perCallEnabled) {
+    return stream;
+  }
+
+  const sourceContext = new (window.AudioContext || window.webkitAudioContext)();
+  const sourceStream = new MediaStream([audioTrack]);
+  const source = sourceContext.createMediaStreamSource(sourceStream);
+  const destination = sourceContext.createMediaStreamDestination();
+
+  connectVoiceEffectNodes(sourceContext, source, destination, settings);
+
+  const processedTrack = destination.stream.getAudioTracks()[0];
+  processedTrack.enabled = audioTrack.enabled;
+  stream.removeTrack(audioTrack);
+  stream.addTrack(processedTrack);
+
+  voiceProcessingState = {
+    stream,
+    rawTrack: audioTrack,
+    processedTrack,
+    sourceContext,
+  };
+
+  return stream;
+}
+
+async function refreshLocalAudioProcessing() {
+  if (!localStream) return;
+  await applyConfiguredAudioProcessing(localStream);
+  const nextAudioTrack = localStream.getAudioTracks()[0] || null;
+  const peerLists = [...peerConnections.values(), serverPeerConnection].filter(Boolean);
+
+  peerLists.forEach((pc) => {
+    const sender = pc.getSenders?.().find((s) => s.track?.kind === 'audio');
+    sender?.replaceTrack(nextAudioTrack).catch((error) => {
+      console.warn('Could not replace processed audio track:', error);
+    });
+  });
+}
+
 async function ensureLocalStream(wantAudio = true, wantVideo = false) {
-  const localVideo = document.getElementById('localVideo');
+  const localVideo = getLocalPreviewVideo();
 
   if (!localStream) {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: wantAudio,
+      audio: getAudioConstraints(wantAudio),
       video: wantVideo,
     });
+    await applyConfiguredAudioProcessing(localStream);
     if (localVideo) {
       localVideo.srcObject = localStream;
       localVideo.muted = true;
@@ -2290,50 +2918,60 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
 async function JoinVoiceCalls() {
   enableAudioPlayback();
   try {
-    if (!selectedServerID) {
+    const targetServerId = selectedServerID;
+    if (!targetServerId) {
       console.error('please select a server first before joining voice chat');
       return;
     }
 
-
-    if (sessionStorage.getItem('UserJoined') === selectedServerID && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+    const joinedVoiceServerId =
+      currentVoiceServerId || sessionStorage.getItem('UserJoined');
+    if (
+      joinedVoiceServerId === targetServerId &&
+      voiceConnection &&
+      voiceConnection.readyState === WebSocket.OPEN
+    ) {
       console.log('you are already in this voice channel');
       return;
     }
 
-
-    if (!voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
-      console.log('setting up voice connection');
-      await initializeVoiceConnection();
+    if (joinedVoiceServerId && joinedVoiceServerId !== targetServerId) {
+      await leaveVoiceServer(joinedVoiceServerId);
     }
+
+    console.log('setting up voice connection');
+    await initializeVoiceConnection();
 
 
     await ensureLocalStream(true, false);
 
 
     if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+      currentVoiceServerId = targetServerId;
+      sessionStorage.setItem('UserJoined', targetServerId);
       voiceConnection.send(
         JSON.stringify({
           Type: 'join',
-          ServerId: selectedServerID,
+          ServerId: targetServerId,
           Username: JWTusername,
         })
       );
-      console.log(`joined voice in server: ${selectedServerID}`);
+      console.log(`joined voice in server: ${targetServerId}`);
+    } else {
+      throw new Error('Voice connection not ready after initialization');
     }
 
 
     await establishServerConnection();
-
-
-    sessionStorage.setItem('UserJoined', selectedServerID);
   } catch (err) {
     console.error('couldnt join voice chat:', err);
   }
 }
-async function LeaveCall() {
+async function leaveVoiceServer(serverIdToLeave) {
   try {
-    if (!selectedServerID) {
+    const activeServerId =
+      serverIdToLeave || currentVoiceServerId || sessionStorage.getItem('UserJoined');
+    if (!activeServerId) {
       console.error('cant leave voice, no server picked');
       return;
     }
@@ -2343,11 +2981,11 @@ async function LeaveCall() {
       voiceConnection.send(
         JSON.stringify({
           Type: 'leave',
-          ServerId: selectedServerID,
+          ServerId: activeServerId,
           Username: JWTusername,
         })
       );
-      console.log(`left voice in server: ${selectedServerID}`);
+      console.log(`left voice in server: ${activeServerId}`);
     }
 
 
@@ -2370,6 +3008,8 @@ async function LeaveCall() {
     }
     peerConnections.clear();
     currentVoiceUsers = [];
+    currentVoiceServerId = null;
+    setVoiceUsersForServer(activeServerId, []);
 
 
     const remotes = Array.from(document.querySelectorAll('[id^="remote_"]'));
@@ -2377,9 +3017,11 @@ async function LeaveCall() {
 
 
     if (localStream) {
+      cleanupVoiceProcessing({ restoreRaw: false });
       localStream.getTracks().forEach((t) => t.stop());
       localStream = null;
     }
+    localVideo = getLocalPreviewVideo();
     if (localVideo) localVideo.srcObject = null;
 
     const localAudio = document.getElementById('localAudio');
@@ -2390,14 +3032,7 @@ async function LeaveCall() {
 
 
     sessionStorage.removeItem('UserJoined');
-
-    const myMemberEl = document.querySelector(`.viewServerAccounts div[data-username="${JWTusername}"]`);
-    if (myMemberEl) {
-      const icon = myMemberEl.querySelector('.voice-status-icon');
-      if (icon) icon.remove();
-    }
-
-    document.querySelectorAll('.voice-user-list').forEach(el => el.remove());
+    renderSelectedServerVoiceUsers();
 
 
     isMuted = false;
@@ -2424,12 +3059,15 @@ async function LeaveCall() {
     console.error('couldnt leave voice chat:', err);
   }
 }
+async function LeaveCall() {
+  await leaveVoiceServer();
+}
 async function VideoOn() {
   try {
     await ensureLocalStream(true, true);
 
 
-    const localVideo = document.getElementById('localVideo');
+    const localVideo = getLocalPreviewVideo();
     if (localVideo && localStream) {
       localVideo.srcObject = localStream;
       localVideo.muted = true;
@@ -2516,7 +3154,7 @@ async function VideoOff() {
       }
     }
   }
-  const localVideo = document.getElementById('localVideo');
+  const localVideo = getLocalPreviewVideo();
   if (localVideo) localVideo.srcObject = localStream;
 }
 function MuteAudio() {
@@ -2619,7 +3257,7 @@ async function ShareScreen() {
       }
       localStream.addTrack(screenTrack);
 
-      const localVideo = document.getElementById('localVideo');
+      const localVideo = getLocalPreviewVideo();
       if (localVideo) {
         localVideo.srcObject = localStream;
         localVideo.muted = true;
@@ -2712,28 +3350,117 @@ function logToScreen(msg) {
   console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
 }
 
+function renderServerManagementControls(container) {
+  if (!container || !selectedServerID) return;
+
+  const tools = document.createElement('div');
+  tools.className = 'server-management-tools';
+
+  const actions = [
+    ['+ Channel', createChannelFromPrompt],
+    ['+ Category', createCategoryFromPrompt],
+    ['Invite', createLimitedInviteFromPrompt],
+    ['Leave', leaveSelectedServer],
+  ];
+
+  actions.forEach(([label, handler]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'server-tool-btn';
+    button.textContent = label;
+    button.addEventListener('click', handler);
+    tools.appendChild(button);
+  });
+
+  container.appendChild(tools);
+}
+
+async function createChannelFromPrompt() {
+  const name = prompt('Channel name')?.trim();
+  if (!name) return;
+  const type = prompt('Channel type: text or voice', 'text')?.trim().toLowerCase() || 'text';
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/CreateChannel`, {
+      serverId: selectedServerID,
+      name,
+      type,
+    });
+    await fetchServerDetails();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not create channel.'), 'error');
+  }
+}
+
+async function createCategoryFromPrompt() {
+  const name = prompt('Category name')?.trim();
+  if (!name) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/CreateCategory`, {
+      serverId: selectedServerID,
+      name,
+    });
+    await fetchServerDetails();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not create category.'), 'error');
+  }
+}
+
+async function createLimitedInviteFromPrompt() {
+  const maxUsesText = prompt('Max uses (blank for unlimited)', '');
+  const expiresText = prompt('Expires in minutes (blank for never)', '');
+
+  const payload = {
+    serverId: selectedServerID,
+    maxUses: maxUsesText ? Number(maxUsesText) : null,
+    expiresInMinutes: expiresText ? Number(expiresText) : null,
+  };
+
+  try {
+    const res = await axios.post(`${homeApiBase}/api/Server/CreateInvite`, payload);
+    const inviteLink = res.data?.inviteLink || res.data?.InviteLink;
+    if (inviteLink && navigator.clipboard) {
+      await navigator.clipboard.writeText(inviteLink);
+    }
+    showAppMessage(inviteLink ? 'Invite link copied.' : 'Invite created.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not create invite.'), 'error');
+  }
+}
+
+async function leaveSelectedServer() {
+  if (!selectedServerID || !confirm('Leave this server?')) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/LeaveServer`, {
+      serverId: selectedServerID,
+    });
+    selectedServerID = null;
+    document.querySelector('.secondColumn').style.display = 'block';
+    document.querySelector('.lastSection').style.display = 'block';
+    document.getElementById('serverDetails').style.display = 'none';
+    await GetServer();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not leave server.'), 'error');
+  }
+}
+
 async function fetchServerDetails() {
   try {
     const response = await axios.get(
-      `http://localhost:5018/api/Server/GetServerDetails?serverId=${selectedServerID}`
+      `${homeApiBase}/api/Server/GetServerDetails?serverId=${encodeURIComponent(selectedServerID)}`
     );
     const { categories, channels } = response.data;
     const channelsList = document.getElementById('channelsList');
     channelsList.innerHTML = '';
+    renderServerManagementControls(channelsList);
 
     const renderChannel = (channel) => {
       const channelEl = document.createElement('div');
+      channelEl.className = 'channel-list-item';
       channelEl.dataset.channelId = channel.id;
       channelEl.dataset.channelType = channel.type;
-      channelEl.style.padding = '5px 10px';
-      channelEl.style.cursor = 'pointer';
-      channelEl.style.color = '#8e9297';
-      channelEl.style.marginLeft = '10px';
-      channelEl.onmouseover = () => channelEl.style.backgroundColor = '#34373c';
-      channelEl.onmouseout = () => {
-        if (selectedChannelID !== channel.id) channelEl.style.backgroundColor = 'transparent';
-      };
-
       if (channel.type === 'text') {
         channelEl.textContent = '# ' + channel.name;
         channelEl.onclick = () => {
@@ -2789,10 +3516,12 @@ async function fetchServerDetails() {
       fetchServerMessages();
     }
 
-    fetchServerMembers();
-
-
-    renderVoiceUserList(currentVoiceUsers);
+    await fetchServerMembers();
+    watchVoiceServer(selectedServerID).catch((err) => {
+      console.error('Voice roster watch failed after loading channels:', err);
+    });
+    startVoiceRosterRefresh();
+    await fetchActiveVoiceUsers(selectedServerID);
 
   } catch (err) {
     console.error('Failed to fetch server details:', err);
@@ -2804,7 +3533,7 @@ async function fetchServerDetails() {
 async function fetchServerMembers() {
   try {
     const response = await axios.get(
-      `http://localhost:5018/api/Server/GetServerMembers?serverId=${selectedServerID}`
+      `${homeApiBase}/api/Server/GetServerMembers?serverId=${encodeURIComponent(selectedServerID)}`
     );
     const members = response.data;
     const membersList = document.querySelector('.viewServerAccounts');
@@ -2820,6 +3549,7 @@ async function fetchServerMembers() {
     members.forEach(member => {
       const memberEl = document.createElement('div');
       memberEl.dataset.username = member.username;
+      memberEl.classList.add('server-member-row');
       memberEl.style.padding = '10px';
       memberEl.style.color = member.role === 'owner' ? '#ff7b00' : '#b9bbbe';
       memberEl.style.cursor = 'pointer';
@@ -2842,14 +3572,13 @@ async function fetchServerMembers() {
 
       memberEl.appendChild(avatar);
       memberEl.appendChild(name);
+      memberEl.appendChild(renderMemberModerationActions(member));
 
       membersList.appendChild(memberEl);
     });
 
 
-    if (typeof currentVoiceUsers !== 'undefined') {
-      renderVoiceUserList(currentVoiceUsers);
-    }
+    renderSelectedServerVoiceUsers();
 
   } catch (err) {
     console.error('Failed to fetch members:', err);
@@ -2919,7 +3648,9 @@ function renderVoiceUserList(users) {
 async function startSignalR() {
   try {
     signalRConnection = new signalR.HubConnectionBuilder()
-      .withUrl("http://localhost:5018/chatHub")
+      .withUrl(`${homeApiBase}/chatHub`, {
+        accessTokenFactory: () => cookieVal || '',
+      })
       .withAutomaticReconnect()
       .build();
 
@@ -2934,11 +3665,29 @@ async function startSignalR() {
       fetchServerMembers();
     });
 
+    signalRConnection.on("VoiceUsersUpdated", (serverId, users) => {
+      setVoiceUsersForServer(serverId, normalizeVoiceUserList(users));
+    });
+
+    signalRConnection.onreconnected(async () => {
+      if (!selectedServerID) {
+        return;
+      }
+
+      try {
+        await signalRConnection.invoke("JoinServer", selectedServerID, JWTusername);
+        await fetchActiveVoiceUsers(selectedServerID);
+      } catch (err) {
+        console.error("SignalR rejoin failed:", err);
+      }
+    });
+
     await signalRConnection.start();
     console.log("SignalR Connected");
 
     if (selectedServerID) {
       await signalRConnection.invoke("JoinServer", selectedServerID, JWTusername);
+      await fetchActiveVoiceUsers(selectedServerID);
     }
 
   } catch (err) {
@@ -2966,11 +3715,7 @@ async function startPrivateCall() {
   console.log('Private call UI started, initiating call...');
 
   try {
-
-    initializeVoiceConnection();
-
-
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await initializeVoiceConnection();
 
     if (!voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
       console.error("Voice connection not ready");
@@ -3303,6 +4048,7 @@ async function endPrivateCall(notifyPeer = true) {
     }
 
     if (peerConnections.size === 0 && localStream) {
+      cleanupVoiceProcessing({ restoreRaw: false });
       localStream.getTracks().forEach(t => t.stop());
       localStream = null;
       if (localVideo) localVideo.srcObject = null;
@@ -3350,7 +4096,7 @@ async function FetchAndRenderFriendsMain() {
     if (listEl) listEl.innerHTML = '';
 
     const res = await axios.get(
-      'http://localhost:5018/api/Account/GetFriends?username=' + JWTusername
+      `${homeApiBase}/api/Account/GetFriends`
     );
 
     let friends = [];
@@ -3468,9 +4214,7 @@ async function startPrivateVideoCall() {
   console.log('Private VIDEO call UI started, initiating call...');
 
   try {
-    initializeVoiceConnection();
-
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await initializeVoiceConnection();
 
     if (!voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
       console.error('Voice connection not ready');
@@ -3555,14 +4299,14 @@ async function handleDMFileUpload(input) {
     formData.append('file', file);
 
     try {
-      const res = await axios.post('http://localhost:5018/api/Upload/UploadImage', formData, {
+      const res = await axios.post(`${homeApiBase}/api/Upload/UploadImage`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
       });
 
       if (res.data && res.data.url) {
-        const fileUrl = 'http://localhost:5018' + res.data.url;
+        const fileUrl = homeApiBase + res.data.url;
         console.log('File uploaded:', fileUrl);
 
         const messageText = `[Image](${fileUrl})`;
@@ -3588,7 +4332,7 @@ async function handleDMFileUpload(input) {
       }
     } catch (err) {
       console.error('File upload failed:', err);
-      alert('Failed to upload image.');
+      showAppMessage(getApiErrorMessage(err, 'Failed to upload image.'), 'error');
     }
 
     input.value = '';
@@ -3644,7 +4388,7 @@ function closeUploadModal() {
 
 function handleFileSelection(file) {
   if (!file.type.startsWith('image/')) {
-    alert('Only image files are supported.');
+    showAppMessage('Only image files are supported.', 'error');
     return;
   }
 
@@ -3676,14 +4420,14 @@ async function submitUploadModal() {
   btn.disabled = true;
 
   try {
-    const res = await axios.post('http://localhost:5018/api/Upload/UploadImage', formData, {
+    const res = await axios.post(`${homeApiBase}/api/Upload/UploadImage`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
     });
 
     if (res.data && res.data.url) {
-      const fileUrl = 'http://localhost:5018' + res.data.url;
+      const fileUrl = homeApiBase + res.data.url;
       console.log('File uploaded:', fileUrl);
 
       const messageText = `[Image](${fileUrl})`;
@@ -3711,7 +4455,7 @@ async function submitUploadModal() {
     }
   } catch (err) {
     console.error('File upload failed:', err);
-    alert('Failed to upload image.');
+    showAppMessage(getApiErrorMessage(err, 'Failed to upload image.'), 'error');
   } finally {
     btn.textContent = originalText;
     btn.disabled = false;
@@ -4002,7 +4746,7 @@ window.openProfilePopout = async function (username, x, y) {
   document.getElementById('popoutAvatar').src = homeDefaultAvatarUrl;
 
   try {
-    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountProfile?username=${username}`);
+    const res = await axios.get(`${homeApiBase}/api/Account/GetAccountProfile?username=${encodeURIComponent(username)}`);
     const profile = res.data;
 
     if (profile) {
@@ -4039,71 +4783,2125 @@ window.openProfilePopout = async function (username, x, y) {
 }
 
 
+const SETTINGS_STORAGE_KEY = 'discordClone_settings_v2';
+const LIGHT_THEME = {
+  background: '#f2f3f5',
+  text: '#1e1f22',
+};
+
+let settingsInteractivityInitialized = false;
+let settingsSystemThemeListenerInitialized = false;
+let accountSettingsLoadPromise = null;
+let accountSettingsPersistTimer = null;
+let accountSettingsServerState = null;
+let voicePreviewStream = null;
+let voicePreviewAudio = null;
+let voicePreviewContext = null;
+
+function createDefaultSettingsState() {
+  return {
+    selectedTab: 'my-account',
+    profileView: 'user-profile',
+    themeMode: 'dark',
+    messageDisplay: 'cozy',
+    fontSize: 16,
+    zoomLevel: 100,
+    saturation: 100,
+    toggles: {},
+    checkboxes: {},
+    radios: {},
+    sliders: {},
+    selects: {},
+    keybinds: null,
+    profileBannerColor: '#0c0c0c',
+    profileBannerUrl: '',
+    presenceStatus: 'online',
+    contact: {
+      email: '',
+      phoneNumber: '',
+    },
+    privacy: {
+      dmPolicy: 'friends',
+      allowFriendRequestsEveryone: true,
+      allowFriendRequestsFriendsOfFriends: true,
+      allowFriendRequestsServerMembers: true,
+      showActivity: true,
+    },
+    voiceChanger: {
+      enabled: false,
+      preset: 'normal',
+      pitch: 0,
+      formant: 0,
+      distortion: 0,
+      echo: 0,
+      perCallEnabled: true,
+    },
+    connectedAccounts: {},
+    removedItems: {},
+  };
+}
+
+function normalizeSettingsNumber(value, fallback, min, max) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, numericValue));
+}
+
+function readSettingsState() {
+  const fallbackState = createDefaultSettingsState();
+  let legacyFontSize = null;
+
+  try {
+    legacyFontSize = localStorage.getItem('discordClone_fontSize');
+    const rawValue = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!rawValue) {
+      if (legacyFontSize) {
+        fallbackState.fontSize = normalizeSettingsNumber(
+          legacyFontSize,
+          fallbackState.fontSize,
+          12,
+          24
+        );
+      }
+      return fallbackState;
+    }
+
+    const parsedState = JSON.parse(rawValue);
+    if (!parsedState || typeof parsedState !== 'object') {
+      return fallbackState;
+    }
+
+    return {
+      ...fallbackState,
+      ...parsedState,
+      selectedTab:
+        typeof parsedState.selectedTab === 'string'
+          ? parsedState.selectedTab
+          : fallbackState.selectedTab,
+      profileView:
+        typeof parsedState.profileView === 'string'
+          ? parsedState.profileView
+          : fallbackState.profileView,
+      themeMode:
+        typeof parsedState.themeMode === 'string'
+          ? parsedState.themeMode
+          : fallbackState.themeMode,
+      messageDisplay:
+        typeof parsedState.messageDisplay === 'string'
+          ? parsedState.messageDisplay
+          : fallbackState.messageDisplay,
+      fontSize: normalizeSettingsNumber(
+        parsedState.fontSize ?? legacyFontSize,
+        fallbackState.fontSize,
+        12,
+        24
+      ),
+      zoomLevel: normalizeSettingsNumber(
+        parsedState.zoomLevel,
+        fallbackState.zoomLevel,
+        50,
+        150
+      ),
+      saturation: normalizeSettingsNumber(
+        parsedState.saturation,
+        fallbackState.saturation,
+        0,
+        100
+      ),
+      toggles:
+        parsedState.toggles && typeof parsedState.toggles === 'object'
+          ? parsedState.toggles
+          : {},
+      checkboxes:
+        parsedState.checkboxes && typeof parsedState.checkboxes === 'object'
+          ? parsedState.checkboxes
+          : {},
+      radios:
+        parsedState.radios && typeof parsedState.radios === 'object'
+          ? parsedState.radios
+          : {},
+      sliders:
+        parsedState.sliders && typeof parsedState.sliders === 'object'
+          ? parsedState.sliders
+          : {},
+      selects:
+        parsedState.selects && typeof parsedState.selects === 'object'
+          ? parsedState.selects
+          : {},
+      keybinds: Array.isArray(parsedState.keybinds) ? parsedState.keybinds : null,
+      profileBannerColor:
+        typeof parsedState.profileBannerColor === 'string'
+          ? parsedState.profileBannerColor
+          : fallbackState.profileBannerColor,
+      profileBannerUrl:
+        typeof parsedState.profileBannerUrl === 'string'
+          ? parsedState.profileBannerUrl
+          : fallbackState.profileBannerUrl,
+      presenceStatus:
+        typeof parsedState.presenceStatus === 'string'
+          ? parsedState.presenceStatus
+          : fallbackState.presenceStatus,
+      contact:
+        parsedState.contact && typeof parsedState.contact === 'object'
+          ? { ...fallbackState.contact, ...parsedState.contact }
+          : fallbackState.contact,
+      privacy:
+        parsedState.privacy && typeof parsedState.privacy === 'object'
+          ? { ...fallbackState.privacy, ...parsedState.privacy }
+          : fallbackState.privacy,
+      voiceChanger:
+        parsedState.voiceChanger && typeof parsedState.voiceChanger === 'object'
+          ? { ...fallbackState.voiceChanger, ...parsedState.voiceChanger }
+          : fallbackState.voiceChanger,
+      connectedAccounts:
+        parsedState.connectedAccounts && typeof parsedState.connectedAccounts === 'object'
+          ? parsedState.connectedAccounts
+          : {},
+      removedItems:
+        parsedState.removedItems && typeof parsedState.removedItems === 'object'
+          ? parsedState.removedItems
+          : {},
+    };
+  } catch (error) {
+    console.warn('Failed to read saved settings state:', error);
+    if (legacyFontSize) {
+      fallbackState.fontSize = normalizeSettingsNumber(
+        legacyFontSize,
+        fallbackState.fontSize,
+        12,
+        24
+      );
+    }
+    return fallbackState;
+  }
+}
+
+function renderMemberModerationActions(member) {
+  const actions = document.createElement('div');
+  actions.className = 'member-actions';
+
+  if (member.username === JWTusername) {
+    return actions;
+  }
+
+  [
+    ['Kick', () => moderateServerMember('KickMember', member.username)],
+    ['Ban', () => moderateServerMember('BanMember', member.username)],
+    ['Role', () => changeServerMemberRole(member.username)],
+    ['Owner', () => transferServerOwnership(member.username)],
+  ].forEach(([label, handler]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'member-action-btn';
+    button.textContent = label;
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handler();
+    });
+    actions.appendChild(button);
+  });
+
+  return actions;
+}
+
+async function moderateServerMember(action, targetUsername) {
+  const reason = action === 'BanMember' ? prompt('Ban reason (optional)', '') : null;
+  if (!confirm(`${action === 'BanMember' ? 'Ban' : 'Kick'} ${targetUsername}?`)) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/${action}`, {
+      serverId: selectedServerID,
+      targetUsername,
+      reason,
+    });
+    await fetchServerMembers();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Moderation action failed.'), 'error');
+  }
+}
+
+async function changeServerMemberRole(targetUsername) {
+  const role = prompt('Role name', 'user')?.trim();
+  if (!role) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/SetMemberRole`, {
+      serverId: selectedServerID,
+      targetUsername,
+      role,
+    });
+    await fetchServerMembers();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not update role.'), 'error');
+  }
+}
+
+async function transferServerOwnership(targetUsername) {
+  if (!confirm(`Transfer ownership to ${targetUsername}?`)) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/TransferOwnership`, {
+      serverId: selectedServerID,
+      targetUsername,
+    });
+    await fetchServerMembers();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not transfer ownership.'), 'error');
+  }
+}
+
+async function uploadImageFile(file) {
+  if (!file || !file.type?.startsWith('image/')) {
+    throw new Error('Only image files are supported.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await axios.post(`${homeApiBase}/api/Upload/UploadImage`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+
+  if (!res.data?.url) {
+    throw new Error('Upload did not return a file URL.');
+  }
+
+  return homeApiBase + res.data.url;
+}
+
+function writeSettingsState(updater) {
+  const currentState = readSettingsState();
+  const nextState =
+    typeof updater === 'function' ? updater(currentState) : { ...currentState, ...updater };
+
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextState));
+    localStorage.setItem('discordClone_fontSize', String(nextState.fontSize));
+    scheduleAccountSettingsPersist(nextState);
+  } catch (error) {
+    console.warn('Failed to save settings state:', error);
+  }
+
+  return nextState;
+}
+
+function parseSettingsJson(value, fallback = {}) {
+  if (!value || typeof value !== 'string') return fallback;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : fallback;
+  } catch (error) {
+    console.warn('Failed to parse server settings JSON:', error);
+    return fallback;
+  }
+}
+
+function scheduleAccountSettingsPersist(state = readSettingsState()) {
+  window.clearTimeout(accountSettingsPersistTimer);
+  accountSettingsPersistTimer = window.setTimeout(() => {
+    persistAccountSettings(state).catch((error) => {
+      console.warn('Failed to persist settings:', error);
+    });
+  }, 450);
+}
+
+async function persistAccountSettings(state = readSettingsState()) {
+  const settingsPayload = { ...state };
+  delete settingsPayload.contact;
+  delete settingsPayload.privacy;
+
+  await axios.post(`${homeApiBase}/api/Account/UpdateAccountSettings`, {
+    settings: settingsPayload,
+    voiceChangerSettings: state.voiceChanger || createDefaultSettingsState().voiceChanger,
+  });
+}
+
+async function loadAccountSettings({ force = false } = {}) {
+  if (accountSettingsLoadPromise && !force) {
+    return accountSettingsLoadPromise;
+  }
+
+  accountSettingsLoadPromise = axios
+    .get(`${homeApiBase}/api/Account/GetAccountSettings`)
+    .then((res) => {
+      applyAccountSettingsResponse(res.data || {});
+      return res.data;
+    })
+    .catch((error) => {
+      console.warn('Could not load account settings:', error);
+      return null;
+    })
+    .finally(() => {
+      accountSettingsLoadPromise = null;
+    });
+
+  return accountSettingsLoadPromise;
+}
+
+function applyAccountSettingsResponse(data) {
+  const serverState = parseSettingsJson(data.settingsJson, {});
+  const voiceChangerState = parseSettingsJson(data.voiceChangerSettingsJson, {});
+  const fallback = createDefaultSettingsState();
+
+  accountSettingsServerState = {
+    ...fallback,
+    ...serverState,
+    contact: {
+      email: data.email || '',
+      phoneNumber: data.phoneNumber || '',
+    },
+    privacy: {
+      ...fallback.privacy,
+      ...(data.privacy || {}),
+    },
+    presenceStatus: data.presenceStatus || serverState.presenceStatus || fallback.presenceStatus,
+    profileBannerColor:
+      data.profileBannerColor || serverState.profileBannerColor || fallback.profileBannerColor,
+    profileBannerUrl: data.profileBannerUrl || serverState.profileBannerUrl || '',
+    voiceChanger: {
+      ...fallback.voiceChanger,
+      ...(serverState.voiceChanger || {}),
+      ...voiceChangerState,
+    },
+  };
+
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(accountSettingsServerState));
+    localStorage.setItem('discordClone_fontSize', String(accountSettingsServerState.fontSize));
+  } catch (error) {
+    console.warn('Failed to cache server settings:', error);
+  }
+
+  applyPersistedSettingsState();
+  updateSettingsIdentityFields();
+}
+
+function slugifySettingsValue(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function hasStoredSettingValue(store, key) {
+  return Object.prototype.hasOwnProperty.call(store, key);
+}
+
+function getSettingsViewKey(element) {
+  return (
+    element
+      ?.closest('.settings-view')
+      ?.id?.replace(/^view-/, '') || 'global'
+  );
+}
+
+function getToggleSettingKey(item, index) {
+  if (item.dataset.settingKey) {
+    return item.dataset.settingKey;
+  }
+
+  const labelText =
+    item.querySelector('.toggle-label')?.textContent?.trim() || `toggle-${index}`;
+  item.dataset.settingKey = `toggle-${getSettingsViewKey(item)}-${slugifySettingsValue(
+    labelText
+  )}`;
+  return item.dataset.settingKey;
+}
+
+function getCheckboxSettingKey(item, index) {
+  if (item.dataset.settingKey) {
+    return item.dataset.settingKey;
+  }
+
+  const labelText = item.textContent?.trim() || `checkbox-${index}`;
+  item.dataset.settingKey = `checkbox-${getSettingsViewKey(item)}-${slugifySettingsValue(
+    labelText
+  )}`;
+  return item.dataset.settingKey;
+}
+
+function getSliderSettingKey(slider, index) {
+  if (slider.dataset.settingsSlider) {
+    return slider.dataset.settingsSlider;
+  }
+
+  if (slider.id) {
+    return slider.id;
+  }
+
+  if (slider.dataset.settingKey) {
+    return slider.dataset.settingKey;
+  }
+
+  const labelText =
+    slider.closest('.form-group')?.querySelector('.form-label')?.textContent?.trim() ||
+    slider.closest('.settings-view')?.querySelector('.settings-section-header')?.textContent?.trim() ||
+    `slider-${index}`;
+  slider.dataset.settingKey = `slider-${getSettingsViewKey(slider)}-${slugifySettingsValue(
+    labelText
+  )}`;
+  return slider.dataset.settingKey;
+}
+
+function getSelectSettingKey(select, index) {
+  if (select.dataset.settingsSelect) {
+    return select.dataset.settingsSelect;
+  }
+
+  if (select.id) {
+    return select.id;
+  }
+
+  if (select.dataset.settingKey) {
+    return select.dataset.settingKey;
+  }
+
+  const labelText =
+    select.closest('.form-group')?.querySelector('.form-label')?.textContent?.trim() ||
+    `select-${index}`;
+  select.dataset.settingKey = `select-${getSettingsViewKey(select)}-${slugifySettingsValue(
+    labelText
+  )}`;
+  return select.dataset.settingKey;
+}
+
+function getRadioGroupKey(group, index) {
+  if (group.dataset.settingsRadio) {
+    return group.dataset.settingsRadio;
+  }
+
+  if (group.dataset.settingKey) {
+    return group.dataset.settingKey;
+  }
+
+  const firstLabel =
+    group.querySelector('.radio-title')?.textContent?.trim() || `radio-group-${index}`;
+  group.dataset.settingKey = `radio-${getSettingsViewKey(group)}-${slugifySettingsValue(
+    firstLabel
+  )}`;
+  return group.dataset.settingKey;
+}
+
+function getRadioItemValue(item, index = 0) {
+  if (!item) {
+    return String(index);
+  }
+
+  if (item.dataset.settingValue) {
+    return item.dataset.settingValue;
+  }
+
+  const titleText = item.querySelector('.radio-title')?.textContent?.trim();
+  return slugifySettingsValue(titleText || index);
+}
+
+function setRadioGroupSelection(group, desiredValue) {
+  if (!group) {
+    return { item: null, value: desiredValue };
+  }
+
+  const items = Array.from(group.querySelectorAll('.radio-item'));
+  if (!items.length) {
+    return { item: null, value: desiredValue };
+  }
+
+  const selectedItem =
+    items.find((item, index) => getRadioItemValue(item, index) === desiredValue) || items[0];
+
+  items.forEach((item) => {
+    const isActive = item === selectedItem;
+    item.classList.toggle('active', isActive);
+    item.querySelector('.radio-circle')?.classList.toggle('selected', isActive);
+  });
+
+  return {
+    item: selectedItem,
+    value: getRadioItemValue(selectedItem, items.indexOf(selectedItem)),
+  };
+}
+
+function updateSettingsIdentityFields() {
+  if (typeof JWTusername === 'undefined' || !JWTusername) {
+    return;
+  }
+
+  const state = readSettingsState();
+  const settingsDisplayName = document.getElementById('settingsDisplayName');
+  const settingsDisplayNameValue = document.getElementById('settingsDisplayNameValue');
+  const settingsUsernameValue = document.getElementById('settingsUsernameValue');
+  const settingsEmailValue = document.getElementById('settingsEmailValue');
+  const settingsPhoneValue = document.getElementById('settingsPhoneValue');
+  const presenceStatusSelect = document.getElementById('presenceStatusSelect');
+  const previewName = document.querySelector('.preview-name');
+  const previewTag = document.querySelector('.preview-tag');
+
+  if (settingsDisplayName) settingsDisplayName.innerText = JWTusername;
+  if (settingsDisplayNameValue) settingsDisplayNameValue.innerText = JWTusername;
+  if (settingsUsernameValue) settingsUsernameValue.innerText = JWTusername;
+  if (settingsEmailValue) settingsEmailValue.innerText = state.contact.email || 'Not added';
+  if (settingsPhoneValue) settingsPhoneValue.innerText = state.contact.phoneNumber || 'Not added';
+  if (presenceStatusSelect) presenceStatusSelect.value = state.presenceStatus || 'online';
+  if (previewName) previewName.textContent = JWTusername;
+  if (previewTag) {
+    previewTag.textContent =
+      '#' + Math.floor(Math.random() * 9999).toString().padStart(4, '0');
+  }
+}
+
+function updateProfileVisuals(profilePictureUrl, description, profileBannerUrl = '', profileBannerColor = '') {
+  const nextAvatarUrl = profilePictureUrl || homeDefaultAvatarUrl;
+  const nextDescription = description || 'Click to add custom status';
+  const nextBannerColor = profileBannerColor || readSettingsState().profileBannerColor || '#0c0c0c';
+
+  document
+    .querySelectorAll('.settings-avatar, .preview-avatar img, #popoutAvatar')
+    .forEach((img) => {
+      if (img.tagName !== 'IMG') {
+        return;
+      }
+
+      img.onerror = () => {
+        img.onerror = null;
+        img.src = homeDefaultAvatarUrl;
+      };
+      img.src = nextAvatarUrl;
+    });
+
+  const customStatus = document.querySelector('.preview-custom-status');
+  if (customStatus) {
+    customStatus.textContent = nextDescription;
+  }
+
+  document.querySelectorAll('.preview-banner, .banner-color, #popoutHeaderColor').forEach((banner) => {
+    banner.style.backgroundColor = nextBannerColor;
+    banner.style.backgroundImage = profileBannerUrl ? `url("${profileBannerUrl}")` : '';
+    banner.style.backgroundSize = 'cover';
+    banner.style.backgroundPosition = 'center';
+  });
+}
+
+function filterSettingsSidebarItems(query = '') {
+  const normalizedQuery = query.trim().toLowerCase();
+  let firstMatch = null;
+
+  document.querySelectorAll('.settings-sidebar .settings-section').forEach((section) => {
+    const items = Array.from(section.querySelectorAll('.settings-item[data-target]'));
+    if (!items.length) {
+      section.style.display = normalizedQuery ? 'none' : '';
+      return;
+    }
+
+    let visibleItemCount = 0;
+    items.forEach((item) => {
+      const matches =
+        !normalizedQuery || item.textContent.toLowerCase().includes(normalizedQuery);
+      item.style.display = matches ? '' : 'none';
+
+      if (matches) {
+        visibleItemCount += 1;
+        if (!firstMatch) {
+          firstMatch = item;
+        }
+      }
+    });
+
+    const groupTitle = section.querySelector('.settings-group-title');
+    if (groupTitle) {
+      groupTitle.style.display = visibleItemCount ? '' : 'none';
+    }
+
+    section.style.display = visibleItemCount ? '' : 'none';
+  });
+
+  return firstMatch;
+}
+
+function applyProfileTab(tabKey) {
+  const targetTab = tabKey || 'user-profile';
+  const profileTabBar = document.querySelector('[data-settings-tab-bar="profileView"]');
+  if (!profileTabBar) {
+    return;
+  }
+
+  profileTabBar.querySelectorAll('.settings-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.tab === targetTab);
+  });
+
+  document.querySelectorAll('[data-tab-panel]').forEach((panel) => {
+    panel.style.display = panel.dataset.tabPanel === targetTab ? 'block' : 'none';
+  });
+}
+
+function applyMessageDisplay(mode) {
+  const isCompact = mode === 'compact';
+  const rootStyle = document.documentElement.style;
+
+  rootStyle.setProperty('--message-group-margin-top', isCompact ? '8px' : '17px');
+  rootStyle.setProperty('--message-group-padding', isCompact ? '1px 16px' : '2px 16px');
+  rootStyle.setProperty('--message-avatar-size', isCompact ? '32px' : '40px');
+  rootStyle.setProperty('--message-header-margin-bottom', isCompact ? '2px' : '4px');
+  rootStyle.setProperty('--message-username-size', isCompact ? '14px' : '16px');
+  rootStyle.setProperty('--message-text-line-height', isCompact ? '1.15rem' : '1.375rem');
+}
+
+function applyMessageFontSize(fontSize) {
+  document.documentElement.style.setProperty('--message-text-size', `${fontSize}px`);
+}
+
+function applyZoomLevel(zoomLevel) {
+  if (document.body) {
+    document.body.style.zoom = `${zoomLevel}%`;
+  }
+}
+
+function applySaturationLevel(saturation) {
+  if (document.body) {
+    document.body.style.filter =
+      saturation === 100 ? '' : `saturate(${Math.max(0, saturation)}%)`;
+  }
+}
+
+function applyOutputVolume(volume) {
+  const normalizedVolume = normalizeSettingsNumber(volume, 100, 0, 100) / 100;
+  document.querySelectorAll('audio, video').forEach((mediaElement) => {
+    if (!mediaElement.muted) {
+      mediaElement.volume = normalizedVolume;
+    }
+  });
+}
+
+function applyOutputDevice(deviceId) {
+  if (!deviceId || deviceId === 'default') return;
+  document.querySelectorAll('audio, video').forEach((mediaElement) => {
+    if (typeof mediaElement.setSinkId === 'function') {
+      mediaElement.setSinkId(deviceId).catch((error) => {
+        console.warn('Could not apply output device:', error);
+      });
+    }
+  });
+}
+
+function applySliderValue(slider, value, index = 0) {
+  if (!slider) {
+    return;
+  }
+
+  const min = Number(slider.min || 0);
+  const max = Number(slider.max || 100);
+  const fallback = Number(slider.value || min);
+  const nextValue = normalizeSettingsNumber(value, fallback, min, max);
+  const settingKey = getSliderSettingKey(slider, index);
+
+  slider.value = String(nextValue);
+
+  if (slider.id === 'fontScalingSlider') {
+    applyMessageFontSize(nextValue);
+  } else if (slider.id === 'zoomLevelSlider') {
+    applyZoomLevel(nextValue);
+  } else if (slider.id === 'saturationSlider') {
+    applySaturationLevel(nextValue);
+  } else if (settingKey === 'outputVolume' || slider.id === 'outputVolumeSlider') {
+    applyOutputVolume(nextValue);
+  }
+}
+
+function applyProfileBannerColor(color) {
+  const nextColor = normalizeHexColor(color, '#0c0c0c');
+  document.querySelectorAll('.banner-color, .preview-banner, .profile-popout-header').forEach((element) => {
+    element.style.backgroundColor = nextColor;
+  });
+
+  const colorHex = document.querySelector('.color-hex');
+  if (colorHex) {
+    colorHex.textContent = nextColor;
+  }
+}
+
+function applyReducedMotion(isEnabled) {
+  document.body?.classList.toggle('app-reduced-motion', Boolean(isEnabled));
+}
+
+function getSystemThemeColors() {
+  const prefersDark =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return prefersDark ? DEFAULT_THEME : LIGHT_THEME;
+}
+
+function syncThemeInputs(backgroundColor, textColor) {
+  const bgInput = document.getElementById('customBgColor');
+  const textInput = document.getElementById('customTextColor');
+
+  if (bgInput) bgInput.value = backgroundColor;
+  if (textInput) textInput.value = textColor;
+}
+
+function applyThemeMode(themeMode, options = {}) {
+  const { syncInputs = true } = options;
+  const presetTheme =
+    themeMode === 'light'
+      ? LIGHT_THEME
+      : themeMode === 'sync-with-computer'
+        ? getSystemThemeColors()
+        : DEFAULT_THEME;
+
+  if (syncInputs) {
+    syncThemeInputs(presetTheme.background, presetTheme.text);
+  }
+
+  applyTheme(presetTheme.background, presetTheme.text);
+}
+
+function syncThemeModeSelectionFromTheme(backgroundColor, textColor) {
+  const themeGroup = document.querySelector('[data-settings-radio="themeMode"]');
+  if (!themeGroup) {
+    return;
+  }
+
+  const normalizedBackground = normalizeHexColor(
+    backgroundColor,
+    DEFAULT_THEME.background
+  );
+  const normalizedText = normalizeHexColor(textColor, DEFAULT_THEME.text);
+  let nextThemeMode = readSettingsState().themeMode || 'dark';
+
+  if (
+    normalizedBackground === normalizeHexColor(DEFAULT_THEME.background) &&
+    normalizedText === normalizeHexColor(DEFAULT_THEME.text)
+  ) {
+    nextThemeMode = 'dark';
+  } else if (
+    normalizedBackground === normalizeHexColor(LIGHT_THEME.background) &&
+    normalizedText === normalizeHexColor(LIGHT_THEME.text)
+  ) {
+    nextThemeMode = 'light';
+  }
+
+  setRadioGroupSelection(themeGroup, nextThemeMode);
+}
+
+function handleToggleStateChange(settingKey, isActive) {
+  writeSettingsState((state) => ({
+    ...state,
+    toggles: {
+      ...state.toggles,
+      [settingKey]: isActive,
+    },
+  }));
+
+  if (settingKey.endsWith('-reduced-motion')) {
+    applyReducedMotion(isActive);
+  }
+
+  if (settingKey === 'privacyShowActivity') {
+    writeSettingsState((state) => ({
+      ...state,
+      privacy: {
+        ...state.privacy,
+        showActivity: isActive,
+      },
+    }));
+    syncPrivacySettingsFromState();
+  }
+
+  if (settingKey === 'voiceChangerEnabled' || settingKey === 'voiceChangerPerCallEnabled') {
+    updateVoiceChangerStateFromControls();
+  }
+}
+
+function handleCheckboxStateChange(settingKey, isChecked) {
+  writeSettingsState((state) => ({
+    ...state,
+    checkboxes: {
+      ...state.checkboxes,
+      [settingKey]: isChecked,
+    },
+  }));
+
+  if (settingKey.startsWith('privacyFriendRequests')) {
+    writeSettingsState((state) => ({
+      ...state,
+      privacy: {
+        ...state.privacy,
+        allowFriendRequestsEveryone:
+          settingKey === 'privacyFriendRequestsEveryone'
+            ? isChecked
+            : state.privacy.allowFriendRequestsEveryone,
+        allowFriendRequestsFriendsOfFriends:
+          settingKey === 'privacyFriendRequestsFriendsOfFriends'
+            ? isChecked
+            : state.privacy.allowFriendRequestsFriendsOfFriends,
+        allowFriendRequestsServerMembers:
+          settingKey === 'privacyFriendRequestsServerMembers'
+            ? isChecked
+            : state.privacy.allowFriendRequestsServerMembers,
+      },
+    }));
+    syncPrivacySettingsFromState();
+  }
+}
+
+function handleSliderStateChange(slider, index) {
+  const settingKey = getSliderSettingKey(slider, index);
+  const value = Number(slider.value);
+
+  applySliderValue(slider, value, index);
+
+  writeSettingsState((state) => {
+    const nextState = {
+      ...state,
+      sliders: {
+        ...state.sliders,
+        [settingKey]: value,
+      },
+    };
+
+    if (slider.id === 'fontScalingSlider') {
+      nextState.fontSize = value;
+    } else if (slider.id === 'zoomLevelSlider') {
+      nextState.zoomLevel = value;
+    } else if (slider.id === 'saturationSlider') {
+      nextState.saturation = value;
+    }
+
+    return nextState;
+  });
+
+  if (settingKey.startsWith('voice') || settingKey === 'inputVolume') {
+    updateVoiceChangerStateFromControls();
+  }
+}
+
+function handleSelectStateChange(select, index) {
+  const settingKey = getSelectSettingKey(select, index);
+  writeSettingsState((state) => ({
+    ...state,
+    selects: {
+      ...state.selects,
+      [settingKey]: select.value,
+    },
+  }));
+
+  if (settingKey === 'presenceStatus') {
+    writeSettingsState((state) => ({
+      ...state,
+      presenceStatus: select.value,
+    }));
+    syncPresenceStatus(select.value);
+  }
+
+  if (settingKey === 'voiceChangerPreset') {
+    applyVoiceChangerPreset(select.value);
+    updateVoiceChangerStateFromControls();
+  }
+
+  if (settingKey === 'inputDevice' && localStream) {
+    cleanupVoiceProcessing({ restoreRaw: false });
+    localStream.getTracks().forEach((track) => track.stop());
+    localStream = null;
+    ensureLocalStream(true, Boolean(getLocalPreviewVideo()?.srcObject?.getVideoTracks?.().length))
+      .catch((error) => showAppMessage(getApiErrorMessage(error, 'Could not switch input device.'), 'error'));
+  }
+
+  if (settingKey === 'outputDevice') {
+    applyOutputDevice(select.value);
+  }
+}
+
+function handleRadioStateChange(settingKey, value) {
+  writeSettingsState((state) => {
+    const nextState = {
+      ...state,
+      radios: {
+        ...state.radios,
+        [settingKey]: value,
+      },
+    };
+
+    if (settingKey === 'themeMode') {
+      nextState.themeMode = value;
+      nextState.customTheme = null;
+    }
+
+    if (settingKey === 'messageDisplay') {
+      nextState.messageDisplay = value;
+    }
+
+    if (settingKey === 'privacyDmPolicy') {
+      nextState.privacy = {
+        ...nextState.privacy,
+        dmPolicy: value,
+      };
+    }
+
+    return nextState;
+  });
+
+  if (settingKey === 'themeMode') {
+    applyThemeMode(value);
+  }
+
+  if (settingKey === 'messageDisplay') {
+    applyMessageDisplay(value);
+  }
+
+  if (settingKey === 'privacyDmPolicy') {
+    syncPrivacySettingsFromState();
+  }
+}
+
+function syncPresenceStatus(presenceStatus) {
+  axios
+    .post(`${homeApiBase}/api/Account/UpdatePresence`, { presenceStatus })
+    .catch((error) => {
+      showAppMessage(getApiErrorMessage(error, 'Could not update status.'), 'error');
+    });
+}
+
+function buildPrivacyPayload(state = readSettingsState()) {
+  const privacy = state.privacy || createDefaultSettingsState().privacy;
+  return {
+    dmPolicy: privacy.dmPolicy || 'friends',
+    allowFriendRequestsEveryone: Boolean(privacy.allowFriendRequestsEveryone),
+    allowFriendRequestsFriendsOfFriends: Boolean(privacy.allowFriendRequestsFriendsOfFriends),
+    allowFriendRequestsServerMembers: Boolean(privacy.allowFriendRequestsServerMembers),
+    showActivity: Boolean(privacy.showActivity),
+  };
+}
+
+function syncPrivacySettingsFromState() {
+  axios
+    .post(`${homeApiBase}/api/Account/UpdatePrivacySettings`, buildPrivacyPayload())
+    .catch((error) => {
+      showAppMessage(getApiErrorMessage(error, 'Could not update privacy settings.'), 'error');
+    });
+}
+
+function getVoiceChangerControlsState() {
+  return {
+    enabled: document.querySelector('[data-setting-key="voiceChangerEnabled"] .toggle-switch')?.classList.contains('active') || false,
+    preset: document.getElementById('voiceChangerPresetSelect')?.value || 'normal',
+    pitch: Number(document.getElementById('voicePitchSlider')?.value || 0),
+    formant: Number(document.getElementById('voiceFormantSlider')?.value || 0),
+    distortion: Number(document.getElementById('voiceDistortionSlider')?.value || 0),
+    echo: Number(document.getElementById('voiceEchoSlider')?.value || 0),
+    perCallEnabled:
+      document.querySelector('[data-setting-key="voiceChangerPerCallEnabled"] .toggle-switch')?.classList.contains('active') !== false,
+  };
+}
+
+function updateVoiceChangerStateFromControls() {
+  const voiceChanger = getVoiceChangerControlsState();
+  writeSettingsState((state) => ({
+    ...state,
+    voiceChanger,
+  }));
+  refreshLocalAudioProcessing().catch((error) => {
+    console.warn('Could not refresh voice changer processing:', error);
+  });
+}
+
+function applyVoiceChangerPreset(preset) {
+  const presets = {
+    normal: { pitch: 0, formant: 0, distortion: 0, echo: 0 },
+    deep: { pitch: -7, formant: -5, distortion: 8, echo: 0 },
+    'higher-pitch': { pitch: 7, formant: 4, distortion: 0, echo: 0 },
+    robot: { pitch: 0, formant: 0, distortion: 65, echo: 8 },
+    radio: { pitch: 0, formant: 6, distortion: 28, echo: 0 },
+    echo: { pitch: 0, formant: 0, distortion: 0, echo: 65 },
+    whisper: { pitch: 4, formant: 10, distortion: 12, echo: 12 },
+  };
+
+  const values = presets[preset] || presets.normal;
+  const controlMap = {
+    voicePitchSlider: values.pitch,
+    voiceFormantSlider: values.formant,
+    voiceDistortionSlider: values.distortion,
+    voiceEchoSlider: values.echo,
+  };
+
+  Object.entries(controlMap).forEach(([id, value]) => {
+    const slider = document.getElementById(id);
+    if (slider) {
+      slider.value = value;
+      applySliderValue(slider, value, 0);
+    }
+  });
+}
+
+
+function applyPersistedSettingsState() {
+  const state = readSettingsState();
+  const themeMode = state.themeMode || 'dark';
+  const messageDisplay = state.messageDisplay || 'cozy';
+  const fontSize = normalizeSettingsNumber(state.fontSize, 16, 12, 24);
+  const zoomLevel = normalizeSettingsNumber(state.zoomLevel, 100, 50, 150);
+  const saturation = normalizeSettingsNumber(state.saturation, 100, 0, 100);
+
+  applyThemeMode(themeMode);
+  applyMessageDisplay(messageDisplay);
+  applyMessageFontSize(fontSize);
+  applyZoomLevel(zoomLevel);
+  applySaturationLevel(saturation);
+  applyProfileBannerColor(state.profileBannerColor || '#0c0c0c');
+
+  document.querySelectorAll('.settings-slider').forEach((slider, index) => {
+    const settingKey = getSliderSettingKey(slider, index);
+    const storedValue =
+      slider.id === 'fontScalingSlider'
+        ? fontSize
+        : slider.id === 'zoomLevelSlider'
+          ? zoomLevel
+          : slider.id === 'saturationSlider'
+            ? saturation
+            : settingKey === 'voicePitch'
+              ? state.voiceChanger.pitch
+              : settingKey === 'voiceFormant'
+                ? state.voiceChanger.formant
+                : settingKey === 'voiceDistortion'
+                  ? state.voiceChanger.distortion
+                  : settingKey === 'voiceEcho'
+                    ? state.voiceChanger.echo
+                    : state.sliders[settingKey] ?? slider.value;
+
+    applySliderValue(slider, storedValue, index);
+  });
+
+  document.querySelectorAll('.settings-select').forEach((select, index) => {
+    const settingKey = getSelectSettingKey(select, index);
+    const storedValue =
+      settingKey === 'presenceStatus'
+        ? state.presenceStatus
+        : settingKey === 'voiceChangerPreset'
+          ? state.voiceChanger.preset
+          : state.selects[settingKey];
+    if (typeof storedValue === 'string') {
+      const hasOption = Array.from(select.options).some((option) => option.value === storedValue);
+      if (hasOption) {
+        select.value = storedValue;
+        if (settingKey === 'outputDevice') {
+          applyOutputDevice(storedValue);
+        }
+      }
+    }
+  });
+
+  document.querySelectorAll('.toggle-item').forEach((item, index) => {
+    const toggle = item.querySelector('.toggle-switch');
+    if (!toggle) {
+      return;
+    }
+
+    const settingKey = getToggleSettingKey(item, index);
+    const forcedToggleValue =
+      settingKey === 'privacyShowActivity'
+        ? state.privacy.showActivity
+        : settingKey === 'voiceChangerEnabled'
+          ? state.voiceChanger.enabled
+          : settingKey === 'voiceChangerPerCallEnabled'
+            ? state.voiceChanger.perCallEnabled
+            : undefined;
+    const isActive =
+      typeof forcedToggleValue === 'boolean'
+        ? forcedToggleValue
+        : hasStoredSettingValue(state.toggles, settingKey)
+          ? Boolean(state.toggles[settingKey])
+          : toggle.classList.contains('active');
+
+    toggle.classList.toggle('active', isActive);
+
+    if (settingKey.endsWith('-reduced-motion')) {
+      applyReducedMotion(isActive);
+    }
+  });
+
+  document.querySelectorAll('.checkbox-item').forEach((item, index) => {
+    const checkbox = item.querySelector('.checkbox-box');
+    if (!checkbox) {
+      return;
+    }
+
+    const settingKey = getCheckboxSettingKey(item, index);
+    const forcedCheckboxValue =
+      settingKey === 'privacyFriendRequestsEveryone'
+        ? state.privacy.allowFriendRequestsEveryone
+        : settingKey === 'privacyFriendRequestsFriendsOfFriends'
+          ? state.privacy.allowFriendRequestsFriendsOfFriends
+          : settingKey === 'privacyFriendRequestsServerMembers'
+            ? state.privacy.allowFriendRequestsServerMembers
+            : undefined;
+    const isChecked =
+      typeof forcedCheckboxValue === 'boolean'
+        ? forcedCheckboxValue
+        : hasStoredSettingValue(state.checkboxes, settingKey)
+          ? Boolean(state.checkboxes[settingKey])
+          : checkbox.classList.contains('checked');
+
+    checkbox.classList.toggle('checked', isChecked);
+  });
+
+  document.querySelectorAll('.radio-group').forEach((group, index) => {
+    const settingKey = getRadioGroupKey(group, index);
+    const defaultValue = getRadioItemValue(
+      group.querySelector('.radio-item.active') || group.querySelector('.radio-item'),
+      0
+    );
+    const storedValue =
+      settingKey === 'themeMode'
+        ? themeMode
+        : settingKey === 'messageDisplay'
+          ? messageDisplay
+          : settingKey === 'privacyDmPolicy'
+            ? state.privacy.dmPolicy
+            : state.radios[settingKey] || defaultValue;
+    const selection = setRadioGroupSelection(group, storedValue);
+
+    if (settingKey === 'themeMode') {
+      applyThemeMode(selection.value);
+    }
+
+    if (settingKey === 'messageDisplay') {
+      applyMessageDisplay(selection.value);
+    }
+  });
+
+  applyProfileTab(state.profileView || 'user-profile');
+}
+
+function getDefaultSettingsKeybinds() {
+  return [
+    { action: 'Push to Talk (Normal)', keys: ['CTRL', 'V'] },
+    { action: 'Toggle Mute', keys: ['CTRL', 'SHIFT', 'M'] },
+  ];
+}
+
+function saveSettingsKeybinds(keybinds) {
+  writeSettingsState((state) => ({
+    ...state,
+    keybinds,
+  }));
+}
+
+function createKeybindRow(keybind, keybinds) {
+  const row = document.createElement('div');
+  row.className = 'keybind-row';
+
+  const action = document.createElement('div');
+  action.className = 'keybind-action';
+  action.textContent = keybind.action;
+
+  const keys = document.createElement('div');
+  keys.className = 'keybind-keys';
+  keybind.keys.forEach((key, index) => {
+    if (index > 0) {
+      keys.appendChild(document.createTextNode(' + '));
+    }
+
+    const keyBox = document.createElement('span');
+    keyBox.className = 'key-box';
+    keyBox.textContent = key;
+    keys.appendChild(keyBox);
+  });
+
+  const removeButton = document.createElement('button');
+  removeButton.className = 'settings-btn-danger';
+  removeButton.style.padding = '4px 8px';
+  removeButton.textContent = 'Remove';
+  removeButton.addEventListener('click', () => {
+    const nextKeybinds = keybinds.filter((item) => item !== keybind);
+    saveSettingsKeybinds(nextKeybinds);
+    renderSettingsKeybinds(nextKeybinds);
+  });
+
+  row.appendChild(action);
+  row.appendChild(keys);
+  row.appendChild(removeButton);
+  return row;
+}
+
+function renderSettingsKeybinds(keybinds = null) {
+  const list = document.querySelector('.keybind-list');
+  if (!list) {
+    return;
+  }
+
+  const activeKeybinds = Array.isArray(keybinds)
+    ? keybinds
+    : readSettingsState().keybinds || getDefaultSettingsKeybinds();
+
+  list.innerHTML = '';
+  activeKeybinds.forEach((keybind) => {
+    list.appendChild(createKeybindRow(keybind, activeKeybinds));
+  });
+
+  if (!activeKeybinds.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state-card';
+    empty.style.padding = '16px';
+    empty.textContent = 'No keybinds added.';
+    list.appendChild(empty);
+  }
+}
+
+function addSettingsKeybind() {
+  const action = prompt('Action name', 'Custom Action')?.trim();
+  if (!action) {
+    return;
+  }
+
+  const keyText = prompt('Keys, separated by +', 'CTRL + SHIFT + K')?.trim();
+  if (!keyText) {
+    return;
+  }
+
+  const keys = keyText
+    .split('+')
+    .map((key) => key.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (!keys.length) {
+    return;
+  }
+
+  const keybinds = readSettingsState().keybinds || getDefaultSettingsKeybinds();
+  const nextKeybinds = [...keybinds, { action, keys }];
+  saveSettingsKeybinds(nextKeybinds);
+  renderSettingsKeybinds(nextKeybinds);
+}
+
+function rememberRemovedSettingsItem(kind, label) {
+  if (!kind || !label) {
+    return;
+  }
+
+  writeSettingsState((state) => {
+    const existingItems = Array.isArray(state.removedItems[kind])
+      ? state.removedItems[kind]
+      : [];
+
+    return {
+      ...state,
+      removedItems: {
+        ...state.removedItems,
+        [kind]: Array.from(new Set([...existingItems, label])),
+      },
+    };
+  });
+}
+
+function applyRemovedSettingsItems() {
+  const removedItems = readSettingsState().removedItems || {};
+  const selectors = [
+    { kind: 'apps', row: '.app-item', label: '.app-name' },
+    { kind: 'devices', row: '.device-card:not(.current)', label: '.device-name' },
+    { kind: 'games', row: '.added-game-row', label: '.game-name' },
+  ];
+
+  selectors.forEach(({ kind, row, label }) => {
+    const removedLabels = Array.isArray(removedItems[kind]) ? removedItems[kind] : [];
+    document.querySelectorAll(row).forEach((item) => {
+      const itemLabel = item.querySelector(label)?.textContent?.trim();
+      if (itemLabel && removedLabels.includes(itemLabel)) {
+        item.remove();
+      }
+    });
+  });
+}
+
+function closeAccountActionDialog() {
+  document.querySelector('.account-action-overlay')?.remove();
+}
+
+function openAccountActionDialog({ title, description, fields, confirmText, danger = false, onSubmit }) {
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = description;
+
+  const form = document.createElement('form');
+  form.className = 'account-action-form';
+
+  const fieldMap = {};
+  fields.forEach((field) => {
+    const label = document.createElement('label');
+    label.textContent = field.label;
+
+    const input = document.createElement('input');
+    input.type = field.type || 'text';
+    input.name = field.name;
+    input.autocomplete = field.autocomplete || 'off';
+    input.placeholder = field.placeholder || '';
+    input.value = field.value || '';
+    input.required = field.required !== false;
+    input.minLength = field.minLength || 0;
+
+    fieldMap[field.name] = input;
+    label.appendChild(input);
+    form.appendChild(label);
+  });
+
+  const error = document.createElement('p');
+  error.className = 'account-action-error';
+  error.setAttribute('role', 'alert');
+  form.appendChild(error);
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.className = 'account-action-cancel';
+  cancelButton.textContent = 'Cancel';
+  cancelButton.addEventListener('click', closeAccountActionDialog);
+
+  const submitButton = document.createElement('button');
+  submitButton.type = 'submit';
+  submitButton.className = danger ? 'account-action-submit danger' : 'account-action-submit';
+  submitButton.textContent = confirmText;
+
+  actions.appendChild(cancelButton);
+  actions.appendChild(submitButton);
+  form.appendChild(actions);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.textContent = '';
+
+    const values = Object.fromEntries(
+      Object.entries(fieldMap).map(([key, input]) => [key, input.value.trim()])
+    );
+
+    try {
+      setBusyState(submitButton, true, 'Saving...');
+      await onSubmit(values);
+      closeAccountActionDialog();
+    } catch (err) {
+      console.error(`${title} failed:`, err);
+      error.textContent = getApiErrorMessage(err, 'This account action failed.');
+    } finally {
+      setBusyState(submitButton, false);
+    }
+  });
+
+  dialog.appendChild(heading);
+  dialog.appendChild(copy);
+  dialog.appendChild(form);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      closeAccountActionDialog();
+    }
+  });
+
+  const firstInput = form.querySelector('input');
+  if (firstInput) firstInput.focus();
+}
+
+function openChangePasswordDialog() {
+  openAccountActionDialog({
+    title: 'Change Password',
+    description: 'Update your password. You will keep your current session after the change.',
+    confirmText: 'Change Password',
+    fields: [
+      {
+        name: 'currentPassword',
+        label: 'Current Password',
+        type: 'password',
+        autocomplete: 'current-password',
+        minLength: 6,
+      },
+      {
+        name: 'newPassword',
+        label: 'New Password',
+        type: 'password',
+        autocomplete: 'new-password',
+        minLength: 6,
+      },
+      {
+        name: 'confirmPassword',
+        label: 'Confirm New Password',
+        type: 'password',
+        autocomplete: 'new-password',
+        minLength: 6,
+      },
+    ],
+    onSubmit: async ({ currentPassword, newPassword, confirmPassword }) => {
+      if (newPassword !== confirmPassword) {
+        throw new Error('New passwords do not match.');
+      }
+
+      const res = await axios.post(`${homeApiBase}/api/Account/ChangePassword`, {
+        username: JWTusername,
+        currentPassword,
+        newPassword,
+      });
+      showAppMessage(res.data?.message || 'Password changed.', 'success');
+    },
+  });
+}
+
+function openDisableAccountDialog() {
+  openAccountActionDialog({
+    title: 'Disable Account',
+    description: 'Your account will be disabled and you will be signed out. Logging in again with the same password recovers it.',
+    confirmText: 'Disable Account',
+    danger: true,
+    fields: [
+      {
+        name: 'password',
+        label: 'Password',
+        type: 'password',
+        autocomplete: 'current-password',
+        minLength: 6,
+      },
+    ],
+    onSubmit: async ({ password }) => {
+      const res = await axios.post(`${homeApiBase}/api/Account/DisableAccount`, {
+        username: JWTusername,
+        password,
+      });
+      showAppMessage(res.data?.message || 'Account disabled.', 'success');
+      window.setTimeout(LogOut, 900);
+    },
+  });
+}
+
+function openDeleteAccountDialog() {
+  openAccountActionDialog({
+    title: 'Delete Account',
+    description: 'This removes your account and friend relationships. Messages already sent are kept for conversation history.',
+    confirmText: 'Delete Account',
+    danger: true,
+    fields: [
+      {
+        name: 'username',
+        label: `Type ${JWTusername} to confirm`,
+        type: 'text',
+        autocomplete: 'username',
+      },
+      {
+        name: 'password',
+        label: 'Password',
+        type: 'password',
+        autocomplete: 'current-password',
+        minLength: 6,
+      },
+    ],
+    onSubmit: async ({ username, password }) => {
+      if (username !== JWTusername) {
+        throw new Error('The confirmation username does not match.');
+      }
+
+      const res = await axios.post(`${homeApiBase}/api/Account/DeleteAccount`, {
+        username: JWTusername,
+        password,
+      });
+      showAppMessage(res.data?.message || 'Account deleted.', 'success');
+      window.setTimeout(LogOut, 900);
+    },
+  });
+}
+
+function openContactInfoDialog() {
+  const state = readSettingsState();
+  openAccountActionDialog({
+    title: 'Contact Info',
+    description: 'Add or update the email and phone number shown on your account page.',
+    confirmText: 'Save Contact Info',
+    fields: [
+      {
+        name: 'email',
+        label: 'Email',
+        type: 'email',
+        autocomplete: 'email',
+        required: false,
+        value: state.contact.email || '',
+        placeholder: state.contact.email || 'name@example.com',
+      },
+      {
+        name: 'phoneNumber',
+        label: 'Phone Number',
+        type: 'tel',
+        autocomplete: 'tel',
+        required: false,
+        value: state.contact.phoneNumber || '',
+        placeholder: state.contact.phoneNumber || '+1 555 0100',
+      },
+    ],
+    onSubmit: async ({ email, phoneNumber }) => {
+      const res = await axios.post(`${homeApiBase}/api/Account/UpdateContactInfo`, {
+        email,
+        phoneNumber,
+      });
+      applyAccountSettingsResponse(res.data || {});
+      showAppMessage('Contact info saved.', 'success');
+    },
+  });
+}
+
+async function clearPhoneNumber() {
+  const state = readSettingsState();
+  try {
+    const res = await axios.post(`${homeApiBase}/api/Account/UpdateContactInfo`, {
+      email: state.contact.email || '',
+      phoneNumber: '',
+    });
+    applyAccountSettingsResponse(res.data || {});
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not remove phone number.'), 'error');
+  }
+}
+
+function setupSettingsActionButtons() {
+  document.querySelectorAll('.account-detail-row .edit-detail-btn:not(#editContactInfoBtn):not(#editContactInfoBtnSecondary)').forEach((button) => {
+    button.addEventListener('click', () => switchSettingsTab('profiles'));
+  });
+
+  document.getElementById('editContactInfoBtn')?.addEventListener('click', openContactInfoDialog);
+  document.getElementById('editContactInfoBtnSecondary')?.addEventListener('click', openContactInfoDialog);
+  document.getElementById('removePhoneNumberBtn')?.addEventListener('click', clearPhoneNumber);
+
+  document.querySelectorAll('.reveal-link').forEach((link) => {
+    link.addEventListener('click', () => {
+      const value = link.closest('.detail-value');
+      const label = link.closest('.account-detail-row')?.querySelector('label')?.textContent?.toLowerCase() || '';
+      if (!value) {
+        return;
+      }
+
+      value.textContent = label.includes('phone')
+        ? 'No phone number connected'
+        : 'No email connected';
+    });
+  });
+
+  document.querySelectorAll('.remove-link:not(#removePhoneNumberBtn)').forEach((link) => {
+    link.addEventListener('click', () => {
+      const row = link.closest('.account-detail-row');
+      const value = row?.querySelector('.detail-value');
+      if (value) {
+        value.textContent = 'No phone number connected';
+      }
+    });
+  });
+
+  document.querySelector('.change-password-btn')?.addEventListener('click', openChangePasswordDialog);
+
+  document.querySelector('.disable-account-btn')?.addEventListener('click', openDisableAccountDialog);
+
+  document.querySelector('.delete-account-btn')?.addEventListener('click', openDeleteAccountDialog);
+
+  document.getElementById('profileBannerColorBtn')?.addEventListener('click', () => {
+    const currentColor = readSettingsState().profileBannerColor || '#0c0c0c';
+    const nextColor = prompt('Banner color hex', currentColor)?.trim();
+    if (!nextColor) {
+      return;
+    }
+
+    const normalizedColor = normalizeHexColor(nextColor, currentColor);
+    applyProfileBannerColor(normalizedColor);
+    writeSettingsState((state) => ({
+      ...state,
+      profileBannerColor: normalizedColor,
+    }));
+  });
+
+  const avatarFileInput = document.getElementById('profileAvatarFileInput');
+  const bannerFileInput = document.getElementById('profileBannerFileInput');
+  document.getElementById('uploadProfileAvatarBtn')?.addEventListener('click', () => {
+    avatarFileInput?.click();
+  });
+  document.getElementById('uploadProfileBannerBtn')?.addEventListener('click', () => {
+    bannerFileInput?.click();
+  });
+  avatarFileInput?.addEventListener('change', async () => {
+    if (!avatarFileInput.files?.[0]) return;
+    try {
+      const url = await uploadImageFile(avatarFileInput.files[0]);
+      const input = document.getElementById('profilePictureUrlInput');
+      if (input) input.value = url;
+      updateProfileVisuals(url, document.getElementById('profileDescriptionInput')?.value || '');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not upload avatar.'), 'error');
+    } finally {
+      avatarFileInput.value = '';
+    }
+  });
+  bannerFileInput?.addEventListener('change', async () => {
+    if (!bannerFileInput.files?.[0]) return;
+    try {
+      const url = await uploadImageFile(bannerFileInput.files[0]);
+      const input = document.getElementById('profileBannerUrlInput');
+      if (input) input.value = url;
+      updateProfileVisuals(
+        document.getElementById('profilePictureUrlInput')?.value || '',
+        document.getElementById('profileDescriptionInput')?.value || '',
+        url,
+        readSettingsState().profileBannerColor
+      );
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not upload banner.'), 'error');
+    } finally {
+      bannerFileInput.value = '';
+    }
+  });
+
+  document.getElementById('addKeybindBtn')?.addEventListener('click', addSettingsKeybind);
+
+  document.querySelectorAll('.app-item .settings-btn-danger').forEach((button) => {
+    button.addEventListener('click', () => {
+      const row = button.closest('.app-item');
+      const label = row?.querySelector('.app-name')?.textContent?.trim();
+      if (label) {
+        rememberRemovedSettingsItem('apps', label);
+      }
+      row?.remove();
+    });
+  });
+
+  document.querySelectorAll('.device-remove').forEach((button) => {
+    button.addEventListener('click', () => {
+      const row = button.closest('.device-card');
+      const label = row?.querySelector('.device-name')?.textContent?.trim();
+      if (label) {
+        rememberRemovedSettingsItem('devices', label);
+      }
+      row?.remove();
+    });
+  });
+
+  document.querySelectorAll('.connection-icon').forEach((icon) => {
+    const label = icon.textContent.trim();
+    const isConnected = Boolean(readSettingsState().connectedAccounts[label]);
+    icon.classList.toggle('connected', isConnected);
+    icon.title = isConnected ? 'Connected' : 'Connect';
+    icon.addEventListener('click', () => {
+      const nextConnected = !icon.classList.contains('connected');
+      icon.classList.toggle('connected', nextConnected);
+      icon.title = nextConnected ? 'Connected' : 'Connect';
+      writeSettingsState((state) => ({
+        ...state,
+        connectedAccounts: {
+          ...state.connectedAccounts,
+          [label]: nextConnected,
+        },
+      }));
+    });
+  });
+
+  document.querySelectorAll('.game-overlay-toggle').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      toggle.classList.toggle('active');
+    });
+  });
+
+  document.querySelectorAll('.remove-game-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const row = button.closest('.added-game-row');
+      const label = row?.querySelector('.game-name')?.textContent?.trim();
+      if (label) {
+        rememberRemovedSettingsItem('games', label);
+      }
+      row?.remove();
+    });
+  });
+}
+
+function formatSessionTime(value) {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString();
+}
+
+function createSessionCard(session) {
+  const card = document.createElement('div');
+  card.className = session.isCurrent ? 'device-card current' : 'device-card';
+
+  const icon = document.createElement('div');
+  icon.className = 'device-icon';
+  icon.textContent = 'PC';
+
+  const info = document.createElement('div');
+  info.className = 'device-info';
+
+  const name = document.createElement('div');
+  name.className = 'device-name';
+  name.textContent = session.userAgent || 'Unknown device';
+
+  const detail = document.createElement('div');
+  detail.className = 'device-location';
+  detail.textContent = `${session.ipAddress || 'Unknown IP'} - ${
+    session.isActive ? 'Active' : 'Revoked'
+  } - Seen ${formatSessionTime(session.lastSeenAt)}`;
+
+  info.appendChild(name);
+  info.appendChild(detail);
+  card.appendChild(icon);
+  card.appendChild(info);
+
+  if (!session.isCurrent && session.isActive) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'device-remove';
+    remove.textContent = 'x';
+    remove.title = 'Log out this device';
+    remove.addEventListener('click', async () => {
+      try {
+        await axios.post(`${homeApiBase}/api/Account/RevokeSession`, {
+          sessionId: session.id,
+        });
+        await loadSessions();
+      } catch (error) {
+        showAppMessage(getApiErrorMessage(error, 'Could not revoke session.'), 'error');
+      }
+    });
+    card.appendChild(remove);
+  }
+
+  return card;
+}
+
+async function loadSessions() {
+  const currentList = document.getElementById('currentSessionsList');
+  const otherList = document.getElementById('otherSessionsList');
+  if (!currentList || !otherList) return;
+
+  try {
+    const res = await axios.get(`${homeApiBase}/api/Account/GetSessions`);
+    const sessions = Array.isArray(res.data) ? res.data : [];
+    const current = sessions.filter((session) => session.isCurrent);
+    const others = sessions.filter((session) => !session.isCurrent && session.isActive);
+
+    currentList.className = 'session-list';
+    otherList.className = 'session-list';
+    currentList.innerHTML = '';
+    otherList.innerHTML = '';
+
+    (current.length ? current : sessions.slice(0, 1)).forEach((session) => {
+      currentList.appendChild(createSessionCard({ ...session, isCurrent: true }));
+    });
+
+    if (!others.length) {
+      otherList.textContent = 'No other active sessions.';
+      return;
+    }
+
+    others.forEach((session) => {
+      otherList.appendChild(createSessionCard(session));
+    });
+  } catch (error) {
+    currentList.textContent = 'Could not load sessions.';
+    otherList.textContent = '';
+  }
+}
+
+async function toggleVoicePreview() {
+  const button = document.getElementById('voicePreviewBtn');
+  const status = document.getElementById('voicePreviewStatus');
+
+  if (voicePreviewStream) {
+    voicePreviewContext?.close?.().catch?.(() => {});
+    voicePreviewContext = null;
+    voicePreviewStream.getTracks().forEach((track) => track.stop());
+    voicePreviewStream = null;
+    if (button) button.textContent = 'Test Voice';
+    if (status) status.textContent = '';
+    return;
+  }
+
+  try {
+    updateVoiceChangerStateFromControls();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: getAudioConstraints(true),
+      video: false,
+    });
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    connectVoiceEffectNodes(
+      audioContext,
+      source,
+      audioContext.destination,
+      getVoiceChangerControlsState()
+    );
+    voicePreviewStream = stream;
+    voicePreviewContext = audioContext;
+    if (button) button.textContent = 'Stop Test';
+    if (status) status.textContent = 'Playing your processed microphone locally.';
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not start voice preview.'), 'error');
+  }
+}
+
+async function testSettingsMicrophone() {
+  const button = document.getElementById('settingsMicTestBtn');
+  const status = document.getElementById('settingsMicTestStatus');
+  if (!button) {
+    return;
+  }
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Checking...';
+  if (status) status.textContent = '';
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((track) => track.stop());
+    if (status) status.textContent = 'Microphone access works.';
+    button.textContent = 'Mic Works';
+  } catch (err) {
+    console.error('Mic test failed:', err);
+    if (status) status.textContent = 'Could not access your microphone.';
+    button.textContent = 'Try Again';
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+      if (button.textContent !== 'Try Again') {
+        button.textContent = originalText;
+      }
+    }, 1200);
+  }
+}
+
+async function populateVoiceDeviceSettings() {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return;
+  }
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const deviceTargets = [
+      {
+        select: document.getElementById('settingsInputDeviceSelect'),
+        kind: 'audioinput',
+        fallbackLabel: 'Microphone',
+      },
+      {
+        select: document.getElementById('settingsOutputDeviceSelect'),
+        kind: 'audiooutput',
+        fallbackLabel: 'Speakers',
+      },
+    ];
+
+    deviceTargets.forEach(({ select, kind, fallbackLabel }) => {
+      if (!select) {
+        return;
+      }
+
+      const previousValue = select.value;
+      const matchingDevices = devices.filter((device) => device.kind === kind);
+      select.innerHTML = '<option value="default">Default</option>';
+
+      matchingDevices.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId || `${kind}-${index}`;
+        option.textContent = device.label || `${fallbackLabel} ${index + 1}`;
+        select.appendChild(option);
+      });
+
+      if (Array.from(select.options).some((option) => option.value === previousValue)) {
+        select.value = previousValue;
+      }
+    });
+  } catch (err) {
+    console.warn('Could not load voice devices:', err);
+  }
+}
+
+function refreshSettingsModal() {
+  loadAccountSettings().then(() => {
+    loadSessions();
+  });
+  updateSettingsIdentityFields();
+  populateVoiceDeviceSettings().then(() => {
+    applyPersistedSettingsState();
+  });
+  applyPersistedSettingsState();
+  renderSettingsKeybinds();
+  applyRemovedSettingsItems();
+
+  const searchInput = document.getElementById('settingsSearchInput');
+  if (searchInput) {
+    searchInput.value = '';
+    filterSettingsSidebarItems('');
+  }
+
+  switchSettingsTab(readSettingsState().selectedTab || 'my-account');
+  loadUserTheme();
+  loadUserProfile();
+  loadSessions();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  refreshIceServersConfig();
   setupEmojiPicker();
   setupMessageSearch();
   setupSettingsInteractivity();
+  loadAccountSettings();
+  applyPersistedSettingsState();
   loadUserTheme();
   loadUserProfile();
 });
 
 // ===== Settings Tab Switching =====
 function switchSettingsTab(target) {
-  // Hide all settings views
-  document.querySelectorAll('.settings-view').forEach(v => v.style.display = 'none');
-  
-  // Show the target view
-  const view = document.getElementById('view-' + target);
-  if (view) view.style.display = 'block';
-  
-  // Update sidebar active state
-  document.querySelectorAll('.settings-item').forEach(item => {
-    item.classList.remove('active');
-    if (item.dataset.target === target) item.classList.add('active');
+  document.querySelectorAll('.settings-view').forEach((view) => {
+    view.style.display = 'none';
   });
+
+  const targetView = document.getElementById('view-' + target);
+  if (targetView) {
+    targetView.style.display = 'block';
+  }
+
+  document.querySelectorAll('.settings-item').forEach((item) => {
+    item.classList.remove('active');
+    if (item.dataset.target === target) {
+      item.classList.add('active');
+    }
+  });
+
+  writeSettingsState((state) => ({
+    ...state,
+    selectedTab: target,
+  }));
 }
 window.switchSettingsTab = switchSettingsTab;
 
 function setupSettingsInteractivity() {
-  // --- Sidebar tab clicking ---
-  document.querySelectorAll('.settings-item[data-target]').forEach(item => {
+  if (settingsInteractivityInitialized) {
+    return;
+  }
+
+  settingsInteractivityInitialized = true;
+
+  document.querySelectorAll('.settings-item[data-target]').forEach((item) => {
     item.addEventListener('click', () => {
       switchSettingsTab(item.dataset.target);
     });
   });
 
-  // --- Toggle switches ---
-  document.querySelectorAll('.toggle-switch').forEach(toggle => {
-    toggle.addEventListener('click', () => {
-      toggle.classList.toggle('active');
+  const searchInput = document.getElementById('settingsSearchInput');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      filterSettingsSidebarItems(searchInput.value);
+    });
+
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+
+      event.preventDefault();
+      const firstMatch = filterSettingsSidebarItems(searchInput.value);
+      if (firstMatch?.dataset.target) {
+        switchSettingsTab(firstMatch.dataset.target);
+      }
+    });
+  }
+
+  const profileTabBar = document.querySelector('[data-settings-tab-bar="profileView"]');
+  if (profileTabBar) {
+    profileTabBar.querySelectorAll('.settings-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const nextTab = tab.dataset.tab || 'user-profile';
+        applyProfileTab(nextTab);
+        writeSettingsState((state) => ({
+          ...state,
+          profileView: nextTab,
+        }));
+      });
+    });
+  }
+
+  document.querySelectorAll('.toggle-item').forEach((item, index) => {
+    item.addEventListener('click', () => {
+      const toggle = item.querySelector('.toggle-switch');
+      if (!toggle) {
+        return;
+      }
+
+      const isActive = !toggle.classList.contains('active');
+      toggle.classList.toggle('active', isActive);
+      handleToggleStateChange(getToggleSettingKey(item, index), isActive);
     });
   });
 
-  // --- Radio groups ---
-  document.querySelectorAll('.radio-group').forEach(group => {
-    group.querySelectorAll('.radio-item').forEach(item => {
+  document.querySelectorAll('.radio-group').forEach((group, index) => {
+    group.querySelectorAll('.radio-item').forEach((item, itemIndex) => {
       item.addEventListener('click', () => {
-        group.querySelectorAll('.radio-item').forEach(i => {
-          i.classList.remove('active');
-          i.querySelector('.radio-circle')?.classList.remove('selected');
-        });
-        item.classList.add('active');
-        item.querySelector('.radio-circle')?.classList.add('selected');
+        const settingKey = getRadioGroupKey(group, index);
+        const value = getRadioItemValue(item, itemIndex);
+        setRadioGroupSelection(group, value);
+        handleRadioStateChange(settingKey, value);
       });
     });
   });
 
-  // --- Checkbox toggles ---
-  document.querySelectorAll('.checkbox-item').forEach(item => {
+  document.querySelectorAll('.checkbox-item').forEach((item, index) => {
     item.addEventListener('click', () => {
-      const box = item.querySelector('.checkbox-box');
-      if (box) box.classList.toggle('checked');
+      const checkbox = item.querySelector('.checkbox-box');
+      if (!checkbox) {
+        return;
+      }
+
+      const isChecked = !checkbox.classList.contains('checked');
+      checkbox.classList.toggle('checked', isChecked);
+      handleCheckboxStateChange(getCheckboxSettingKey(item, index), isChecked);
     });
   });
 
-  // --- ESC key closes settings ---
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
+  document.querySelectorAll('.settings-select').forEach((select, index) => {
+    select.addEventListener('change', () => {
+      handleSelectStateChange(select, index);
+    });
+  });
+
+  document.querySelectorAll('.settings-slider').forEach((slider, index) => {
+    slider.addEventListener('input', () => {
+      handleSliderStateChange(slider, index);
+    });
+  });
+
+  setupSettingsActionButtons();
+  renderSettingsKeybinds();
+  applyRemovedSettingsItems();
+  document.getElementById('settingsMicTestBtn')?.addEventListener('click', testSettingsMicrophone);
+  document.getElementById('voicePreviewBtn')?.addEventListener('click', toggleVoicePreview);
+
+  const settingsModal = document.getElementById('settingsModal');
+  if (settingsModal) {
+    settingsModal.addEventListener('click', (event) => {
+      if (event.target === settingsModal) {
+        closeSettingsModal();
+      }
+    });
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
       const modal = document.getElementById('settingsModal');
       if (modal && modal.style.display === 'flex') {
         closeSettingsModal();
@@ -4111,63 +6909,74 @@ function setupSettingsInteractivity() {
     }
   });
 
-  // --- Save Profile Button ---
   const saveProfileBtn = document.getElementById('saveProfileSettingsBtn');
   if (saveProfileBtn) {
     saveProfileBtn.addEventListener('click', async () => {
-      const profilePicUrl = document.getElementById('profilePictureUrlInput')?.value || '';
-      const description = document.getElementById('profileDescriptionInput')?.value || '';
-      
+      const profilePicUrl = document.getElementById('profilePictureUrlInput')?.value?.trim() || '';
+      const profileBannerUrl = document.getElementById('profileBannerUrlInput')?.value?.trim() || '';
+      const profileBannerColor = readSettingsState().profileBannerColor || '#0c0c0c';
+      const description =
+        document.getElementById('profileDescriptionInput')?.value?.trim() || '';
+
       try {
         saveProfileBtn.textContent = 'Saving...';
         saveProfileBtn.disabled = true;
-        
-        await axios.post('http://localhost:5018/api/Account/UpdateAccountProfile', {
-          username: JWTusername,
+
+        await axios.post(`${homeApiBase}/api/Account/UpdateAccountProfile`, {
           profilePictureUrl: profilePicUrl,
-          description: description
+          profileBannerUrl,
+          profileBannerColor,
+          description: description,
         });
-        
+
+        updateProfileVisuals(profilePicUrl, description, profileBannerUrl, profileBannerColor);
+        writeSettingsState((state) => ({
+          ...state,
+          profileBannerUrl,
+          profileBannerColor,
+        }));
         saveProfileBtn.textContent = 'Saved!';
         setTimeout(() => {
           saveProfileBtn.textContent = 'Save Profile';
           saveProfileBtn.disabled = false;
         }, 2000);
-        
-        // Update avatar previews if URL provided
-        if (profilePicUrl) {
-          document.querySelectorAll('.settings-avatar, .preview-avatar img, #popoutAvatar').forEach(img => {
-            if (img.tagName === 'IMG') img.src = profilePicUrl;
-          });
-        }
       } catch (err) {
         console.error('Failed to save profile:', err);
-        saveProfileBtn.textContent = 'Error - Try Again';
+        saveProfileBtn.textContent = 'Try Again';
+        showAppMessage(getApiErrorMessage(err, 'Failed to save profile.'), 'error');
         saveProfileBtn.disabled = false;
       }
     });
   }
 
-  // --- Save Custom Theme Button ---
   const saveThemeBtn = document.getElementById('saveCustomThemeBtn');
   if (saveThemeBtn) {
     saveThemeBtn.addEventListener('click', async () => {
-      const bgColor = document.getElementById('customBgColor')?.value || DEFAULT_THEME.background;
-      const textColor = document.getElementById('customTextColor')?.value || DEFAULT_THEME.text;
-      
+      const bgColor =
+        document.getElementById('customBgColor')?.value || DEFAULT_THEME.background;
+      const textColor =
+        document.getElementById('customTextColor')?.value || DEFAULT_THEME.text;
+
       try {
         saveThemeBtn.textContent = 'Saving...';
         saveThemeBtn.disabled = true;
-        
-        await axios.post('http://localhost:5018/api/Account/UpdateAccountTheme', {
+
+        await axios.post(`${homeApiBase}/api/Account/UpdateAccountTheme`, {
           username: JWTusername,
           backgroundColor: bgColor,
-          textColor: textColor
+          textColor: textColor,
         });
-        
-        // Apply theme immediately
+
         applyTheme(bgColor, textColor);
-        
+        syncThemeModeSelectionFromTheme(bgColor, textColor);
+        writeSettingsState((state) => ({
+          ...state,
+          customTheme: {
+            backgroundColor: bgColor,
+            textColor,
+          },
+        }));
+
         saveThemeBtn.textContent = 'Saved!';
         setTimeout(() => {
           saveThemeBtn.textContent = 'Save Theme';
@@ -4175,32 +6984,37 @@ function setupSettingsInteractivity() {
         }, 2000);
       } catch (err) {
         console.error('Failed to save theme:', err);
-        saveThemeBtn.textContent = 'Error - Try Again';
+        saveThemeBtn.textContent = 'Try Again';
+        showAppMessage(getApiErrorMessage(err, 'Failed to save theme.'), 'error');
         saveThemeBtn.disabled = false;
       }
     });
   }
 
-  // --- Reset Theme Button ---
   const resetThemeBtn = document.getElementById('resetCustomThemeBtn');
   if (resetThemeBtn) {
     resetThemeBtn.addEventListener('click', async () => {
       try {
-        await axios.post('http://localhost:5018/api/Account/UpdateAccountTheme', {
+        await axios.post(`${homeApiBase}/api/Account/UpdateAccountTheme`, {
           username: JWTusername,
           backgroundColor: DEFAULT_THEME.background,
-          textColor: DEFAULT_THEME.text
+          textColor: DEFAULT_THEME.text,
         });
-        
+
         applyTheme(DEFAULT_THEME.background, DEFAULT_THEME.text);
-        
-        const bgInput = document.getElementById('customBgColor');
-        const textInput = document.getElementById('customTextColor');
-        if (bgInput) bgInput.value = DEFAULT_THEME.background;
-        if (textInput) textInput.value = DEFAULT_THEME.text;
-        
+        syncThemeInputs(DEFAULT_THEME.background, DEFAULT_THEME.text);
+        setRadioGroupSelection(
+          document.querySelector('[data-settings-radio="themeMode"]'),
+          'dark'
+        );
+        writeSettingsState((state) => ({
+          ...state,
+          themeMode: 'dark',
+          customTheme: null,
+        }));
       } catch (err) {
         console.error('Failed to reset theme:', err);
+        showAppMessage(getApiErrorMessage(err, 'Failed to reset theme.'), 'error');
       }
     });
   }
@@ -4217,30 +7031,31 @@ function setupSettingsInteractivity() {
   if (bgInput) bgInput.addEventListener('input', previewTheme);
   if (textInput) textInput.addEventListener('input', previewTheme);
 
-  // --- Font Scaling Slider ---
-  const fontSlider = document.getElementById('fontScalingSlider');
-  if (fontSlider) {
-    fontSlider.addEventListener('input', (e) => {
-      const size = e.target.value + 'px';
-      document.querySelectorAll('.message-text, .messagesDisplay p').forEach(el => {
-        el.style.fontSize = size;
-      });
-      localStorage.setItem('discordClone_fontSize', e.target.value);
-    });
-
-    // Load saved font size
-    const savedSize = localStorage.getItem('discordClone_fontSize');
-    if (savedSize) {
-      fontSlider.value = savedSize;
-    }
-  }
-
-  // --- Edit Profile button in My Account tab ---
   const editProfileBtn = document.querySelector('.edit-profile-btn');
   if (editProfileBtn) {
     editProfileBtn.addEventListener('click', () => {
       switchSettingsTab('profiles');
     });
+  }
+
+  if (
+    typeof window.matchMedia === 'function' &&
+    !settingsSystemThemeListenerInitialized
+  ) {
+    const colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleColorSchemeChange = () => {
+      if (readSettingsState().themeMode === 'sync-with-computer') {
+        applyThemeMode('sync-with-computer');
+      }
+    };
+
+    if (typeof colorSchemeQuery.addEventListener === 'function') {
+      colorSchemeQuery.addEventListener('change', handleColorSchemeChange);
+    } else if (typeof colorSchemeQuery.addListener === 'function') {
+      colorSchemeQuery.addListener(handleColorSchemeChange);
+    }
+
+    settingsSystemThemeListenerInitialized = true;
   }
 }
 
@@ -4388,7 +7203,7 @@ function applyTheme(bgColor, textColor) {
 async function loadUserTheme() {
   try {
     if (typeof JWTusername === 'undefined' || !JWTusername) return;
-    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountTheme?username=${JWTusername}`);
+    const res = await axios.get(`${homeApiBase}/api/Account/GetAccountTheme`);
     if (res.data && res.data.backgroundColor) {
       applyTheme(res.data.backgroundColor, res.data.textColor || '#dbdee1');
       
@@ -4396,6 +7211,10 @@ async function loadUserTheme() {
       const textInput = document.getElementById('customTextColor');
       if (bgInput) bgInput.value = res.data.backgroundColor;
       if (textInput && res.data.textColor) textInput.value = res.data.textColor;
+      syncThemeModeSelectionFromTheme(
+        res.data.backgroundColor,
+        res.data.textColor || DEFAULT_THEME.text
+      );
     }
   } catch (err) {
     console.log('Could not load theme, using defaults');
@@ -4405,25 +7224,25 @@ async function loadUserTheme() {
 async function loadUserProfile() {
   try {
     if (typeof JWTusername === 'undefined' || !JWTusername) return;
-    const res = await axios.get(`http://localhost:5018/api/Account/GetAccountProfile?username=${JWTusername}`);
+    const res = await axios.get(`${homeApiBase}/api/Account/GetAccountProfile?username=${encodeURIComponent(JWTusername)}`);
     if (res.data) {
       const picInput = document.getElementById('profilePictureUrlInput');
+      const bannerInput = document.getElementById('profileBannerUrlInput');
       const descInput = document.getElementById('profileDescriptionInput');
+      const nextAvatarUrl = res.data.profilePictureUrl || homeDefaultAvatarUrl;
+      const nextDescription = res.data.description || 'Click to add custom status';
+      const nextBannerUrl = res.data.profileBannerUrl || '';
+      const nextBannerColor = res.data.profileBannerColor || readSettingsState().profileBannerColor || '#0c0c0c';
       
-      if (picInput && res.data.profilePictureUrl) picInput.value = res.data.profilePictureUrl;
-      if (descInput && res.data.description) descInput.value = res.data.description;
-      
-      // Update preview
-      if (res.data.profilePictureUrl) {
-        document.querySelectorAll('.settings-avatar, .preview-avatar img').forEach(img => {
-          if (img.tagName === 'IMG') img.src = res.data.profilePictureUrl;
-        });
-      }
-      
-      if (res.data.description) {
-        const customStatus = document.querySelector('.preview-custom-status');
-        if (customStatus) customStatus.textContent = res.data.description;
-      }
+      if (picInput) picInput.value = res.data.profilePictureUrl || '';
+      if (bannerInput) bannerInput.value = nextBannerUrl;
+      if (descInput) descInput.value = res.data.description || '';
+      updateProfileVisuals(nextAvatarUrl, nextDescription, nextBannerUrl, nextBannerColor);
+      writeSettingsState((state) => ({
+        ...state,
+        profileBannerUrl: nextBannerUrl,
+        profileBannerColor: nextBannerColor,
+      }));
     }
   } catch (err) {
     console.log('Could not load profile, using defaults');
