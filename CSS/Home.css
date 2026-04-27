@@ -12,6 +12,13 @@
   --text-soft: #949ba4;
   --text-inverse: #111214;
   --theme-shadow: rgba(0, 0, 0, 0.35);
+  --message-group-margin-top: 17px;
+  --message-group-padding: 2px 16px;
+  --message-avatar-size: 40px;
+  --message-header-margin-bottom: 4px;
+  --message-username-size: 16px;
+  --message-text-size: 16px;
+  --message-text-line-height: 1.375rem;
 }
 
 @font-face {
@@ -1156,8 +1163,8 @@
 
 .message-group {
   display: flex;
-  margin-top: 17px;
-  padding: 2px 16px;
+  margin-top: var(--message-group-margin-top);
+  padding: var(--message-group-padding);
 
 }
 
@@ -1166,8 +1173,8 @@
 }
 
 .message-avatar {
-  width: 40px;
-  height: 40px;
+  width: var(--message-avatar-size);
+  height: var(--message-avatar-size);
   border-radius: 50%;
   background-size: cover;
   background-position: center;
@@ -1186,7 +1193,7 @@
 .message-header {
   display: flex;
   align-items: baseline;
-  margin-bottom: 4px;
+  margin-bottom: var(--message-header-margin-bottom);
 }
 
 .message-username {
@@ -1194,7 +1201,7 @@
   font-weight: 500;
   margin-right: 8px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: var(--message-username-size);
 }
 
 .message-username:hover {
@@ -1211,8 +1218,8 @@
   color: #dcddde;
   white-space: pre-wrap;
   word-wrap: break-word;
-  line-height: 1.375rem;
-  font-size: 1rem;
+  line-height: var(--message-text-line-height);
+  font-size: var(--message-text-size);
   margin: 0;
 }
 
@@ -1819,6 +1826,10 @@
   margin-bottom: -2px;
 }
 
+.settings-tab-panel {
+  display: block;
+}
+
 .profile-preview-section {
   display: flex;
   justify-content: center;
@@ -2192,6 +2203,7 @@
 }
 
 .connection-icon {
+  position: relative;
   width: 40px;
   height: 40px;
   border-radius: 4px;
@@ -2202,6 +2214,27 @@
   font-weight: bold;
   font-size: 12px;
   cursor: pointer;
+}
+
+.connection-icon.connected {
+  outline: 2px solid #23a559;
+  outline-offset: 2px;
+}
+
+.connection-icon.connected::after {
+  content: 'OK';
+  position: absolute;
+  margin-left: 28px;
+  margin-top: -28px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #23a559;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
 }
 
 .keybind-input {
@@ -2452,4 +2485,726 @@
   line-height: 1.4;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+body.app-reduced-motion *,
+body.app-reduced-motion *::before,
+body.app-reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--main-bg);
+  color: var(--text-main);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.allservers {
+  width: 72px;
+  min-width: 72px;
+  padding: 12px 0;
+  gap: 8px;
+  border-right: 1px solid rgba(0, 0, 0, 0.28);
+}
+
+.servers {
+  position: relative;
+  outline: 0;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.servers:focus-visible,
+.call-control-btn:focus-visible,
+.settings-btn-primary:focus-visible,
+.settings-btn-danger:focus-visible,
+.account-action-submit:focus-visible,
+.account-action-cancel:focus-visible {
+  outline: 2px solid #00a8fc;
+  outline-offset: 2px;
+}
+
+.server-name {
+  max-width: 34px;
+  overflow: hidden;
+  color: var(--text-main);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.role-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 3px solid var(--main-bg);
+  border-radius: 50%;
+  background: #3498db;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.role-badge[data-role='owner'] {
+  background: #f0b232;
+  color: #111214;
+}
+
+.secondColumn {
+  width: 260px;
+  min-width: 240px;
+  border-right: 1px solid rgba(0, 0, 0, 0.28);
+}
+
+.positionSecond {
+  min-height: 0;
+  margin: 0;
+  padding: 0 8px;
+  overflow: hidden auto;
+}
+
+.friendsDiv,
+.testaddeduser,
+.group-chat-item {
+  min-height: 42px;
+  align-items: center;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text-muted);
+}
+
+.friendsDiv:hover,
+.testaddeduser:hover,
+.group-chat-item:hover {
+  background: var(--surface-raised);
+  color: var(--text-main);
+}
+
+.smallHead {
+  margin: 16px 8px 8px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.plus {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+}
+
+.plus:hover {
+  background: var(--surface-raised);
+  color: var(--text-main);
+}
+
+.lastSection {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--main-bg);
+}
+
+.nav {
+  min-height: 56px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+
+.addFriend,
+.logOut,
+.navText {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.navText {
+  padding: 7px 10px;
+  border-radius: 5px;
+}
+
+.navText:hover {
+  background: var(--surface-raised);
+  color: var(--text-main);
+}
+
+.addFriend,
+.logOut,
+.friendsButton,
+.removeFriendsButton,
+.formButton,
+.settings-btn-primary,
+.settings-btn-danger,
+.change-password-btn,
+.disable-account-btn,
+.delete-account-btn,
+.call-control-btn {
+  min-height: 34px;
+  border-radius: 6px;
+  font-weight: 700;
+  transition: background-color 0.16s ease, color 0.16s ease, transform 0.08s ease;
+}
+
+.call-control-btn {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-raised);
+  color: var(--text-main);
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.call-control-btn:hover {
+  background: #4b5363;
+}
+
+.call-control-btn:active {
+  transform: translateY(1px);
+}
+
+.call-control-btn.danger,
+.settings-btn-danger,
+.disable-account-btn,
+.delete-account-btn {
+  border-color: rgba(237, 66, 69, 0.5);
+  color: #fff;
+  background: #da373c;
+}
+
+.settings-btn-danger {
+  color: #ed4245;
+  background: transparent;
+}
+
+.settings-btn-danger:hover,
+.disable-account-btn:hover,
+.delete-account-btn:hover,
+.call-control-btn.danger:hover {
+  background: #a12828;
+  color: #fff;
+}
+
+.account {
+  min-height: 58px;
+  flex-wrap: wrap;
+}
+
+#username,
+#inServerUsername {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 800;
+}
+
+.CurrentServer,
+.chatSection,
+.privateMessage,
+.messagesDisplay,
+.chatMessages {
+  min-width: 0;
+}
+
+.CurrentServerMenu {
+  width: 260px;
+  min-width: 230px;
+}
+
+.currentServerName {
+  min-height: 56px;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  font-size: 16px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatSection {
+  background: var(--main-bg);
+}
+
+.chatMessages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.chatMessages p {
+  margin: 3px 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+
+.chatMessages p:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.compact-message {
+  margin: 3px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+
+.compact-message:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.compact-message-header {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.compact-message-reply {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.compact-message-body {
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+
+.compact-message-edited {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.message-attachment {
+  margin-top: 8px;
+}
+
+.message-attachment img {
+  display: block;
+  max-width: min(420px, 100%);
+  max-height: 280px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  object-fit: contain;
+}
+
+.message-attachment a {
+  color: #8ea1e1;
+}
+
+.message-reactions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.message-reaction {
+  padding: 3px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.message-pending {
+  opacity: 0.72;
+}
+
+.message-failed {
+  border: 1px solid rgba(237, 66, 69, 0.55);
+}
+
+.message-retry-btn {
+  margin-top: 8px;
+  border: 1px solid rgba(237, 66, 69, 0.55);
+  border-radius: 5px;
+  background: transparent;
+  color: #ffb4b4;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.channel-list-item {
+  position: relative;
+  margin-left: 10px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.channel-list-item:hover,
+.channel-list-item.active {
+  background: var(--surface-raised);
+  color: var(--text-main);
+}
+
+.channel-list-item.has-unread::after {
+  content: attr(data-unread);
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ed4245;
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  transform: translateY(-50%);
+}
+
+.channel-category-label {
+  padding: 15px 5px 5px 10px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.server-management-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 10px;
+}
+
+.server-tool-btn,
+.member-action-btn {
+  min-height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.server-tool-btn:hover,
+.member-action-btn:hover {
+  background: #4752c4;
+  color: #fff;
+}
+
+.server-member-row {
+  gap: 8px;
+}
+
+.member-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.server-member-row:hover .member-actions {
+  opacity: 1;
+}
+
+.group-header-btn {
+  min-height: 28px;
+  margin-left: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: var(--text-main);
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.group-header-btn:hover {
+  background: #4752c4;
+  color: #fff;
+}
+
+.viewServerAccounts {
+  border-left: 1px solid rgba(0, 0, 0, 0.28);
+}
+
+#preCallUI {
+  background-color: var(--main-bg);
+  border-bottom-color: var(--border-subtle);
+}
+
+.privateMessageForm,
+.chatForm {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.chat-input-container {
+  min-height: 46px;
+  height: auto;
+  margin: 0;
+  padding: 0 10px;
+  background: var(--input-strong);
+}
+
+.message-group {
+  border-radius: 8px;
+}
+
+.outerModalMessage {
+  position: fixed;
+  inset: auto 20px 24px auto;
+  z-index: 3000;
+  align-items: flex-end;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.innerModalMessage {
+  position: static;
+  min-width: 260px;
+  max-width: min(420px, calc(100vw - 40px));
+  margin: 0;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 12px 32px var(--theme-shadow);
+  pointer-events: auto;
+}
+
+.outerModalMessage[data-variant='success'] .innerModalMessage {
+  border-color: rgba(35, 165, 89, 0.55);
+}
+
+.outerModalMessage[data-variant='error'] .innerModalMessage {
+  border-color: rgba(237, 66, 69, 0.65);
+}
+
+.error-state {
+  padding: 20px;
+  color: #ffb4b4;
+}
+
+.account-action-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.account-action-dialog {
+  width: min(100%, 460px);
+  padding: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--main-bg);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.account-action-dialog h3 {
+  margin-bottom: 8px;
+  color: var(--text-main);
+  font-size: 20px;
+}
+
+.account-action-copy {
+  margin-bottom: 18px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.account-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.account-action-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.account-action-form input {
+  min-height: 44px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text-main);
+  padding: 10px 12px;
+  outline: none;
+}
+
+.account-action-form input:focus {
+  border-color: #5865f2;
+  box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.18);
+}
+
+.account-action-error {
+  min-height: 18px;
+  color: #ffb4b4;
+  font-size: 13px;
+}
+
+.account-action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.account-action-cancel,
+.account-action-submit {
+  min-height: 38px;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.account-action-cancel {
+  background: transparent;
+  color: var(--text-main);
+}
+
+.account-action-cancel:hover {
+  background: var(--surface-raised);
+}
+
+.account-action-submit {
+  background: #5865f2;
+  color: #fff;
+}
+
+.account-action-submit:hover {
+  background: #4752c4;
+}
+
+.account-action-submit.danger {
+  background: #da373c;
+}
+
+.account-action-submit.danger:hover {
+  background: #a12828;
+}
+
+@media (max-width: 980px) {
+  .secondColumn,
+  .CurrentServerMenu {
+    width: 230px;
+    min-width: 220px;
+  }
+
+  .viewServerAccounts {
+    width: 200px;
+    min-width: 200px;
+  }
+
+  .settings-content {
+    padding-right: 72px;
+  }
+}
+
+@media (max-width: 780px) {
+  .allservers {
+    width: 62px;
+    min-width: 62px;
+  }
+
+  .secondColumn {
+    width: 210px;
+    min-width: 200px;
+  }
+
+  .viewServerAccounts {
+    display: none;
+  }
+
+  .settings-sidebar {
+    width: 184px;
+    padding-left: 10px;
+  }
+
+  .settings-sidebar > * {
+    width: 164px;
+  }
+
+  .settings-content {
+    padding: 44px 56px 64px 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  .sections {
+    overflow-x: auto;
+  }
+
+  .nav {
+    padding: 0 10px;
+  }
+
+  .CurrentServerMenu {
+    min-width: 190px;
+    width: 190px;
+  }
+
+  .privateMessageForm,
+  .chatForm {
+    padding: 10px;
+  }
+
+  .settings-container {
+    min-width: 620px;
+  }
+
+  .account-action-overlay {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .account-action-dialog {
+    padding: 18px;
+  }
 }
