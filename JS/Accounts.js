@@ -14,6 +14,10 @@ const confirmPasswordInput = document.querySelector('.confirmPasswordInput');
 const modalContent = document.querySelector('.content');
 const outerModal = document.querySelector('.outerModal');
 
+if (typeof axios !== 'undefined') {
+  axios.defaults.withCredentials = true;
+}
+
 function showStatusMessage(message, duration = 2200) {
   if (!modalContent || !outerModal) return;
 
@@ -64,9 +68,11 @@ async function LogInForm(event) {
     }
 
     document.cookie = `token=${token}; path=/; max-age=1209600; SameSite=Lax`;
-    const jwtRes = await axios.post(
-      `${accountsApiBase}/api/Account/VerifyToken?token=${encodeURIComponent(token)}`
-    );
+    axios.defaults.headers.common.Authorization = `Bearer ${token}`;
+    if (response?.data?.refreshToken) {
+      localStorage.setItem('refreshToken', response.data.refreshToken);
+    }
+    const jwtRes = await axios.post(`${accountsApiBase}/api/Account/VerifyToken`);
 
     if (response.data.message) {
       showStatusMessage(response.data.message);
