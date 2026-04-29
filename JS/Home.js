@@ -15,6 +15,11 @@ let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let selectedChannelID;
 let currentServerName;
+let currentServerVerificationLevel = 'none';
+let currentServerRequireVerifiedEmail = false;
+let currentServerMinimumAccountAgeMinutes = 0;
+let currentServerMinimumMembershipMinutes = 0;
+let currentServerRequireTwoFactorForModerators = false;
 let currentFriend;
 let chatMessages = document.querySelector('.chatMessages');
 let userJoined = document.querySelector('.UserJoined');
@@ -50,6 +55,66 @@ if (typeof axios !== 'undefined') {
   }
 }
 
+const apiClient = typeof axios !== 'undefined' ? axios : null;
+let appOffline = !navigator.onLine;
+
+function getConnectionStatusBanner() {
+  let banner = document.getElementById('connectionStatusBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'connectionStatusBanner';
+    banner.className = 'connection-status-banner';
+    banner.setAttribute('role', 'status');
+    banner.textContent = 'Offline. Reconnecting...';
+    document.body.appendChild(banner);
+  }
+  return banner;
+}
+
+function setAppOfflineState(isOffline, reason = '') {
+  appOffline = Boolean(isOffline);
+  document.body?.classList.toggle('app-offline', appOffline);
+  const banner = getConnectionStatusBanner();
+  banner.textContent = reason || (appOffline ? 'Offline. Reconnecting...' : 'Back online.');
+  banner.classList.toggle('visible', appOffline || reason === 'Back online.');
+
+  if (!appOffline && reason === 'Back online.') {
+    window.setTimeout(() => {
+      banner.classList.remove('visible');
+    }, 1800);
+  }
+}
+
+if (apiClient) {
+  apiClient.interceptors.request.use((request) => {
+    request.withCredentials = true;
+    request.headers = request.headers || {};
+    if (cookieVal && !request.headers.Authorization) {
+      request.headers.Authorization = `Bearer ${cookieVal}`;
+    }
+    return request;
+  });
+
+  apiClient.interceptors.response.use(
+    (response) => {
+      if (appOffline) {
+        setAppOfflineState(false, 'Back online.');
+      }
+      return response;
+    },
+    (error) => {
+      if (!error.response) {
+        setAppOfflineState(true, 'Connection lost. Changes will retry when possible.');
+      }
+      return Promise.reject(error);
+    }
+  );
+}
+
+window.addEventListener('online', () => setAppOfflineState(false, 'Back online.'));
+window.addEventListener('offline', () => setAppOfflineState(true));
+window.apiClient = apiClient;
+
 function getAuthHeaders(extraHeaders = {}) {
   return {
     ...extraHeaders,
@@ -60,6 +125,32 @@ function getAuthHeaders(extraHeaders = {}) {
 function withAccessToken(url) {
   if (!cookieVal) return url;
   return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(cookieVal)}`;
+}
+
+function isPrivateCallActive() {
+  const activeCallUI = document.getElementById('activeCallUI');
+  return Boolean(currentFriend && activeCallUI && activeCallUI.style.display !== 'none');
+}
+
+function shouldReconnectVoiceConnection() {
+  return Boolean(sessionStorage.getItem('UserJoined') || isPrivateCallActive());
+}
+
+function scheduleVoiceReconnect() {
+  if (!shouldReconnectVoiceConnection()) {
+    return;
+  }
+
+  console.log("Attempting to reconnect voice in 3 seconds...");
+  setTimeout(() => {
+    if (!shouldReconnectVoiceConnection()) {
+      return;
+    }
+
+    initializeVoiceConnection().catch((err) => {
+      console.error('Voice reconnect failed:', err);
+    });
+  }, 3000);
 }
 
 function decodeJWT(token) {
@@ -279,6 +370,7 @@ async function openServer(server, fallbackRole = 'user') {
 
   selectedServerID = server.serverID;
   currentServerName = server.serverName;
+  applyServerRuleState(server);
 
   document.querySelector('.secondColumn').style.display = 'none';
   document.querySelector('.lastSection').style.display = 'none';
@@ -473,6 +565,137 @@ function buildMessageAttachmentNode(attachmentUrl, contentType = '') {
   return wrapper;
 }
 
+const linkPreviewCache = new Map();
+const linkUrlRegex = /(https?:\/\/[^\s<>"']+)/gi;
+
+function normalizeUrlForPreview(url) {
+  return String(url || '').replace(/[),.;!?]+$/, '');
+}
+
+function extractMessageUrls(text = '') {
+  return Array.from(new Set(
+    (String(text).match(linkUrlRegex) || [])
+      .map(normalizeUrlForPreview)
+      .filter(Boolean)
+  )).slice(0, 3);
+}
+
+function areLinkPreviewsEnabled() {
+  try {
+    const state = readSettingsState();
+    return state.toggles?.linkPreviews !== false;
+  } catch {
+    return true;
+  }
+}
+
+function appendMessageTextWithLinks(container, text = '') {
+  const value = String(text || '');
+  let cursor = 0;
+
+  value.replace(linkUrlRegex, (match, offset) => {
+    const url = normalizeUrlForPreview(match);
+    const end = offset + match.length;
+    if (offset > cursor) {
+      container.appendChild(document.createTextNode(value.slice(cursor, offset)));
+    }
+
+    const link = document.createElement('a');
+    link.className = 'message-link';
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.textContent = url;
+    container.appendChild(link);
+    cursor = end;
+    return match;
+  });
+
+  if (cursor < value.length) {
+    container.appendChild(document.createTextNode(value.slice(cursor)));
+  }
+}
+
+async function getLinkPreview(url) {
+  if (!linkPreviewCache.has(url)) {
+    linkPreviewCache.set(
+      url,
+      apiClient
+        .get(`${homeApiBase}/api/LinkPreview/Get?url=${encodeURIComponent(url)}`)
+        .then((res) => res.data)
+        .catch((error) => {
+          console.warn('Could not load link preview:', error);
+          return null;
+        })
+    );
+  }
+
+  return linkPreviewCache.get(url);
+}
+
+function buildLinkPreviewNode(preview) {
+  if (!preview || !preview.url) {
+    return null;
+  }
+
+  const card = document.createElement('a');
+  card.className = 'link-preview-card';
+  card.href = preview.url;
+  card.target = '_blank';
+  card.rel = 'noreferrer';
+
+  const content = document.createElement('div');
+  content.className = 'link-preview-content';
+
+  const site = document.createElement('div');
+  site.className = 'link-preview-site';
+  try {
+    site.textContent = preview.siteName || new URL(preview.url).hostname;
+  } catch {
+    site.textContent = preview.siteName || preview.url;
+  }
+  content.appendChild(site);
+
+  const title = document.createElement('div');
+  title.className = 'link-preview-title';
+  title.textContent = preview.title || preview.url;
+  content.appendChild(title);
+
+  if (preview.description) {
+    const description = document.createElement('div');
+    description.className = 'link-preview-description';
+    description.textContent = preview.description;
+    content.appendChild(description);
+  }
+
+  card.appendChild(content);
+
+  if (preview.image) {
+    const image = document.createElement('img');
+    image.className = 'link-preview-image';
+    image.src = preview.image;
+    image.alt = '';
+    image.loading = 'lazy';
+    card.appendChild(image);
+  }
+
+  return card;
+}
+
+function hydrateLinkPreviews(messageEl, text = '') {
+  if (!areLinkPreviewsEnabled()) {
+    return;
+  }
+
+  extractMessageUrls(text).forEach(async (url) => {
+    const preview = await getLinkPreview(url);
+    const previewNode = buildLinkPreviewNode(preview);
+    if (previewNode && messageEl.isConnected) {
+      messageEl.appendChild(previewNode);
+    }
+  });
+}
+
 function renderCompactMessage(message, scope = 'server') {
   const messageEl = document.createElement('div');
   messageEl.className = 'compact-message';
@@ -500,11 +723,12 @@ function renderCompactMessage(message, scope = 'server') {
 
   const body = document.createElement('div');
   body.className = 'compact-message-body';
-  body.textContent =
+  const messageText =
     message.userText ||
     message.friendMessagesData ||
     message.content ||
     '';
+  appendMessageTextWithLinks(body, messageText);
   if (message.editedAt) {
     const edited = document.createElement('span');
     edited.className = 'compact-message-edited';
@@ -533,6 +757,7 @@ function renderCompactMessage(message, scope = 'server') {
     messageEl.appendChild(reactions);
   }
 
+  hydrateLinkPreviews(messageEl, messageText);
   return messageEl;
 }
 
@@ -665,6 +890,47 @@ async function ServerChat(event) {
     });
     pendingMessage.appendChild(retry);
     showAppMessage(getApiErrorMessage(e, 'Message failed to send.'), 'error');
+  }
+}
+
+async function runOptimisticMessageSend({
+  container,
+  draft,
+  send,
+  rollbackInput,
+  refresh,
+  failureMessage = 'Message failed to send.',
+}) {
+  const pendingMessage = renderCompactMessage(draft);
+  pendingMessage.classList.add('message-pending');
+  container.appendChild(pendingMessage);
+  container.scrollTop = container.scrollHeight;
+
+  try {
+    const result = await send();
+    pendingMessage.classList.remove('message-pending');
+    pendingMessage.classList.add('message-delivered');
+    if (typeof refresh === 'function') {
+      await refresh(result);
+    }
+    return result;
+  } catch (error) {
+    pendingMessage.classList.remove('message-pending');
+    pendingMessage.classList.add('message-failed');
+    if (typeof rollbackInput === 'function') {
+      rollbackInput();
+    }
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'message-retry-btn';
+    retry.textContent = 'Retry';
+    retry.addEventListener('click', () => {
+      pendingMessage.remove();
+      rollbackInput?.();
+    });
+    pendingMessage.appendChild(retry);
+    showAppMessage(getApiErrorMessage(error, failureMessage), 'error');
+    throw error;
   }
 }
 function showAddFriends() {
@@ -955,15 +1221,11 @@ function createMessageElement(sender, text, date) {
   if (imageMatch && imageMatch[1]) {
     const img = document.createElement('img');
     img.src = imageMatch[1];
-    img.style.maxWidth = '300px';
-    img.style.maxHeight = '300px';
-    img.style.borderRadius = '5px';
-    img.style.marginTop = '5px';
-    img.style.cursor = 'pointer';
+    img.className = 'message-inline-image';
     img.onclick = () => window.open(img.src, '_blank');
     messageText.appendChild(img);
   } else {
-    messageText.textContent = text;
+    appendMessageTextWithLinks(messageText, text);
   }
 
   content.appendChild(header);
@@ -972,6 +1234,7 @@ function createMessageElement(sender, text, date) {
   container.appendChild(avatar);
   container.appendChild(content);
 
+  hydrateLinkPreviews(container, text);
   return container;
 }
 
@@ -995,39 +1258,76 @@ function InitWebSocket() {
 }
 async function PrivateMessage(event) {
   event.preventDefault();
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    console.log('not connected to chat');
+  const formData = new FormData(event.target);
+  const input = event.target.querySelector('.chatInput');
+  const content = String(formData.get('friendMessagesData') || '').trim();
+  if (!content) {
     return;
   }
-  const formData = new FormData(event.target);
-  const content = formData.get('friendMessagesData');
+  const messagesDisplay = document.querySelector('.messagesDisplay');
 
   if (currentGroupId) {
-    try {
-      await axios.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
+    if (input) input.value = '';
+    await runOptimisticMessageSend({
+      container: messagesDisplay,
+      draft: {
+        sender: JWTusername,
+        content,
+        date: new Date().toISOString(),
+      },
+      send: () => apiClient.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
         groupId: currentGroupId,
         content,
-      });
-    } catch (error) {
-      showAppMessage(getApiErrorMessage(error, 'Group message failed to send.'), 'error');
-    }
+      }),
+      rollbackInput: () => {
+        if (input) input.value = content;
+      },
+      refresh: () => GetGroupMessages(currentGroupId),
+      failureMessage: 'Group message failed to send.',
+    }).catch(() => {});
   } else {
-
+    if (!currentFriend) {
+      return;
+    }
+    if (input) input.value = '';
+    const messageId = generateUUID();
     const messageObject = {
+      PrivateMessageID: messageId,
       MessagesUserSender: JWTusername,
       MessageUserReciver: currentFriend,
       friendMessagesData: content,
       date: new Date().toISOString(),
     };
-    socket.send(JSON.stringify(messageObject));
-    const messagesDisplay = document.querySelector('.messagesDisplay');
-    const messageElement = createMessageElement(JWTusername, messageObject.friendMessagesData, messageObject.date);
-    messagesDisplay.appendChild(messageElement);
-    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
-    currentChatHistory.push({ messagesUserSender: JWTusername, friendMessagesData: messageObject.friendMessagesData, date: messageObject.date });
-  }
 
-  event.target.reset();
+    await runOptimisticMessageSend({
+      container: messagesDisplay,
+      draft: {
+        privateMessageID: messageId,
+        messagesUserSender: JWTusername,
+        friendMessagesData: content,
+        date: messageObject.date,
+      },
+      send: async () => {
+        const response = await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, messageObject);
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(messageObject));
+        }
+        return response;
+      },
+      rollbackInput: () => {
+        if (input) input.value = content;
+      },
+      refresh: async (response) => {
+        currentChatHistory.push(response?.data || {
+          messagesUserSender: JWTusername,
+          friendMessagesData: content,
+          date: messageObject.date,
+        });
+        await GetPrivateMessage();
+      },
+      failureMessage: 'Direct message failed to send.',
+    }).catch(() => {});
+  }
 }
 async function GetPrivateMessage() {
   try {
@@ -1245,6 +1545,11 @@ let voiceConnectionOpenPromise = null;
 const voiceUsersByServer = new Map();
 let peerConnections = new Map();
 let voiceProcessingState = null;
+function isTurnIceServer(server) {
+  const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
+  return urls.some((url) => /^turns?:/i.test(String(url || '').trim()));
+}
+
 function buildIceServers() {
   const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
   const configuredServers =
@@ -1272,9 +1577,7 @@ async function refreshIceServersConfig() {
     const nextIceServers = res.data?.iceServers;
     if (Array.isArray(nextIceServers) && nextIceServers.length > 0) {
       config.iceServers = nextIceServers;
-      homeAppPaths.turnServers = nextIceServers.filter((server) =>
-        String(Array.isArray(server.urls) ? server.urls[0] : server.urls || '').startsWith('turn:')
-      );
+      homeAppPaths.turnServers = nextIceServers.filter(isTurnIceServer);
     }
   } catch (error) {
     console.warn('Could not load TURN/STUN config:', error);
@@ -1682,7 +1985,7 @@ function renderGroupManagementButtons(container, groupId) {
 }
 
 async function renameCurrentGroup(groupId) {
-  const name = prompt('Group name')?.trim();
+  const name = await askText('Rename Group', 'Group name');
   if (!name) return;
 
   try {
@@ -1697,7 +2000,7 @@ async function renameCurrentGroup(groupId) {
 }
 
 async function updateCurrentGroupAvatar(groupId) {
-  const avatarUrl = prompt('Group avatar URL or uploaded /uploads path', '')?.trim();
+  const avatarUrl = await askText('Group Avatar', 'Avatar URL or uploaded /uploads path');
 
   try {
     await axios.post(`${homeApiBase}/api/GroupChat/UpdateGroupAvatar`, {
@@ -1711,7 +2014,7 @@ async function updateCurrentGroupAvatar(groupId) {
 }
 
 async function addMembersToCurrentGroup(groupId) {
-  const membersText = prompt('Usernames to add, comma separated', '')?.trim();
+  const membersText = await askText('Add Members', 'Usernames to add, comma separated');
   if (!membersText) return;
 
   const members = membersText
@@ -1731,7 +2034,7 @@ async function addMembersToCurrentGroup(groupId) {
 }
 
 async function leaveCurrentGroup(groupId) {
-  if (!confirm('Leave this group DM?')) return;
+  if (!await askConfirm('Leave Group DM', 'Leave this group DM?', { danger: true, confirmText: 'Leave' })) return;
 
   try {
     await axios.post(`${homeApiBase}/api/GroupChat/LeaveGroup`, { groupId });
@@ -1807,7 +2110,7 @@ async function handleGroupSignaling(msg) {
   switch (msg.Type) {
     case 'call-init':
       if (msg.Sender !== JWTusername) {
-        if (confirm(`${msg.Sender} started a group call. Join?`)) {
+        if (await askConfirm('Join Group Call', `${msg.Sender} started a group call. Join?`, { confirmText: 'Join' })) {
           joinGroupCall(msg.GroupId, msg.Sender);
         }
       }
@@ -2102,6 +2405,7 @@ async function initializeVoiceConnection() {
       const joinedServer = sessionStorage.getItem('UserJoined');
       if (joinedServer) {
         currentVoiceServerId = joinedServer;
+        applyMicrophoneGate();
         console.log(`Re-joining voice for server ${joinedServer} as ${JWTusername}`);
         voiceConnection.send(JSON.stringify({
           Type: 'join',
@@ -2112,6 +2416,13 @@ async function initializeVoiceConnection() {
 
       if (selectedServerID) {
         sendVoiceRosterWatch(selectedServerID);
+      }
+
+      if (isPrivateCallActive()) {
+        applyMicrophoneGate();
+        renegotiatePrivateCallAfterReconnect().catch((err) => {
+          console.warn('Could not renegotiate private call after reconnect:', err);
+        });
       }
     };
 
@@ -2224,7 +2535,7 @@ async function initializeVoiceConnection() {
             break;
 
           case 'peer-answer':
-            await handlePeerAnswer(message.Username, message.Data);
+            await handlePeerAnswer(message.Username, message.Data, message.IsPrivate);
             break;
 
           case 'peer-ice-candidate':
@@ -2261,15 +2572,7 @@ async function initializeVoiceConnection() {
       voiceConnectionOpenPromise = null;
       watchedVoiceServerId = null;
 
-      const joinedServer = sessionStorage.getItem('UserJoined');
-      if (joinedServer) {
-        console.log("Attempting to reconnect voice in 3 seconds...");
-        setTimeout(() => {
-          initializeVoiceConnection().catch((err) => {
-            console.error('Voice reconnect failed:', err);
-          });
-        }, 3000);
-      }
+      scheduleVoiceReconnect();
     };
 
     return voiceConnectionOpenPromise;
@@ -2374,42 +2677,39 @@ async function initializeVoiceConnection() {
         }
 
         const remoteDesc = new RTCSessionDescription(JSON.parse(offer));
-        if (peerConnection.signalingState === 'have-local-offer') {
-          // Polite peer logic: lower username yields
-          if (JWTusername > fromUser) {
-            console.log("I am impolite (initiator), ignoring colliding offer from", fromUser);
-            return;
+        if (peerConnection.signalingState === 'have-local-offer' && JWTusername > fromUser) {
+          console.log("Ignoring colliding offer from", fromUser);
+          return;
+        }
+
+        await peerConnection.setRemoteDescription(remoteDesc);
+        console.log(`RX SDP: hasVideo=${offer.includes('m=video')}, State=${peerConnection.signalingState}`);
+
+        if (peerConnection.signalingState === 'have-remote-offer') {
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+
+          if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+            voiceConnection.send(JSON.stringify({
+              Type: 'peer-answer',
+              Data: JSON.stringify(answer),
+              TargetUser: fromUser
+            }));
           }
-
-          await peerConnection.setRemoteDescription(remoteDesc);
-          console.log(`RX SDP: hasVideo=${offer.includes('m=video')}, State=${peerConnection.signalingState}`);
-
-          if (peerConnection.signalingState === 'have-remote-offer') {
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-
-            if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
-              voiceConnection.send(JSON.stringify({
-                Type: 'peer-answer',
-                Data: JSON.stringify(answer),
-                TargetUser: fromUser
-              }));
-            }
-          } else {
-            console.warn(`Cannot set local answer, state is ${peerConnection.signalingState} (expected have-remote-offer)`);
-          }
+        } else {
+          console.warn(`Cannot set local answer, state is ${peerConnection.signalingState} (expected have-remote-offer)`);
         }
       } catch (err) {
         console.error('couldnt handle connection request:', err);
       }
     }
 
-    async function handlePeerAnswer(fromUser, answer) {
+    async function handlePeerAnswer(fromUser, answer, isPrivateCall) {
       console.log(`RX Answer from ${fromUser}`);
 
 
       const isServerPeer = currentVoiceUsers && currentVoiceUsers.includes(fromUser);
-      if (!isServerPeer) {
+      if (isPrivateCall || !isServerPeer) {
         if (window.handlePeerAnswer) {
           await window.handlePeerAnswer(fromUser, answer);
         } else {
@@ -2475,6 +2775,7 @@ async function initializeVoiceConnection() {
 
       peerConnection.onconnectionstatechange = () => {
         console.log(`connection with ${userId}: ${peerConnection.connectionState}`);
+        updateCallDiagnosticsPanel();
         if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
           peerConnections.delete(userId);
           removePeerUI(userId);
@@ -2670,6 +2971,7 @@ async function createServerPeerConnection() {
       'Server connection state:',
       serverPeerConnection.connectionState
     );
+    updateCallDiagnosticsPanel();
     if (
       serverPeerConnection.connectionState === 'failed' ||
       serverPeerConnection.connectionState === 'closed' ||
@@ -2841,6 +3143,7 @@ async function refreshLocalAudioProcessing() {
       console.warn('Could not replace processed audio track:', error);
     });
   });
+  applyMicrophoneGate();
 }
 
 async function ensureLocalStream(wantAudio = true, wantVideo = false) {
@@ -2852,6 +3155,7 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
       video: wantVideo,
     });
     await applyConfiguredAudioProcessing(localStream);
+    applyMicrophoneGate();
     if (localVideo) {
       localVideo.srcObject = localStream;
       localVideo.muted = true;
@@ -2892,6 +3196,7 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
         console.log('microphone monitoring enabled');
       }
     }
+    applyMicrophoneGate();
     return;
   }
 
@@ -2913,6 +3218,7 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
       localVideo.srcObject = localStream;
       localVideo.muted = true;
     }
+    applyMicrophoneGate();
   }
 }
 async function JoinVoiceCalls() {
@@ -2949,6 +3255,7 @@ async function JoinVoiceCalls() {
     if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
       currentVoiceServerId = targetServerId;
       sessionStorage.setItem('UserJoined', targetServerId);
+      applyMicrophoneGate();
       voiceConnection.send(
         JSON.stringify({
           Type: 'join',
@@ -3009,6 +3316,8 @@ async function leaveVoiceServer(serverIdToLeave) {
     peerConnections.clear();
     currentVoiceUsers = [];
     currentVoiceServerId = null;
+    pushToTalkActive = false;
+    pressedShortcutKeys.clear();
     setVoiceUsersForServer(activeServerId, []);
 
 
@@ -3047,12 +3356,8 @@ async function leaveVoiceServer(serverIdToLeave) {
       btn.textContent = "Deafen";
       btn.style.color = "white";
     }
-    btn = document.querySelector('button[onclick="ShareScreen()"]');
-    if (btn) {
-      btn.textContent = "Share Screen";
-      btn.style.color = "white";
-      btn.onclick = ShareScreen;
-    }
+    await stopScreenShare({ restoreCamera: false });
+    updateScreenShareButtons(false);
 
 
   } catch (err) {
@@ -3099,10 +3404,13 @@ async function VideoOn() {
 
       if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
         console.log(`VideoOn: Sending offer to ${targetUser}`);
+        const isPrivate = isPrivatePeerTarget(targetUser);
         voiceConnection.send(JSON.stringify({
           Type: 'peer-offer',
           Data: JSON.stringify(offer),
-          TargetUser: targetUser
+          TargetUser: targetUser,
+          IsPrivate: isPrivate,
+          IsVideo: true
         }));
       }
     }
@@ -3142,10 +3450,13 @@ async function VideoOff() {
         }
 
         if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
+          const isPrivate = isPrivatePeerTarget(targetUser);
           voiceConnection.send(JSON.stringify({
             Type: 'peer-offer',
             Data: JSON.stringify(offer),
-            TargetUser: targetUser
+            TargetUser: targetUser,
+            IsPrivate: isPrivate,
+            IsVideo: false
           }));
         }
 
@@ -3157,11 +3468,89 @@ async function VideoOff() {
   const localVideo = getLocalPreviewVideo();
   if (localVideo) localVideo.srcObject = localStream;
 }
+let pushToTalkActive = false;
+const pressedShortcutKeys = new Set();
+
+function hasActiveVoiceOrCall() {
+  const privateCallUI = document.getElementById('activeCallUI');
+  const groupCallUI = document.getElementById('groupCallUI');
+  return Boolean(
+    localStream &&
+    (
+      currentVoiceServerId ||
+      (privateCallUI && privateCallUI.style.display !== 'none') ||
+      (groupCallUI && groupCallUI.style.display !== 'none')
+    )
+  );
+}
+
+function isPushToTalkMode() {
+  return readSettingsState().inputMode === 'push-to-talk';
+}
+
+function normalizeShortcutKey(event) {
+  if (event.code?.startsWith('Key')) return event.code.slice(3).toUpperCase();
+  if (event.code?.startsWith('Digit')) return event.code.slice(5);
+  const key = String(event.key || '').toUpperCase();
+  if (key === 'CONTROL') return 'CTRL';
+  if (key === ' ') return 'SPACE';
+  return key;
+}
+
+function getPushToTalkShortcut() {
+  const keybinds = readSettingsState().keybinds || getDefaultSettingsKeybinds();
+  const binding = keybinds.find((item) =>
+    String(item.action || '').toLowerCase().includes('push to talk')
+  );
+  return (binding?.keys || ['CTRL', 'V']).map((key) => String(key).toUpperCase());
+}
+
+function isPushToTalkShortcutPressed() {
+  const shortcut = getPushToTalkShortcut();
+  return shortcut.every((key) => pressedShortcutKeys.has(key));
+}
+
+function applyMicrophoneGate() {
+  if (!localStream) return;
+  const shouldTransmit =
+    !isMuted &&
+    (!isPushToTalkMode() || (hasActiveVoiceOrCall() && pushToTalkActive));
+
+  localStream.getAudioTracks().forEach((track) => {
+    track.enabled = shouldTransmit;
+  });
+
+  document.body?.classList.toggle('push-to-talk-active', Boolean(pushToTalkActive && isPushToTalkMode()));
+  updateCallDiagnosticsPanel();
+}
+
+function handlePushToTalkKeyChange(event, isDown) {
+  if (!isPushToTalkMode()) {
+    return;
+  }
+
+  const key = normalizeShortcutKey(event);
+  if (!key) return;
+
+  if (isDown) {
+    pressedShortcutKeys.add(key);
+  } else {
+    pressedShortcutKeys.delete(key);
+  }
+
+  const nextActive = isPushToTalkShortcutPressed();
+  if (nextActive !== pushToTalkActive) {
+    pushToTalkActive = nextActive;
+    applyMicrophoneGate();
+  }
+}
+
+document.addEventListener('keydown', (event) => handlePushToTalkKeyChange(event, true));
+document.addEventListener('keyup', (event) => handlePushToTalkKeyChange(event, false));
+
 function MuteAudio() {
   if (!localStream) return;
-  for (const track of localStream.getAudioTracks()) {
-    track.enabled = false;
-  }
+  applyMicrophoneGate();
 
   const localAudio = document.getElementById('localAudio');
   if (localAudio) {
@@ -3171,9 +3560,7 @@ function MuteAudio() {
 }
 function UnmuteAudio() {
   if (!localStream) return;
-  for (const track of localStream.getAudioTracks()) {
-    track.enabled = true;
-  }
+  applyMicrophoneGate();
 
   const localAudio = document.getElementById('localAudio');
   if (localAudio) {
@@ -3243,18 +3630,194 @@ function ToggleVideo() {
   }
 }
 
-async function ShareScreen() {
+let screenShareState = null;
+const outgoingVideoSenders = new WeakMap();
+
+function getPeerTargetForConnection(peerConnection) {
+  for (const [user, connection] of peerConnections.entries()) {
+    if (connection === peerConnection) return user;
+  }
+  return null;
+}
+
+function isPrivatePeerTarget(targetUser) {
+  return Boolean(targetUser && isPrivateCallActive() && targetUser === currentFriend);
+}
+
+async function renegotiatePrivateCallAfterReconnect() {
+  if (!isPrivateCallActive() || !currentFriend || !voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  const peerConnection = peerConnections.get(currentFriend);
+  if (!peerConnection || peerConnection.signalingState !== 'stable') {
+    return;
+  }
+
+  if (JWTusername && currentFriend && JWTusername > currentFriend) {
+    return;
+  }
+
+  let offer;
   try {
+    offer = await peerConnection.createOffer({ iceRestart: true });
+  } catch {
+    offer = await peerConnection.createOffer();
+  }
+  await peerConnection.setLocalDescription(offer);
+
+  const hasVideo = Boolean(localStream?.getVideoTracks?.().length);
+  voiceConnection.send(JSON.stringify({
+    Type: 'peer-offer',
+    Data: JSON.stringify({ type: offer.type, sdp: offer.sdp, isVideo: hasVideo }),
+    TargetUser: currentFriend,
+    IsPrivate: true,
+    IsVideo: hasVideo
+  }));
+}
+
+async function sendVideoRenegotiation(peerConnection) {
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+
+  if (!voiceConnection || voiceConnection.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  if (peerConnection === serverPeerConnection) {
+    voiceConnection.send(JSON.stringify({
+      Type: 'server-offer',
+      Data: JSON.stringify(offer),
+    }));
+    return;
+  }
+
+  const targetUser = getPeerTargetForConnection(peerConnection);
+  if (targetUser) {
+    const isPrivate = isPrivatePeerTarget(targetUser);
+    voiceConnection.send(JSON.stringify({
+      Type: 'peer-offer',
+      Data: JSON.stringify(offer),
+      TargetUser: targetUser,
+      IsPrivate: isPrivate,
+      IsVideo: offer.sdp?.includes('m=video') || false
+    }));
+  }
+}
+
+async function replaceOutgoingVideoTrack(videoTrack) {
+  const connections = [...peerConnections.values(), serverPeerConnection].filter(Boolean);
+  await Promise.all(connections.map(async (pc) => {
+    let sender = outgoingVideoSenders.get(pc);
+    if (sender && !pc.getSenders().includes(sender)) {
+      sender = null;
+      outgoingVideoSenders.delete(pc);
+    }
+
+    if (!sender) {
+      sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+    }
+
+    if (sender) {
+      await sender.replaceTrack(videoTrack);
+    } else if (videoTrack && localStream) {
+      sender = pc.addTrack(videoTrack, localStream);
+    }
+
+    if (sender) {
+      outgoingVideoSenders.set(pc, sender);
+    }
+    await sendVideoRenegotiation(pc);
+  }));
+}
+
+function updateScreenShareButtons(isSharing = Boolean(screenShareState)) {
+  document
+    .querySelectorAll('[data-action="screen-share"], button[onclick="ShareScreen()"]')
+    .forEach((btn) => {
+      btn.textContent = isSharing ? 'Stop Sharing' : 'Share Screen';
+      btn.classList.toggle('active', isSharing);
+      btn.title = isSharing ? 'Stop screen sharing' : 'Share screen';
+    });
+  document.querySelectorAll('.screen-swap-btn').forEach((btn) => {
+    btn.classList.toggle('visible', isSharing);
+    btn.disabled = !isSharing;
+  });
+}
+
+async function stopScreenShare({ restoreCamera = true } = {}) {
+  if (!screenShareState) {
+    updateScreenShareButtons(false);
+    return;
+  }
+
+  const { stream, track, cameraWasOn } = screenShareState;
+  screenShareState = null;
+
+  try {
+    track.onended = null;
+    track.stop();
+    stream.getTracks().forEach((mediaTrack) => {
+      if (mediaTrack !== track) mediaTrack.stop();
+    });
+  } catch (error) {
+    console.warn('Could not stop screen share cleanly:', error);
+  }
+
+  if (localStream) {
+    localStream.getVideoTracks().forEach((videoTrack) => {
+      try {
+        localStream.removeTrack(videoTrack);
+        videoTrack.stop();
+      } catch { }
+    });
+  }
+
+  let nextVideoTrack = null;
+  if (restoreCamera && cameraWasOn) {
+    try {
+      const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      nextVideoTrack = cameraStream.getVideoTracks()[0] || null;
+      if (nextVideoTrack && localStream) {
+        localStream.addTrack(nextVideoTrack);
+      }
+      isVideoOn = Boolean(nextVideoTrack);
+    } catch (error) {
+      console.warn('Could not restore camera after screen share:', error);
+      isVideoOn = false;
+    }
+  } else {
+    isVideoOn = false;
+  }
+
+  await replaceOutgoingVideoTrack(nextVideoTrack);
+  const previewVideo = getLocalPreviewVideo();
+  if (previewVideo && localStream) {
+    previewVideo.srcObject = localStream;
+    previewVideo.muted = true;
+  }
+  updateScreenShareButtons(false);
+  updateCallDiagnosticsPanel();
+}
+
+async function ShareScreen() {
+  if (screenShareState) {
+    await stopScreenShare({ restoreCamera: true });
+    return;
+  }
+
+  try {
+    await ensureLocalStream(true, false);
     const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     const screenTrack = screenStream.getVideoTracks()[0];
+    const cameraWasOn = Boolean(localStream?.getVideoTracks().length || isVideoOn);
 
 
     if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0];
-      if (videoTrack) {
+      localStream.getVideoTracks().forEach((videoTrack) => {
         videoTrack.stop();
         localStream.removeTrack(videoTrack);
-      }
+      });
       localStream.addTrack(screenTrack);
 
       const localVideo = getLocalPreviewVideo();
@@ -3264,79 +3827,31 @@ async function ShareScreen() {
       }
     }
 
-    const btn = document.querySelector('button[onclick="ShareScreen()"]');
-    if (btn) {
-      btn.textContent = "Stop Sharing";
-      btn.style.color = "red";
-      btn.onclick = () => {
-        screenTrack.stop();
-
-      };
-    }
-
-
-    for (const pc of peerConnections.values()) {
-      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-      if (sender) {
-        await sender.replaceTrack(screenTrack);
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-
-        let targetUser = null;
-        for (const [user, conn] of peerConnections.entries()) {
-          if (conn === pc) { targetUser = user; break; }
-        }
-
-        if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
-          voiceConnection.send(JSON.stringify({
-            Type: 'peer-offer',
-            Data: JSON.stringify(offer),
-            TargetUser: targetUser
-          }));
-        }
-
-      } else {
-        pc.addTrack(screenTrack, localStream);
-
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        let targetUser = null;
-        for (const [user, conn] of peerConnections.entries()) {
-          if (conn === pc) { targetUser = user; break; }
-        }
-
-        if (targetUser && voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
-          console.log(`ShareScreen (New Track): Sending offer to ${targetUser}`);
-          voiceConnection.send(JSON.stringify({
-            Type: 'peer-offer',
-            Data: JSON.stringify(offer),
-            TargetUser: targetUser
-          }));
-        }
-      }
-    }
-
+    screenShareState = { stream: screenStream, track: screenTrack, cameraWasOn };
+    updateScreenShareButtons(true);
+    await replaceOutgoingVideoTrack(screenTrack);
     screenTrack.onended = () => {
-      VideoOff();
-      if (btn) {
-        btn.textContent = "Share Screen";
-        btn.style.color = "white";
-        btn.onclick = ShareScreen;
-      }
+      stopScreenShare({ restoreCamera: true }).catch((error) => {
+        console.error('Could not stop screen share:', error);
+      });
     };
+    updateCallDiagnosticsPanel();
 
   } catch (err) {
     console.error("Error sharing screen:", err);
+    showAppMessage(getApiErrorMessage(err, 'Could not share your screen.'), 'error');
   }
+}
+
+async function SwapScreenShare() {
+  await stopScreenShare({ restoreCamera: false });
+  await ShareScreen();
 }
 
 window.Mute = Mute;
 window.Deafen = Deafen;
 window.ShareScreen = ShareScreen;
+window.SwapScreenShare = SwapScreenShare;
 window.JoinVoiceCalls = JoinVoiceCalls;
 window.LeaveCall = LeaveCall;
 window.VideoOn = VideoOn;
@@ -3350,8 +3865,207 @@ function logToScreen(msg) {
   console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
 }
 
+async function collectPeerStats(peerConnection) {
+  if (!peerConnection?.getStats) {
+    return {};
+  }
+
+  const stats = await peerConnection.getStats();
+  const summary = {
+    bytesSent: 0,
+    bytesReceived: 0,
+    packetsLost: 0,
+    currentRoundTripTime: null,
+    candidatePairState: '',
+  };
+
+  stats.forEach((report) => {
+    if (report.type === 'outbound-rtp') summary.bytesSent += report.bytesSent || 0;
+    if (report.type === 'inbound-rtp') {
+      summary.bytesReceived += report.bytesReceived || 0;
+      summary.packetsLost += report.packetsLost || 0;
+    }
+    if (report.type === 'candidate-pair' && report.selected) {
+      summary.currentRoundTripTime = report.currentRoundTripTime ?? null;
+      summary.candidatePairState = report.state || '';
+    }
+  });
+
+  return summary;
+}
+
+async function buildCallDiagnostics() {
+  const serverDiagnostics = await apiClient
+    .get(`${homeApiBase}/api/VoiceConfig/GetDiagnostics`)
+    .then((res) => res.data)
+    .catch(() => null);
+  const peerEntries = [...peerConnections.entries()];
+  const peerStats = await Promise.all(peerEntries.map(async ([user, pc]) => ({
+    user,
+    connectionState: pc.connectionState,
+    iceConnectionState: pc.iceConnectionState,
+    signalingState: pc.signalingState,
+    stats: await collectPeerStats(pc),
+  })));
+
+  if (serverPeerConnection) {
+    peerStats.push({
+      user: 'server mix',
+      connectionState: serverPeerConnection.connectionState,
+      iceConnectionState: serverPeerConnection.iceConnectionState,
+      signalingState: serverPeerConnection.signalingState,
+      stats: await collectPeerStats(serverPeerConnection),
+    });
+  }
+
+  const localAudio = localStream?.getAudioTracks?.()[0] || null;
+  const localVideoTrack = localStream?.getVideoTracks?.()[0] || null;
+
+  return {
+    generatedAt: new Date().toLocaleTimeString(),
+    websocket: voiceConnection ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][voiceConnection.readyState] : 'CLOSED',
+    selectedServerID,
+    currentVoiceServerId,
+    watchedVoiceServerId,
+    users: currentVoiceUsers,
+    inputMode: readSettingsState().inputMode,
+    pushToTalkActive,
+    muted: isMuted,
+    deafened: isDeafened,
+    screenSharing: Boolean(screenShareState),
+    localAudio: localAudio ? `${localAudio.readyState} enabled=${localAudio.enabled}` : 'none',
+    localVideo: localVideoTrack ? `${localVideoTrack.readyState} enabled=${localVideoTrack.enabled}` : 'none',
+    ice: serverDiagnostics,
+    peers: peerStats,
+  };
+}
+
+function renderCallDiagnostics(diagnostics) {
+  const panel = document.getElementById('callDiagnosticsPanel');
+  if (!panel || !diagnostics) return;
+
+  const rows = [
+    ['Updated', diagnostics.generatedAt],
+    ['Voice socket', diagnostics.websocket],
+    ['Server', diagnostics.currentVoiceServerId || diagnostics.selectedServerID || 'none'],
+    ['Roster watch', diagnostics.watchedVoiceServerId || 'none'],
+    ['Users', diagnostics.users.length ? diagnostics.users.join(', ') : 'none'],
+    ['Input mode', diagnostics.inputMode],
+    ['PTT', diagnostics.pushToTalkActive ? 'pressed' : 'idle'],
+    ['Mute / Deafen', `${diagnostics.muted ? 'muted' : 'unmuted'} / ${diagnostics.deafened ? 'deafened' : 'listening'}`],
+    ['Screen share', diagnostics.screenSharing ? 'active' : 'off'],
+    ['Local audio', diagnostics.localAudio],
+    ['Local video', diagnostics.localVideo],
+    ['ICE servers', diagnostics.ice ? `${diagnostics.ice.iceServerCount} total, ${diagnostics.ice.turnServerCount} TURN` : 'unavailable'],
+    ['TURN ready', diagnostics.ice?.turnCredentialReady ? 'yes' : 'no'],
+  ];
+
+  panel.innerHTML = '';
+  rows.forEach(([label, value]) => {
+    const row = document.createElement('div');
+    row.className = 'diagnostics-row';
+    const key = document.createElement('span');
+    key.textContent = label;
+    const val = document.createElement('strong');
+    val.textContent = value;
+    row.appendChild(key);
+    row.appendChild(val);
+    panel.appendChild(row);
+  });
+
+  const peerList = document.createElement('div');
+  peerList.className = 'diagnostics-peer-list';
+  diagnostics.peers.forEach((peer) => {
+    const item = document.createElement('div');
+    item.className = 'diagnostics-peer';
+    const rtt = peer.stats.currentRoundTripTime == null
+      ? 'n/a'
+      : `${Math.round(peer.stats.currentRoundTripTime * 1000)}ms`;
+    item.textContent = `${peer.user}: ${peer.connectionState}, ICE ${peer.iceConnectionState}, RTT ${rtt}, lost ${peer.stats.packetsLost}`;
+    peerList.appendChild(item);
+  });
+  if (!diagnostics.peers.length) {
+    peerList.textContent = 'No peer connections yet.';
+  }
+  panel.appendChild(peerList);
+}
+
+async function updateCallDiagnosticsPanel() {
+  const panel = document.getElementById('callDiagnosticsPanel');
+  if (!panel) return;
+  try {
+    renderCallDiagnostics(await buildCallDiagnostics());
+  } catch (error) {
+    panel.textContent = getApiErrorMessage(error, 'Could not load diagnostics.');
+  }
+}
+
+function startCallDiagnosticsAutoRefresh() {
+  updateCallDiagnosticsPanel();
+  window.clearInterval(startCallDiagnosticsAutoRefresh.timer);
+  startCallDiagnosticsAutoRefresh.timer = window.setInterval(updateCallDiagnosticsPanel, 3000);
+}
+
+const SERVER_VERIFICATION_LEVELS = [
+  { value: 'none', label: 'None - unrestricted' },
+  { value: 'low', label: 'Low - verified email' },
+  { value: 'medium', label: 'Medium - registered 5+ minutes' },
+  { value: 'high', label: 'High - member 10+ minutes' },
+  { value: 'highest', label: 'Highest - verified phone' },
+];
+const MAX_SERVER_RULE_MINUTES = 525600;
+
+function getServerVerificationLabel(level) {
+  return SERVER_VERIFICATION_LEVELS.find((item) => item.value === level)?.label || 'None';
+}
+
+function normalizeServerRuleMinutes(value) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes)) return 0;
+  return Math.max(0, Math.min(MAX_SERVER_RULE_MINUTES, Math.floor(minutes)));
+}
+
+function parseServerRuleMinutes(value) {
+  if (String(value || '').trim() === '') return 0;
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > MAX_SERVER_RULE_MINUTES) {
+    return null;
+  }
+  return Math.floor(minutes);
+}
+
+function applyServerRuleState(server = {}) {
+  currentServerVerificationLevel = server.verificationLevel || currentServerVerificationLevel || 'none';
+  currentServerRequireVerifiedEmail = Boolean(server.requireVerifiedEmail);
+  currentServerMinimumAccountAgeMinutes = normalizeServerRuleMinutes(server.minimumAccountAgeMinutes);
+  currentServerMinimumMembershipMinutes = normalizeServerRuleMinutes(server.minimumMembershipMinutes);
+  currentServerRequireTwoFactorForModerators = Boolean(server.requireTwoFactorForModerators);
+}
+
+function formatServerRulesSummary() {
+  const rules = [`Verification: ${getServerVerificationLabel(currentServerVerificationLevel)}`];
+  if (currentServerRequireVerifiedEmail) {
+    rules.push('Email required');
+  }
+  if (currentServerMinimumAccountAgeMinutes > 0) {
+    rules.push(`Account ${currentServerMinimumAccountAgeMinutes}+ min`);
+  }
+  if (currentServerMinimumMembershipMinutes > 0) {
+    rules.push(`Member ${currentServerMinimumMembershipMinutes}+ min`);
+  }
+  if (currentServerRequireTwoFactorForModerators) {
+    rules.push('Moderator/admin 2FA');
+  }
+  return rules.join(' | ');
+}
+
 function renderServerManagementControls(container) {
   if (!container || !selectedServerID) return;
+
+  const summary = document.createElement('div');
+  summary.className = 'server-verification-summary';
+  summary.textContent = formatServerRulesSummary();
+  container.appendChild(summary);
 
   const tools = document.createElement('div');
   tools.className = 'server-management-tools';
@@ -3360,6 +4074,7 @@ function renderServerManagementControls(container) {
     ['+ Channel', createChannelFromPrompt],
     ['+ Category', createCategoryFromPrompt],
     ['Invite', createLimitedInviteFromPrompt],
+    ['Rules', updateServerVerificationFromPrompt],
     ['Leave', leaveSelectedServer],
   ];
 
@@ -3375,10 +4090,135 @@ function renderServerManagementControls(container) {
   container.appendChild(tools);
 }
 
+async function updateServerVerificationFromPrompt() {
+  await loadAccountSettings();
+  const settingsState = readSettingsState();
+  const phoneVerificationAvailable = Boolean(settingsState.verification.phoneVerificationAvailable);
+  const verificationOptions = SERVER_VERIFICATION_LEVELS.map((level) => {
+    if (
+      level.value === 'highest' &&
+      !phoneVerificationAvailable &&
+      currentServerVerificationLevel !== 'highest'
+    ) {
+      return {
+        ...level,
+        label: `${level.label} (SMS unavailable)`,
+        disabled: true,
+      };
+    }
+
+    return level;
+  });
+
+  const values = await openSimpleFormDialog({
+    title: 'Server Rules',
+    description: 'Email and account-age rules apply when joining and posting. Member time applies before posting.',
+    fields: [
+      {
+        name: 'verificationLevel',
+        label: 'Verification level',
+        value: currentServerVerificationLevel || 'none',
+        options: verificationOptions,
+      },
+      {
+        name: 'requireVerifiedEmail',
+        label: 'Email required for join/post',
+        value: currentServerRequireVerifiedEmail ? 'true' : 'false',
+        options: [
+          { value: 'false', label: 'Off' },
+          { value: 'true', label: 'On' },
+        ],
+      },
+      {
+        name: 'minimumAccountAgeMinutes',
+        label: 'Account age required (minutes)',
+        type: 'number',
+        min: 0,
+        max: MAX_SERVER_RULE_MINUTES,
+        step: 1,
+        value: String(currentServerMinimumAccountAgeMinutes || 0),
+      },
+      {
+        name: 'minimumMembershipMinutes',
+        label: 'Member before posting (minutes)',
+        type: 'number',
+        min: 0,
+        max: MAX_SERVER_RULE_MINUTES,
+        step: 1,
+        value: String(currentServerMinimumMembershipMinutes || 0),
+      },
+      {
+        name: 'requireTwoFactorForModerators',
+        label: '2FA required for moderators/admins',
+        value: currentServerRequireTwoFactorForModerators ? 'true' : 'false',
+        options: [
+          { value: 'false', label: 'Off' },
+          { value: 'true', label: 'On' },
+        ],
+      },
+    ],
+    confirmText: 'Save',
+  });
+
+  const verificationLevel = values?.verificationLevel;
+  if (!verificationLevel) return;
+  const minimumAccountAgeMinutes = parseServerRuleMinutes(values.minimumAccountAgeMinutes);
+  const minimumMembershipMinutes = parseServerRuleMinutes(values.minimumMembershipMinutes);
+  if (minimumAccountAgeMinutes == null || minimumMembershipMinutes == null) {
+    showAppMessage('Rule minutes must be between 0 and 525600.', 'error');
+    return;
+  }
+  if (
+    verificationLevel === 'highest' &&
+    !phoneVerificationAvailable &&
+    currentServerVerificationLevel !== 'highest'
+  ) {
+    showAppMessage('Highest verification requires SMS provider configuration.', 'error');
+    return;
+  }
+
+  try {
+    const res = await axios.post(`${homeApiBase}/api/Server/UpdateVerificationLevel`, {
+      serverId: selectedServerID,
+      verificationLevel,
+      requireVerifiedEmail: values.requireVerifiedEmail === 'true',
+      minimumAccountAgeMinutes,
+      minimumMembershipMinutes,
+      requireTwoFactorForModerators: values.requireTwoFactorForModerators === 'true',
+    });
+    applyServerRuleState(res.data || {
+      verificationLevel,
+      requireVerifiedEmail: values.requireVerifiedEmail === 'true',
+      minimumAccountAgeMinutes,
+      minimumMembershipMinutes,
+      requireTwoFactorForModerators: values.requireTwoFactorForModerators === 'true',
+    });
+    await fetchServerDetails();
+    showAppMessage('Server rules updated.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not update server rules.'), 'error');
+  }
+}
+
 async function createChannelFromPrompt() {
-  const name = prompt('Channel name')?.trim();
+  const values = await openSimpleFormDialog({
+    title: 'Create Channel',
+    fields: [
+      { name: 'name', label: 'Channel name' },
+      {
+        name: 'type',
+        label: 'Channel type',
+        options: [
+          { value: 'text', label: 'Text' },
+          { value: 'voice', label: 'Voice' },
+        ],
+      },
+    ],
+    confirmText: 'Create',
+  });
+  const name = values?.name?.trim();
   if (!name) return;
-  const type = prompt('Channel type: text or voice', 'text')?.trim().toLowerCase() || 'text';
+  const type = values?.type === 'voice' ? 'voice' : 'text';
 
   try {
     await axios.post(`${homeApiBase}/api/Server/CreateChannel`, {
@@ -3393,7 +4233,7 @@ async function createChannelFromPrompt() {
 }
 
 async function createCategoryFromPrompt() {
-  const name = prompt('Category name')?.trim();
+  const name = await askText('Create Category', 'Category name');
   if (!name) return;
 
   try {
@@ -3408,13 +4248,20 @@ async function createCategoryFromPrompt() {
 }
 
 async function createLimitedInviteFromPrompt() {
-  const maxUsesText = prompt('Max uses (blank for unlimited)', '');
-  const expiresText = prompt('Expires in minutes (blank for never)', '');
+  const values = await openSimpleFormDialog({
+    title: 'Create Invite',
+    fields: [
+      { name: 'maxUses', label: 'Max uses (blank for unlimited)', required: false },
+      { name: 'expiresInMinutes', label: 'Expires in minutes (blank for never)', required: false },
+    ],
+    confirmText: 'Create Invite',
+  });
+  if (!values) return;
 
   const payload = {
     serverId: selectedServerID,
-    maxUses: maxUsesText ? Number(maxUsesText) : null,
-    expiresInMinutes: expiresText ? Number(expiresText) : null,
+    maxUses: values.maxUses ? Number(values.maxUses) : null,
+    expiresInMinutes: values.expiresInMinutes ? Number(values.expiresInMinutes) : null,
   };
 
   try {
@@ -3430,7 +4277,7 @@ async function createLimitedInviteFromPrompt() {
 }
 
 async function leaveSelectedServer() {
-  if (!selectedServerID || !confirm('Leave this server?')) return;
+  if (!selectedServerID || !await askConfirm('Leave Server', 'Leave this server?', { danger: true, confirmText: 'Leave' })) return;
 
   try {
     await axios.post(`${homeApiBase}/api/Server/LeaveServer`, {
@@ -3451,7 +4298,13 @@ async function fetchServerDetails() {
     const response = await axios.get(
       `${homeApiBase}/api/Server/GetServerDetails?serverId=${encodeURIComponent(selectedServerID)}`
     );
-    const { categories, channels } = response.data;
+    const { categories, channels, server } = response.data;
+    if (server) {
+      applyServerRuleState(server);
+    }
+    if (server?.serverName) {
+      currentServerName = server.serverName;
+    }
     const channelsList = document.getElementById('channelsList');
     channelsList.innerHTML = '';
     renderServerManagementControls(channelsList);
@@ -3754,7 +4607,8 @@ async function startPrivateCall() {
       Type: 'peer-offer',
       Data: JSON.stringify(offerPayload),
       TargetUser: currentFriend,
-      IsPrivate: true
+      IsPrivate: true,
+      IsVideo: false
     }));
 
     console.log(`Offer sent to ${currentFriend}`);
@@ -3858,7 +4712,9 @@ async function handlePrivatePeerOffer(peerName, offerData, _unusedIsVideo) {
       voiceConnection.send(JSON.stringify({
         Type: 'peer-answer',
         Data: JSON.stringify(answer),
-        TargetUser: peerName
+        TargetUser: peerName,
+        IsPrivate: true,
+        IsVideo: isVideo
       }));
     }
     return;
@@ -3920,7 +4776,9 @@ async function AcceptCall() {
     voiceConnection.send(JSON.stringify({
       Type: 'peer-answer',
       Data: JSON.stringify(answer),
-      TargetUser: peerName
+      TargetUser: peerName,
+      IsPrivate: true,
+      IsVideo: pendingIsVideo
     }));
   }
 
@@ -4040,6 +4898,9 @@ async function endPrivateCall(notifyPeer = true) {
   console.log('Private call UI ended, cleaning up...');
 
   try {
+    await stopScreenShare({ restoreCamera: false });
+    pushToTalkActive = false;
+    pressedShortcutKeys.clear();
     if (currentFriend && peerConnections.has(currentFriend)) {
       const pc = peerConnections.get(currentFriend);
       pc.close();
@@ -4248,7 +5109,8 @@ async function startPrivateVideoCall() {
       Type: 'peer-offer',
       Data: JSON.stringify(offerPayload),
       TargetUser: currentFriend,
-      IsPrivate: true
+      IsPrivate: true,
+      IsVideo: true
     }));
 
     console.log('Video Offer sent to ' + currentFriend);
@@ -4804,6 +5666,7 @@ function createDefaultSettingsState() {
     profileView: 'user-profile',
     themeMode: 'dark',
     messageDisplay: 'cozy',
+    inputMode: 'voice-activity',
     fontSize: 16,
     zoomLevel: 100,
     saturation: 100,
@@ -4819,6 +5682,17 @@ function createDefaultSettingsState() {
     contact: {
       email: '',
       phoneNumber: '',
+      emailVerified: false,
+      phoneNumberVerified: false,
+    },
+    verification: {
+      emailVerificationAvailable: true,
+      phoneVerificationAvailable: false,
+    },
+    twoFactor: {
+      enabled: false,
+      authenticatorConfigured: false,
+      backupCodesRemaining: 0,
     },
     privacy: {
       dmPolicy: 'friends',
@@ -4893,6 +5767,10 @@ function readSettingsState() {
         typeof parsedState.messageDisplay === 'string'
           ? parsedState.messageDisplay
           : fallbackState.messageDisplay,
+      inputMode:
+        typeof parsedState.inputMode === 'string'
+          ? parsedState.inputMode
+          : fallbackState.inputMode,
       fontSize: normalizeSettingsNumber(
         parsedState.fontSize ?? legacyFontSize,
         fallbackState.fontSize,
@@ -4948,6 +5826,14 @@ function readSettingsState() {
         parsedState.contact && typeof parsedState.contact === 'object'
           ? { ...fallbackState.contact, ...parsedState.contact }
           : fallbackState.contact,
+      verification:
+        parsedState.verification && typeof parsedState.verification === 'object'
+          ? { ...fallbackState.verification, ...parsedState.verification }
+          : fallbackState.verification,
+      twoFactor:
+        parsedState.twoFactor && typeof parsedState.twoFactor === 'object'
+          ? { ...fallbackState.twoFactor, ...parsedState.twoFactor }
+          : fallbackState.twoFactor,
       privacy:
         parsedState.privacy && typeof parsedState.privacy === 'object'
           ? { ...fallbackState.privacy, ...parsedState.privacy }
@@ -5008,8 +5894,13 @@ function renderMemberModerationActions(member) {
 }
 
 async function moderateServerMember(action, targetUsername) {
-  const reason = action === 'BanMember' ? prompt('Ban reason (optional)', '') : null;
-  if (!confirm(`${action === 'BanMember' ? 'Ban' : 'Kick'} ${targetUsername}?`)) return;
+  const isBan = action === 'BanMember';
+  const reason = isBan ? await askText('Ban Member', 'Ban reason (optional)') : null;
+  if (!await askConfirm(
+    isBan ? 'Ban Member' : 'Kick Member',
+    `${isBan ? 'Ban' : 'Kick'} ${targetUsername}?`,
+    { danger: true, confirmText: isBan ? 'Ban' : 'Kick' }
+  )) return;
 
   try {
     await axios.post(`${homeApiBase}/api/Server/${action}`, {
@@ -5024,7 +5915,7 @@ async function moderateServerMember(action, targetUsername) {
 }
 
 async function changeServerMemberRole(targetUsername) {
-  const role = prompt('Role name', 'user')?.trim();
+  const role = await askText('Change Role', 'Role name', 'user');
   if (!role) return;
 
   try {
@@ -5040,7 +5931,7 @@ async function changeServerMemberRole(targetUsername) {
 }
 
 async function transferServerOwnership(targetUsername) {
-  if (!confirm(`Transfer ownership to ${targetUsername}?`)) return;
+  if (!await askConfirm('Transfer Ownership', `Transfer ownership to ${targetUsername}?`, { danger: true, confirmText: 'Transfer' })) return;
 
   try {
     await axios.post(`${homeApiBase}/api/Server/TransferOwnership`, {
@@ -5116,6 +6007,8 @@ function scheduleAccountSettingsPersist(state = readSettingsState()) {
 async function persistAccountSettings(state = readSettingsState()) {
   const settingsPayload = { ...state };
   delete settingsPayload.contact;
+  delete settingsPayload.verification;
+  delete settingsPayload.twoFactor;
   delete settingsPayload.privacy;
 
   await axios.post(`${homeApiBase}/api/Account/UpdateAccountSettings`, {
@@ -5157,6 +6050,18 @@ function applyAccountSettingsResponse(data) {
     contact: {
       email: data.email || '',
       phoneNumber: data.phoneNumber || '',
+      emailVerified: Boolean(data.emailVerified),
+      phoneNumberVerified: Boolean(data.phoneNumberVerified),
+      emailVerifiedAt: data.emailVerifiedAt || null,
+      phoneNumberVerifiedAt: data.phoneNumberVerifiedAt || null,
+    },
+    verification: {
+      emailVerificationAvailable: data.emailVerificationAvailable !== false,
+      phoneVerificationAvailable: Boolean(data.phoneVerificationAvailable),
+    },
+    twoFactor: {
+      ...fallback.twoFactor,
+      ...(data.twoFactor || {}),
     },
     privacy: {
       ...fallback.privacy,
@@ -5340,15 +6245,57 @@ function updateSettingsIdentityFields() {
   const settingsUsernameValue = document.getElementById('settingsUsernameValue');
   const settingsEmailValue = document.getElementById('settingsEmailValue');
   const settingsPhoneValue = document.getElementById('settingsPhoneValue');
+  const settingsEmailVerificationStatus = document.getElementById('settingsEmailVerificationStatus');
+  const settingsPhoneVerificationStatus = document.getElementById('settingsPhoneVerificationStatus');
+  const emailVerificationPrimaryStatus = document.getElementById('emailVerificationPrimaryStatus');
+  const twoFactorStatusText = document.getElementById('twoFactorStatusText');
+  const phoneVerificationRow = document.getElementById('phoneVerificationRow');
+  const requestPhoneVerificationBtn = document.getElementById('requestPhoneVerificationBtn');
+  const removePhoneNumberBtn = document.getElementById('removePhoneNumberBtn');
+  const enableTwoFactorBtn = document.getElementById('enableTwoFactorBtn');
+  const disableTwoFactorBtn = document.getElementById('disableTwoFactorBtn');
+  const regenerateBackupCodesBtn = document.getElementById('regenerateBackupCodesBtn');
   const presenceStatusSelect = document.getElementById('presenceStatusSelect');
   const previewName = document.querySelector('.preview-name');
   const previewTag = document.querySelector('.preview-tag');
+  const phoneAvailable = Boolean(state.verification.phoneVerificationAvailable);
 
   if (settingsDisplayName) settingsDisplayName.innerText = JWTusername;
   if (settingsDisplayNameValue) settingsDisplayNameValue.innerText = JWTusername;
   if (settingsUsernameValue) settingsUsernameValue.innerText = JWTusername;
   if (settingsEmailValue) settingsEmailValue.innerText = state.contact.email || 'Not added';
   if (settingsPhoneValue) settingsPhoneValue.innerText = state.contact.phoneNumber || 'Not added';
+  if (phoneVerificationRow) phoneVerificationRow.style.display = phoneAvailable ? '' : 'none';
+  if (requestPhoneVerificationBtn) requestPhoneVerificationBtn.disabled = !phoneAvailable;
+  if (removePhoneNumberBtn) removePhoneNumberBtn.style.display = phoneAvailable ? '' : 'none';
+  if (settingsEmailVerificationStatus) {
+    settingsEmailVerificationStatus.textContent = state.contact.email
+      ? (state.contact.emailVerified ? 'Verified' : 'Unverified')
+      : 'No email connected';
+    settingsEmailVerificationStatus.classList.toggle('verified', Boolean(state.contact.emailVerified));
+  }
+  if (emailVerificationPrimaryStatus) {
+    emailVerificationPrimaryStatus.textContent = state.contact.email
+      ? (state.contact.emailVerified ? 'Verified' : 'Verify to unlock email-gated servers')
+      : 'Add an email to verify';
+    emailVerificationPrimaryStatus.classList.toggle('verified', Boolean(state.contact.emailVerified));
+  }
+  if (settingsPhoneVerificationStatus) {
+    settingsPhoneVerificationStatus.textContent = state.contact.phoneNumber
+      ? (state.contact.phoneNumberVerified ? 'Verified' : 'Unverified')
+      : 'No phone connected';
+    settingsPhoneVerificationStatus.classList.toggle('verified', Boolean(state.contact.phoneNumberVerified));
+  }
+  if (twoFactorStatusText) {
+    const remaining = Number(state.twoFactor.backupCodesRemaining || 0);
+    twoFactorStatusText.textContent = state.twoFactor.enabled
+      ? `Enabled - ${remaining} backup code${remaining === 1 ? '' : 's'} left`
+      : 'Disabled';
+    twoFactorStatusText.classList.toggle('verified', Boolean(state.twoFactor.enabled));
+  }
+  if (enableTwoFactorBtn) enableTwoFactorBtn.style.display = state.twoFactor.enabled ? 'none' : '';
+  if (disableTwoFactorBtn) disableTwoFactorBtn.style.display = state.twoFactor.enabled ? '' : 'none';
+  if (regenerateBackupCodesBtn) regenerateBackupCodesBtn.disabled = !state.twoFactor.enabled;
   if (presenceStatusSelect) presenceStatusSelect.value = state.presenceStatus || 'online';
   if (previewName) previewName.textContent = JWTusername;
   if (previewTag) {
@@ -5736,6 +6683,10 @@ function handleRadioStateChange(settingKey, value) {
       nextState.messageDisplay = value;
     }
 
+    if (settingKey === 'inputMode') {
+      nextState.inputMode = value;
+    }
+
     if (settingKey === 'privacyDmPolicy') {
       nextState.privacy = {
         ...nextState.privacy,
@@ -5752,6 +6703,10 @@ function handleRadioStateChange(settingKey, value) {
 
   if (settingKey === 'messageDisplay') {
     applyMessageDisplay(value);
+  }
+
+  if (settingKey === 'inputMode') {
+    applyMicrophoneGate();
   }
 
   if (settingKey === 'privacyDmPolicy') {
@@ -5960,6 +6915,8 @@ function applyPersistedSettingsState() {
         ? themeMode
         : settingKey === 'messageDisplay'
           ? messageDisplay
+          : settingKey === 'inputMode'
+            ? state.inputMode
           : settingKey === 'privacyDmPolicy'
             ? state.privacy.dmPolicy
             : state.radios[settingKey] || defaultValue;
@@ -5971,6 +6928,10 @@ function applyPersistedSettingsState() {
 
     if (settingKey === 'messageDisplay') {
       applyMessageDisplay(selection.value);
+    }
+
+    if (settingKey === 'inputMode') {
+      applyMicrophoneGate();
     }
   });
 
@@ -6052,13 +7013,21 @@ function renderSettingsKeybinds(keybinds = null) {
   }
 }
 
-function addSettingsKeybind() {
-  const action = prompt('Action name', 'Custom Action')?.trim();
+async function addSettingsKeybind() {
+  const values = await openSimpleFormDialog({
+    title: 'Add Keybind',
+    fields: [
+      { name: 'action', label: 'Action name', value: 'Custom Action' },
+      { name: 'keys', label: 'Keys, separated by +', value: 'CTRL + SHIFT + K' },
+    ],
+    confirmText: 'Add Keybind',
+  });
+  const action = values?.action?.trim();
   if (!action) {
     return;
   }
 
-  const keyText = prompt('Keys, separated by +', 'CTRL + SHIFT + K')?.trim();
+  const keyText = values?.keys?.trim();
   if (!keyText) {
     return;
   }
@@ -6117,6 +7086,117 @@ function applyRemovedSettingsItems() {
   });
 }
 
+function openSimpleFormDialog({ title, description = '', fields = [], confirmText = 'Save', danger = false }) {
+  return new Promise((resolve) => {
+    closeAccountActionDialog();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'account-action-overlay';
+    const dialog = document.createElement('div');
+    dialog.className = 'account-action-dialog';
+
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    dialog.appendChild(heading);
+
+    if (description) {
+      const copy = document.createElement('p');
+      copy.className = 'account-action-copy';
+      copy.textContent = description;
+      dialog.appendChild(copy);
+    }
+
+    const form = document.createElement('form');
+    form.className = 'account-action-form';
+    const fieldMap = {};
+
+    fields.forEach((field) => {
+      const label = document.createElement('label');
+      label.textContent = field.label;
+
+      const input = field.options ? document.createElement('select') : document.createElement('input');
+      input.name = field.name;
+      input.className = field.options ? 'account-action-select' : '';
+      if (!field.options) {
+        input.type = field.type || 'text';
+      }
+      input.autocomplete = field.autocomplete || 'off';
+      if (field.min !== undefined) input.min = field.min;
+      if (field.max !== undefined) input.max = field.max;
+      if (field.step !== undefined) input.step = field.step;
+      if (field.inputMode) input.inputMode = field.inputMode;
+      if (field.autocapitalize) input.autocapitalize = field.autocapitalize;
+      if (field.spellcheck !== undefined) input.spellcheck = field.spellcheck;
+      input.required = field.required !== false;
+
+      (field.options || []).forEach((option) => {
+      const optionEl = document.createElement('option');
+      optionEl.value = option.value;
+      optionEl.textContent = option.label;
+      optionEl.disabled = Boolean(option.disabled);
+      input.appendChild(optionEl);
+    });
+      input.value = field.value || '';
+
+      fieldMap[field.name] = input;
+      label.appendChild(input);
+      form.appendChild(label);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'account-action-buttons';
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'account-action-cancel';
+    cancelButton.textContent = 'Cancel';
+    const submitButton = document.createElement('button');
+    submitButton.type = 'submit';
+    submitButton.className = danger ? 'account-action-submit danger' : 'account-action-submit';
+    submitButton.textContent = confirmText;
+    actions.appendChild(cancelButton);
+    actions.appendChild(submitButton);
+    form.appendChild(actions);
+
+    const close = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+
+    cancelButton.addEventListener('click', () => close(null));
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close(null);
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      close(Object.fromEntries(Object.entries(fieldMap).map(([key, input]) => [key, input.value.trim()])));
+    });
+
+    dialog.appendChild(form);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    form.querySelector('input, select')?.focus();
+  });
+}
+
+async function askText(title, label, value = '') {
+  const result = await openSimpleFormDialog({
+    title,
+    fields: [{ name: 'value', label, value }],
+  });
+  return result?.value?.trim() || '';
+}
+
+async function askConfirm(title, description, { danger = false, confirmText = 'Confirm' } = {}) {
+  const result = await openSimpleFormDialog({
+    title,
+    description,
+    fields: [],
+    danger,
+    confirmText,
+  });
+  return result !== null;
+}
+
 function closeAccountActionDialog() {
   document.querySelector('.account-action-overlay')?.remove();
 }
@@ -6153,6 +7233,9 @@ function openAccountActionDialog({ title, description, fields, confirmText, dang
     input.value = field.value || '';
     input.required = field.required !== false;
     input.minLength = field.minLength || 0;
+    if (field.inputMode) input.inputMode = field.inputMode;
+    if (field.autocapitalize) input.autocapitalize = field.autocapitalize;
+    if (field.spellcheck !== undefined) input.spellcheck = field.spellcheck;
 
     fieldMap[field.name] = input;
     label.appendChild(input);
@@ -6325,37 +7408,276 @@ function openDeleteAccountDialog() {
 
 function openContactInfoDialog() {
   const state = readSettingsState();
+  const fields = [
+    {
+      name: 'email',
+      label: 'Email',
+      type: 'email',
+      autocomplete: 'email',
+      required: false,
+      value: state.contact.email || '',
+      placeholder: state.contact.email || 'name@example.com',
+    },
+  ];
+
+  if (state.verification.phoneVerificationAvailable) {
+    fields.push({
+      name: 'phoneNumber',
+      label: 'Phone Number',
+      type: 'tel',
+      autocomplete: 'tel',
+      required: false,
+      value: state.contact.phoneNumber || '',
+      placeholder: state.contact.phoneNumber || '+1 555 0100',
+    });
+  }
+
   openAccountActionDialog({
     title: 'Contact Info',
-    description: 'Add or update the email and phone number shown on your account page.',
+    description: state.verification.phoneVerificationAvailable
+      ? 'Add or update the email and phone number shown on your account page.'
+      : 'Add or update the email used for free verification.',
     confirmText: 'Save Contact Info',
-    fields: [
-      {
-        name: 'email',
-        label: 'Email',
-        type: 'email',
-        autocomplete: 'email',
-        required: false,
-        value: state.contact.email || '',
-        placeholder: state.contact.email || 'name@example.com',
-      },
-      {
-        name: 'phoneNumber',
-        label: 'Phone Number',
-        type: 'tel',
-        autocomplete: 'tel',
-        required: false,
-        value: state.contact.phoneNumber || '',
-        placeholder: state.contact.phoneNumber || '+1 555 0100',
-      },
-    ],
+    fields,
     onSubmit: async ({ email, phoneNumber }) => {
       const res = await axios.post(`${homeApiBase}/api/Account/UpdateContactInfo`, {
         email,
-        phoneNumber,
+        phoneNumber: state.verification.phoneVerificationAvailable
+          ? phoneNumber
+          : state.contact.phoneNumber || '',
       });
       applyAccountSettingsResponse(res.data || {});
       showAppMessage('Contact info saved.', 'success');
+    },
+  });
+}
+
+async function requestContactVerification(kind) {
+  const state = readSettingsState();
+  const isEmail = kind === 'email';
+  if (!isEmail && !state.verification.phoneVerificationAvailable) {
+    showAppMessage('Phone verification is not available yet.', 'error');
+    return;
+  }
+
+  const target = isEmail ? state.contact.email : state.contact.phoneNumber;
+  if (!target) {
+    openContactInfoDialog();
+    return;
+  }
+
+  try {
+    const endpoint = isEmail ? 'RequestEmailVerification' : 'RequestPhoneVerification';
+    const res = await apiClient.post(`${homeApiBase}/api/Account/${endpoint}`, { target });
+    showAppMessage(
+      res.data?.deliveryConfigured === false
+        ? 'Verification code generated. Configure a provider webhook for production delivery.'
+        : 'Verification code sent.',
+      res.data?.deliveryConfigured === false ? 'info' : 'success',
+      4200
+    );
+    openVerificationCodeDialog(kind, target);
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not request verification.'), 'error');
+  }
+}
+
+function openVerificationCodeDialog(kind, target) {
+  const isEmail = kind === 'email';
+  openAccountActionDialog({
+    title: isEmail ? 'Verify Email' : 'Verify Phone',
+    description: `Enter the 6-digit code sent to ${target}.`,
+    confirmText: 'Verify',
+    fields: [
+      {
+        name: 'code',
+        label: 'Verification Code',
+        type: 'text',
+        autocomplete: 'one-time-code',
+        inputMode: 'numeric',
+        minLength: 6,
+      },
+    ],
+    onSubmit: async ({ code }) => {
+      const endpoint = isEmail ? 'ConfirmEmailVerification' : 'ConfirmPhoneVerification';
+      const res = await apiClient.post(`${homeApiBase}/api/Account/${endpoint}`, { code });
+      applyAccountSettingsResponse(res.data || {});
+      updateSettingsIdentityFields();
+      showAppMessage(isEmail ? 'Email verified.' : 'Phone verified.', 'success');
+    },
+  });
+}
+
+function applyTwoFactorStatus(twoFactor) {
+  if (!twoFactor) {
+    return;
+  }
+
+  writeSettingsState((state) => ({
+    ...state,
+    twoFactor: {
+      ...state.twoFactor,
+      ...twoFactor,
+    },
+  }));
+  updateSettingsIdentityFields();
+}
+
+function showBackupCodesDialog(codes = []) {
+  if (!Array.isArray(codes) || !codes.length) {
+    return;
+  }
+
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Backup Codes';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = 'Each code works once if you lose access to your authenticator app.';
+
+  const grid = document.createElement('div');
+  grid.className = 'backup-code-grid';
+  codes.forEach((code) => {
+    const pill = document.createElement('div');
+    pill.className = 'backup-code-pill';
+    pill.textContent = code;
+    grid.appendChild(pill);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'account-action-submit';
+  copyButton.textContent = 'Copy Codes';
+  copyButton.addEventListener('click', async () => {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(codes.join('\n'));
+      showAppMessage('Backup codes copied.', 'success');
+    }
+  });
+
+  const doneButton = document.createElement('button');
+  doneButton.type = 'button';
+  doneButton.className = 'account-action-cancel';
+  doneButton.textContent = 'Done';
+  doneButton.addEventListener('click', closeAccountActionDialog);
+
+  actions.appendChild(doneButton);
+  actions.appendChild(copyButton);
+  dialog.appendChild(heading);
+  dialog.appendChild(copy);
+  dialog.appendChild(grid);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+}
+
+async function enableAuthenticatorApp() {
+  try {
+    const setup = await axios.post(`${homeApiBase}/api/Account/BeginAuthenticatorSetup`, {
+      label: JWTusername,
+    });
+    const secret = setup.data?.manualEntryKey || setup.data?.secret;
+    const values = await openSimpleFormDialog({
+      title: 'Set Up Authenticator',
+      description: `Add this manual key to your authenticator app: ${secret}`,
+      fields: [
+        {
+          name: 'code',
+          label: '6-digit code',
+          type: 'text',
+          autocomplete: 'one-time-code',
+          inputMode: 'numeric',
+        },
+      ],
+      confirmText: 'Enable',
+    });
+
+    if (!values?.code) {
+      return;
+    }
+
+    const res = await axios.post(`${homeApiBase}/api/Account/EnableAuthenticator`, {
+      code: values.code,
+    });
+    applyTwoFactorStatus(res.data?.twoFactor);
+    showAppMessage(res.data?.message || 'Authenticator-app 2FA enabled.', 'success');
+    showBackupCodesDialog(res.data?.backupCodes || []);
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not enable authenticator-app 2FA.'), 'error');
+  }
+}
+
+function disableAuthenticatorApp() {
+  openAccountActionDialog({
+    title: 'Disable Two-Factor',
+    description: 'Confirm with your password and an authenticator or backup code.',
+    confirmText: 'Disable',
+    danger: true,
+    fields: [
+      {
+        name: 'password',
+        label: 'Password',
+        type: 'password',
+        autocomplete: 'current-password',
+      },
+      {
+        name: 'code',
+        label: 'Authenticator or Backup Code',
+        type: 'text',
+        autocomplete: 'one-time-code',
+        inputMode: 'text',
+        autocapitalize: 'characters',
+        spellcheck: false,
+      },
+    ],
+    onSubmit: async ({ password, code }) => {
+      const res = await axios.post(`${homeApiBase}/api/Account/DisableTwoFactor`, {
+        password,
+        code,
+      });
+      applyTwoFactorStatus(res.data?.twoFactor);
+      showAppMessage(res.data?.message || 'Two-factor authentication disabled.', 'success');
+    },
+  });
+}
+
+function regenerateBackupCodes() {
+  openAccountActionDialog({
+    title: 'Regenerate Backup Codes',
+    description: 'Old backup codes stop working after new ones are created.',
+    confirmText: 'Regenerate',
+    fields: [
+      {
+        name: 'password',
+        label: 'Password',
+        type: 'password',
+        autocomplete: 'current-password',
+      },
+      {
+        name: 'code',
+        label: 'Authenticator or Backup Code',
+        type: 'text',
+        autocomplete: 'one-time-code',
+        inputMode: 'text',
+        autocapitalize: 'characters',
+        spellcheck: false,
+      },
+    ],
+    onSubmit: async ({ password, code }) => {
+      const res = await axios.post(`${homeApiBase}/api/Account/RegenerateBackupCodes`, {
+        password,
+        code,
+      });
+      applyTwoFactorStatus(res.data?.twoFactor);
+      showBackupCodesDialog(res.data?.backupCodes || []);
     },
   });
 }
@@ -6380,7 +7702,13 @@ function setupSettingsActionButtons() {
 
   document.getElementById('editContactInfoBtn')?.addEventListener('click', openContactInfoDialog);
   document.getElementById('editContactInfoBtnSecondary')?.addEventListener('click', openContactInfoDialog);
+  document.getElementById('requestEmailVerificationBtn')?.addEventListener('click', () => requestContactVerification('email'));
+  document.getElementById('primaryEmailVerificationBtn')?.addEventListener('click', () => requestContactVerification('email'));
+  document.getElementById('requestPhoneVerificationBtn')?.addEventListener('click', () => requestContactVerification('phone'));
   document.getElementById('removePhoneNumberBtn')?.addEventListener('click', clearPhoneNumber);
+  document.getElementById('enableTwoFactorBtn')?.addEventListener('click', enableAuthenticatorApp);
+  document.getElementById('disableTwoFactorBtn')?.addEventListener('click', disableAuthenticatorApp);
+  document.getElementById('regenerateBackupCodesBtn')?.addEventListener('click', regenerateBackupCodes);
 
   document.querySelectorAll('.reveal-link').forEach((link) => {
     link.addEventListener('click', () => {
@@ -6412,9 +7740,9 @@ function setupSettingsActionButtons() {
 
   document.querySelector('.delete-account-btn')?.addEventListener('click', openDeleteAccountDialog);
 
-  document.getElementById('profileBannerColorBtn')?.addEventListener('click', () => {
+  document.getElementById('profileBannerColorBtn')?.addEventListener('click', async () => {
     const currentColor = readSettingsState().profileBannerColor || '#0c0c0c';
-    const nextColor = prompt('Banner color hex', currentColor)?.trim();
+    const nextColor = await askText('Banner Color', 'Banner color hex', currentColor);
     if (!nextColor) {
       return;
     }
@@ -6468,6 +7796,7 @@ function setupSettingsActionButtons() {
   });
 
   document.getElementById('addKeybindBtn')?.addEventListener('click', addSettingsKeybind);
+  document.getElementById('runCallDiagnosticsBtn')?.addEventListener('click', startCallDiagnosticsAutoRefresh);
 
   document.querySelectorAll('.app-item .settings-btn-danger').forEach((button) => {
     button.addEventListener('click', () => {
