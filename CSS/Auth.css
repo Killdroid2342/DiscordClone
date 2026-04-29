@@ -112,7 +112,8 @@ body.register-page .logInFormDiv {
 }
 
 .usernameLogInLabel,
-.passwordLogInLabel {
+.passwordLogInLabel,
+.twoFactorLabel {
   padding: 15px 0 8px;
   color: var(--auth-muted);
   font-family: 'formLabels', sans-serif;
@@ -124,6 +125,7 @@ body.register-page .logInFormDiv {
 
 .usernameInput,
 .LogInpasswordInput,
+.twoFactorInput,
 .passwordInput,
 .confirmPasswordInput,
 .displayname {
@@ -140,6 +142,7 @@ body.register-page .logInFormDiv {
 
 .usernameInput:focus,
 .LogInpasswordInput:focus,
+.twoFactorInput:focus,
 .passwordInput:focus,
 .confirmPasswordInput:focus,
 .displayname:focus {
