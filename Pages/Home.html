@@ -132,27 +132,43 @@
           </div>
         </div>
 
-        <div id="activeCallUI" class="extracted-inline-8">
-          <div class="extracted-inline-9">
-            <div class="extracted-inline-10">
+        <div id="activeCallUI" class="active-call-shell extracted-inline-8">
+          <div class="call-header">
+            <div class="call-header-copy">
+              <span class="call-kicker">Direct call</span>
               <h2 class="messageUser extracted-inline-11" id="activeCallUsername"></h2>
             </div>
+            <div id="privateCallQualitySummary" class="call-quality-summary" data-quality="idle">Connecting</div>
 
           </div>
-          <div>
-            <h2 id="centerCallUser" class="extracted-inline-12"></h2>
+          <div class="call-stage">
+            <h2 id="centerCallUser" class="call-title extracted-inline-12"></h2>
+            <div id="privateCallQualityWarnings" class="call-quality-warnings" aria-live="polite"></div>
 
             <div id="videoContainer"
-              class="extracted-inline-13">
-              <video id="remoteVideo" autoplay playsinline
-                class="extracted-inline-14"></video>
-              <video id="localVideo" autoplay playsinline muted
-                class="extracted-inline-15"></video>
+              class="call-video-grid extracted-inline-13">
+              <div class="call-video-tile remote-call-tile">
+                <video id="remoteVideo" autoplay playsinline
+                  class="extracted-inline-14"></video>
+                <div class="call-video-label">
+                  <span id="remoteVideoLabel">Remote</span>
+                  <span id="remoteCallStatus">Waiting</span>
+                </div>
+              </div>
+              <div class="call-video-tile local-call-tile">
+                <video id="localVideo" autoplay playsinline muted
+                  class="extracted-inline-15"></video>
+                <div class="call-video-label">
+                  <span>Me</span>
+                  <span id="localCallStatus">Ready</span>
+                </div>
+              </div>
 
             </div>
+            <div id="privateVolumeControls" class="call-volume-controls" aria-label="Call volume controls"></div>
 
             <div
-              class="extracted-inline-16">
+              class="call-controls extracted-inline-16">
               <button class="call-control-btn" onclick="Mute()">Mute/Unmute</button>
               <button class="call-control-btn" onclick="ToggleVideo()">Video</button>
               <button class="call-control-btn" data-action="screen-share" onclick="ShareScreen()">Share Screen</button>
@@ -266,9 +282,23 @@
       </div>
       <div class="chatSection">
         <p class="chatHeader">Text Channel</p>
+        <div class="server-call-strip">
+          <div class="server-call-copy">
+            <span>Voice Channel</span>
+            <strong id="serverCallQualitySummary" class="call-quality-summary" data-quality="idle">Not connected</strong>
+          </div>
+          <div id="serverCallQualityWarnings" class="call-quality-warnings" aria-live="polite"></div>
+          <div id="serverVolumeControls" class="call-volume-controls" aria-label="Voice volume controls"></div>
+        </div>
         <div class="videoBox">
-          <video class="videos" id="serverLocalVideo" autoplay muted playsinline></video>
-          <div id="remoteVideosContainer"></div>
+          <div class="server-video-tile local-call-tile">
+            <video class="videos" id="serverLocalVideo" autoplay muted playsinline></video>
+            <div class="call-video-label">
+              <span>Me</span>
+              <span id="serverLocalCallStatus">Ready</span>
+            </div>
+          </div>
+          <div id="remoteVideosContainer" class="remote-video-grid"></div>
         </div>
 
         <div class="chatMessages"></div>
