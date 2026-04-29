@@ -1545,6 +1545,439 @@ let voiceConnectionOpenPromise = null;
 const voiceUsersByServer = new Map();
 let peerConnections = new Map();
 let voiceProcessingState = null;
+const PEER_VOLUME_STORAGE_KEY = 'discordClone_peer_volumes_v1';
+const CALL_QUALITY_REFRESH_MS = 3500;
+const peerVolumeLevels = new Map();
+let callQualityMonitorTimer = null;
+const VOICE_ACTIVITY_POLL_MS = 90;
+const VOICE_ACTIVITY_THRESHOLD = 0.045;
+const voiceActivityMonitors = new Map();
+
+function loadPeerVolumeLevels() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PEER_VOLUME_STORAGE_KEY) || '{}');
+    Object.entries(parsed || {}).forEach(([peerName, volume]) => {
+      const normalizedVolume = normalizeSettingsNumber(volume, 100, 0, 100);
+      peerVolumeLevels.set(peerName, normalizedVolume);
+    });
+  } catch (error) {
+    console.warn('Could not load peer volume settings:', error);
+  }
+}
+
+loadPeerVolumeLevels();
+
+function getPeerVolumeKey(peerName) {
+  return String(peerName || 'unknown');
+}
+
+function getPeerVolumeDomId(peerName) {
+  return getPeerVolumeKey(peerName).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function getPeerDisplayName(peerName) {
+  if (peerName === 'server-mixed') return 'Server mix';
+  return String(peerName || 'Unknown');
+}
+
+function persistPeerVolumeLevels() {
+  try {
+    localStorage.setItem(
+      PEER_VOLUME_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(peerVolumeLevels.entries()))
+    );
+  } catch (error) {
+    console.warn('Could not save peer volume settings:', error);
+  }
+}
+
+function getGlobalOutputVolume() {
+  return normalizeSettingsNumber(readSettingsState().sliders?.outputVolume, 100, 0, 100);
+}
+
+function getPeerVolume(peerName) {
+  return peerVolumeLevels.get(getPeerVolumeKey(peerName)) ?? 100;
+}
+
+function getEffectivePeerVolume(peerName) {
+  return (getGlobalOutputVolume() / 100) * (getPeerVolume(peerName) / 100);
+}
+
+function getRegisteredRemoteMediaElements(peerName) {
+  const key = getPeerVolumeKey(peerName);
+  const registered = Array.from(document.querySelectorAll('[data-peer-volume-id]'))
+    .filter((element) => element.dataset.peerVolumeId === key);
+  const legacyElement = document.getElementById(`remote_${peerName}`);
+  if (legacyElement && !registered.includes(legacyElement)) {
+    registered.push(legacyElement);
+  }
+  return registered;
+}
+
+function applyPeerVolume(peerName) {
+  const effectiveVolume = Math.max(0, Math.min(1, getEffectivePeerVolume(peerName)));
+  getRegisteredRemoteMediaElements(peerName).forEach((mediaElement) => {
+    mediaElement.volume = effectiveVolume;
+  });
+}
+
+function applyAllPeerVolumes() {
+  document.querySelectorAll('[data-peer-volume-id]').forEach((mediaElement) => {
+    applyPeerVolume(mediaElement.dataset.peerName || mediaElement.dataset.peerVolumeId);
+  });
+}
+
+function setPeerVolume(peerName, volume) {
+  const normalizedVolume = normalizeSettingsNumber(volume, 100, 0, 100);
+  const key = getPeerVolumeKey(peerName);
+  peerVolumeLevels.set(key, normalizedVolume);
+  persistPeerVolumeLevels();
+  applyPeerVolume(peerName);
+
+  document.querySelectorAll(`[data-peer-volume-control-id="${getPeerVolumeDomId(peerName)}"]`)
+    .forEach((control) => {
+      const slider = control.querySelector('.peer-volume-slider');
+      const value = control.querySelector('.peer-volume-value');
+      if (slider) slider.value = String(normalizedVolume);
+      if (value) value.textContent = `${Math.round(normalizedVolume)}%`;
+    });
+}
+
+function registerRemoteMediaElement(peerName, mediaElement, context = inferVolumeControlContext(peerName)) {
+  if (!mediaElement || peerName === JWTusername) return;
+  mediaElement.dataset.remoteMedia = 'true';
+  mediaElement.dataset.peerName = getPeerVolumeKey(peerName);
+  mediaElement.dataset.peerVolumeId = getPeerVolumeKey(peerName);
+  mediaElement.muted = isDeafened;
+  applyPeerVolume(peerName);
+  startVoiceActivityMonitor(peerName, mediaElement.srcObject, context);
+}
+
+function getVolumeControlContainer(context) {
+  if (context === 'private') {
+    return document.getElementById('privateVolumeControls');
+  }
+  return document.getElementById('serverVolumeControls');
+}
+
+function inferVolumeControlContext(peerName) {
+  if (peerName === currentFriend && isPrivateCallActive()) {
+    return 'private';
+  }
+  return 'server';
+}
+
+function ensurePeerVolumeControl(peerName, mediaElement, context = inferVolumeControlContext(peerName)) {
+  if (!peerName || peerName === JWTusername) return null;
+  const container = getVolumeControlContainer(context);
+  if (!container) return null;
+
+  const domId = getPeerVolumeDomId(peerName);
+  const controlId = `peerVolume_${context}_${domId}`;
+  let control = document.getElementById(controlId);
+  const currentVolume = getPeerVolume(peerName);
+
+  if (!control) {
+    control = document.createElement('label');
+    control.id = controlId;
+    control.className = 'peer-volume-control';
+    control.dataset.peerVolumeControlId = domId;
+    control.dataset.peerName = getPeerVolumeKey(peerName);
+
+    const name = document.createElement('span');
+    name.className = 'peer-volume-name';
+    name.textContent = getPeerDisplayName(peerName);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.step = '1';
+    slider.className = 'peer-volume-slider';
+    slider.setAttribute('aria-label', `${getPeerDisplayName(peerName)} volume`);
+    slider.addEventListener('input', () => {
+      setPeerVolume(peerName, slider.value);
+    });
+
+    const value = document.createElement('span');
+    value.className = 'peer-volume-value';
+
+    control.appendChild(name);
+    control.appendChild(slider);
+    control.appendChild(value);
+    container.appendChild(control);
+  }
+
+  const slider = control.querySelector('.peer-volume-slider');
+  const value = control.querySelector('.peer-volume-value');
+  if (slider) slider.value = String(currentVolume);
+  if (value) value.textContent = `${Math.round(currentVolume)}%`;
+
+  registerRemoteMediaElement(peerName, mediaElement, context);
+  return control;
+}
+
+function removePeerVolumeControls(peerName) {
+  const domId = getPeerVolumeDomId(peerName);
+  document.querySelectorAll(`[data-peer-volume-control-id="${domId}"]`)
+    .forEach((control) => control.remove());
+}
+
+function clearCallVolumeControls(context) {
+  const container = getVolumeControlContainer(context);
+  if (container) container.innerHTML = '';
+}
+
+function updateRemoteMediaStatus(peerName, stream) {
+  const hasVideo = Boolean(stream?.getVideoTracks?.().length);
+  const remoteVideoLabel = document.getElementById('remoteVideoLabel');
+  const remoteCallStatus = document.getElementById('remoteCallStatus');
+  if (remoteVideoLabel) remoteVideoLabel.textContent = getPeerDisplayName(peerName);
+  if (remoteCallStatus) remoteCallStatus.textContent = hasVideo ? 'Video' : 'Audio only';
+}
+
+function createRemoteVideoTile(peerName, stream) {
+  const container = document.getElementById('remoteVideosContainer') || document.querySelector('.videoBox');
+  if (!container) return null;
+
+  const domId = getPeerVolumeDomId(peerName);
+  document.getElementById(`remote_tile_${domId}`)?.remove();
+
+  const wrapper = document.createElement('div');
+  wrapper.id = `remote_tile_${domId}`;
+  wrapper.className = 'remote-video-tile';
+  wrapper.dataset.peerUiId = domId;
+
+  const video = document.createElement('video');
+  video.id = `remote_${peerName}`;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  video.classList.add('videos');
+
+  const label = document.createElement('div');
+  label.className = 'call-video-label';
+  const name = document.createElement('span');
+  name.textContent = getPeerDisplayName(peerName);
+  const status = document.createElement('span');
+  status.textContent = 'Video';
+  label.appendChild(name);
+  label.appendChild(status);
+
+  wrapper.appendChild(video);
+  wrapper.appendChild(label);
+  container.appendChild(wrapper);
+  ensurePeerVolumeControl(peerName, video, 'server');
+  return video;
+}
+
+function createRemoteAudioElement(peerName, stream, context = inferVolumeControlContext(peerName)) {
+  let audio = document.getElementById(`remote_${peerName}`);
+  if (!audio || audio.tagName !== 'AUDIO') {
+    audio?.remove();
+    audio = document.createElement('audio');
+    audio.id = `remote_${peerName}`;
+    audio.autoplay = true;
+    audio.controls = false;
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+  }
+
+  audio.srcObject = stream;
+  registerRemoteMediaElement(peerName, audio, context);
+  ensurePeerVolumeControl(peerName, audio, context);
+  audio.play?.().catch?.((error) => {
+    console.warn(`Could not autoplay audio for ${peerName}:`, error);
+  });
+  return audio;
+}
+
+function getVoiceActivityMonitorKey(peerName, context) {
+  return `${context}:${getPeerVolumeKey(peerName)}`;
+}
+
+function getVoiceActivityAudioContext() {
+  try {
+    if (!globalAudioContext) {
+      globalAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return globalAudioContext;
+  } catch (error) {
+    console.warn('Could not start voice activity analyzer:', error);
+    return null;
+  }
+}
+
+function getVoiceActivityLevel(stream, analyser, buffer) {
+  if (!stream?.getAudioTracks?.().some((track) => track.readyState === 'live')) {
+    return null;
+  }
+
+  analyser.getByteTimeDomainData(buffer);
+  let sum = 0;
+  for (let index = 0; index < buffer.length; index += 1) {
+    const centeredSample = (buffer[index] - 128) / 128;
+    sum += centeredSample * centeredSample;
+  }
+
+  return Math.sqrt(sum / buffer.length);
+}
+
+function getNormalizedVoiceLevel(level) {
+  return Math.max(0, Math.min(1, (level - VOICE_ACTIVITY_THRESHOLD) / 0.18));
+}
+
+function setElementVoiceState(element, isSpeaking, level) {
+  if (!element) return;
+  element.classList.toggle('is-speaking', isSpeaking);
+  element.style.setProperty('--voice-level', String(level.toFixed(2)));
+}
+
+function getIdleLocalVoiceStatus() {
+  if (isMuted) return 'Muted';
+  return isVideoOn ? 'Video on' : 'Audio only';
+}
+
+function setLocalVoiceActivityState(isSpeaking, level) {
+  document.querySelectorAll('.local-call-tile').forEach((tile) => {
+    setElementVoiceState(tile, isSpeaking, level);
+  });
+
+  const nextStatus = isSpeaking && !isMuted ? 'Speaking' : getIdleLocalVoiceStatus();
+  const localCallStatus = document.getElementById('localCallStatus');
+  const serverLocalCallStatus = document.getElementById('serverLocalCallStatus');
+  if (localCallStatus) localCallStatus.textContent = nextStatus;
+  if (serverLocalCallStatus) serverLocalCallStatus.textContent = nextStatus;
+}
+
+function setRemoteVoiceActivityState(peerName, context, isSpeaking, level) {
+  const domId = getPeerVolumeDomId(peerName);
+  document.querySelectorAll(`[data-peer-volume-control-id="${domId}"]`).forEach((control) => {
+    setElementVoiceState(control, isSpeaking, level);
+  });
+
+  const remoteTile = document.getElementById(`remote_tile_${domId}`);
+  setElementVoiceState(remoteTile, isSpeaking, level);
+
+  if (context === 'private') {
+    setElementVoiceState(document.querySelector('.remote-call-tile'), isSpeaking, level);
+    const remoteCallStatus = document.getElementById('remoteCallStatus');
+    if (remoteCallStatus) {
+      const mediaElement = document.getElementById('remoteVideo') || document.getElementById(`remote_${peerName}`);
+      const stream = mediaElement?.srcObject;
+      const hasVideo = Boolean(stream?.getVideoTracks?.().length);
+      remoteCallStatus.textContent = isSpeaking ? 'Speaking' : hasVideo ? 'Video' : 'Audio only';
+    }
+  }
+
+  if (remoteTile) {
+    const status = remoteTile.querySelector('.call-video-label span:last-child');
+    if (status) status.textContent = isSpeaking ? 'Speaking' : 'Video';
+  }
+}
+
+function setVoiceActivityState(peerName, context, isSpeaking, level) {
+  if (context === 'local') {
+    setLocalVoiceActivityState(isSpeaking, level);
+    return;
+  }
+
+  setRemoteVoiceActivityState(peerName, context, isSpeaking, level);
+}
+
+function startVoiceActivityMonitor(peerName, stream, context = 'server') {
+  if (!stream?.getAudioTracks?.().length) return;
+
+  const key = getVoiceActivityMonitorKey(peerName, context);
+  const existingMonitor = voiceActivityMonitors.get(key);
+  if (existingMonitor?.stream === stream) {
+    return;
+  }
+
+  stopVoiceActivityMonitor(peerName, context);
+
+  const audioContext = getVoiceActivityAudioContext();
+  if (!audioContext) return;
+  if (audioContext.state === 'suspended') {
+    audioContext.resume?.().catch?.(() => {});
+  }
+
+  try {
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.72;
+
+    const source = audioContext.createMediaStreamSource(stream);
+    source.connect(analyser);
+
+    const buffer = new Uint8Array(analyser.fftSize);
+    let silenceFrames = 0;
+    let isSpeaking = false;
+
+    const tick = () => {
+      const level = getVoiceActivityLevel(stream, analyser, buffer);
+      if (level == null) {
+        stopVoiceActivityMonitor(peerName, context);
+        return;
+      }
+
+      const overThreshold = audioContext.state !== 'suspended' && level >= VOICE_ACTIVITY_THRESHOLD;
+      if (overThreshold) {
+        silenceFrames = 0;
+        isSpeaking = true;
+      } else {
+        silenceFrames += 1;
+        if (silenceFrames >= 4) {
+          isSpeaking = false;
+        }
+      }
+
+      setVoiceActivityState(peerName, context, isSpeaking, getNormalizedVoiceLevel(level));
+    };
+
+    const intervalId = window.setInterval(tick, VOICE_ACTIVITY_POLL_MS);
+    stream.getAudioTracks().forEach((track) => {
+      track.addEventListener('ended', () => stopVoiceActivityMonitor(peerName, context), { once: true });
+    });
+
+    voiceActivityMonitors.set(key, {
+      analyser,
+      intervalId,
+      source,
+      stream,
+      peerName,
+      context,
+    });
+    tick();
+  } catch (error) {
+    console.warn('Could not monitor voice activity:', error);
+  }
+}
+
+function stopVoiceActivityMonitor(peerName, context) {
+  const key = getVoiceActivityMonitorKey(peerName, context);
+  const monitor = voiceActivityMonitors.get(key);
+  if (!monitor) return;
+
+  window.clearInterval(monitor.intervalId);
+  try {
+    monitor.source.disconnect();
+  } catch {
+  }
+  voiceActivityMonitors.delete(key);
+  setVoiceActivityState(peerName, context, false, 0);
+}
+
+function stopPeerVoiceActivity(peerName) {
+  ['private', 'server'].forEach((context) => stopVoiceActivityMonitor(peerName, context));
+}
+
+function stopVoiceActivityContext(context) {
+  Array.from(voiceActivityMonitors.values())
+    .filter((monitor) => monitor.context === context)
+    .forEach((monitor) => stopVoiceActivityMonitor(monitor.peerName, monitor.context));
+}
+
 function isTurnIceServer(server) {
   const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
   return urls.some((url) => /^turns?:/i.test(String(url || '').trim()));
@@ -2776,6 +3209,7 @@ async function initializeVoiceConnection() {
       peerConnection.onconnectionstatechange = () => {
         console.log(`connection with ${userId}: ${peerConnection.connectionState}`);
         updateCallDiagnosticsPanel();
+        updateCallQualityWarnings();
         if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
           peerConnections.delete(userId);
           removePeerUI(userId);
@@ -2796,7 +3230,7 @@ async function initializeVoiceConnection() {
 }
 
 
-function createRemoteMediaElement(peerName, stream) {
+function createRemoteMediaElement(peerName, stream, context = inferVolumeControlContext(peerName)) {
   let existing = document.getElementById('remote_' + peerName);
   if (existing) existing.remove();
   const hasVideo = stream.getVideoTracks().length > 0;
@@ -2855,31 +3289,23 @@ function createRemoteMediaElement(peerName, stream) {
   const privateCallUI = document.getElementById('activeCallUI');
   const privateRemoteVideo = document.getElementById('remoteVideo');
 
-  if (privateCallUI && privateCallUI.style.display !== 'none' && privateRemoteVideo) {
+  if (context === 'private' && privateCallUI && privateCallUI.style.display !== 'none' && privateRemoteVideo) {
     console.log(`Redirecting stream from ${peerName} to Private Call Video UI`);
     privateRemoteVideo.srcObject = stream;
+    registerRemoteMediaElement(peerName, privateRemoteVideo, 'private');
+    ensurePeerVolumeControl(peerName, privateRemoteVideo, 'private');
+    updateRemoteMediaStatus(peerName, stream);
+    privateRemoteVideo.play?.().catch?.((error) => {
+      console.warn(`Could not autoplay private stream for ${peerName}:`, error);
+    });
     return privateRemoteVideo;
   }
 
 
   if (hasVideo) {
-    const v = document.createElement('video');
-    v.id = 'remote_' + peerName;
-    v.autoplay = true;
-    v.playsInline = true;
-    v.srcObject = stream;
-    v.width = 240;
-    v.classList.add('videos');
-    document.querySelector('.videoBox').appendChild(v);
-    return v;
+    return createRemoteVideoTile(peerName, stream);
   } else {
-    const a = document.createElement('audio');
-    a.id = 'remote_' + peerName;
-    a.autoplay = true;
-    a.srcObject = stream;
-    a.style.display = 'none';
-    a.volume = 1.0;
-    a.muted = false;
+    const a = createRemoteAudioElement(peerName, stream, context);
 
     if (globalAudioContext && globalAudioContext.state === 'suspended') {
       globalAudioContext.resume().then(() => {
@@ -2926,6 +3352,10 @@ function createRemoteMediaElement(peerName, stream) {
 function removePeerUI(peerName) {
   let el = document.getElementById('remote_' + peerName);
   if (el) el.remove();
+  document.getElementById(`remote_tile_${getPeerVolumeDomId(peerName)}`)?.remove();
+  removePeerVolumeControls(peerName);
+  stopPeerVoiceActivity(peerName);
+  updateCallQualityWarnings();
 }
 
 async function createServerPeerConnection() {
@@ -2946,7 +3376,7 @@ async function createServerPeerConnection() {
   serverPeerConnection.ontrack = (event) => {
     const stream = event.streams[0];
     console.log('getting audio from server');
-    createRemoteMediaElement('server-mixed', stream);
+    createRemoteMediaElement('server-mixed', stream, 'server');
   };
 
 
@@ -2972,6 +3402,7 @@ async function createServerPeerConnection() {
       serverPeerConnection.connectionState
     );
     updateCallDiagnosticsPanel();
+    updateCallQualityWarnings();
     if (
       serverPeerConnection.connectionState === 'failed' ||
       serverPeerConnection.connectionState === 'closed' ||
@@ -3144,6 +3575,7 @@ async function refreshLocalAudioProcessing() {
     });
   });
   applyMicrophoneGate();
+  startVoiceActivityMonitor('local', localStream, 'local');
 }
 
 async function ensureLocalStream(wantAudio = true, wantVideo = false) {
@@ -3156,6 +3588,7 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
     });
     await applyConfiguredAudioProcessing(localStream);
     applyMicrophoneGate();
+    startVoiceActivityMonitor('local', localStream, 'local');
     if (localVideo) {
       localVideo.srcObject = localStream;
       localVideo.muted = true;
@@ -3220,6 +3653,9 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
     }
     applyMicrophoneGate();
   }
+  if (wantAudio && localStream.getAudioTracks().length) {
+    startVoiceActivityMonitor('local', localStream, 'local');
+  }
 }
 async function JoinVoiceCalls() {
   enableAudioPlayback();
@@ -3270,6 +3706,8 @@ async function JoinVoiceCalls() {
 
 
     await establishServerConnection();
+    startCallQualityMonitor();
+    updateCallControlStates();
   } catch (err) {
     console.error('couldnt join voice chat:', err);
   }
@@ -3323,12 +3761,16 @@ async function leaveVoiceServer(serverIdToLeave) {
 
     const remotes = Array.from(document.querySelectorAll('[id^="remote_"]'));
     remotes.forEach((el) => el.remove());
+    document.querySelectorAll('[id^="remote_tile_"]').forEach((el) => el.remove());
+    clearCallVolumeControls('server');
+    stopVoiceActivityContext('server');
 
 
     if (localStream) {
       cleanupVoiceProcessing({ restoreRaw: false });
       localStream.getTracks().forEach((t) => t.stop());
       localStream = null;
+      stopVoiceActivityMonitor('local', 'local');
     }
     localVideo = getLocalPreviewVideo();
     if (localVideo) localVideo.srcObject = null;
@@ -3346,18 +3788,11 @@ async function leaveVoiceServer(serverIdToLeave) {
 
     isMuted = false;
     isDeafened = false;
-    let btn = document.querySelector('button[onclick="Mute()"]');
-    if (btn) {
-      btn.textContent = "Mute";
-      btn.style.color = "white";
-    }
-    btn = document.querySelector('button[onclick="Deafen()"]');
-    if (btn) {
-      btn.textContent = "Deafen";
-      btn.style.color = "white";
-    }
+    isVideoOn = false;
     await stopScreenShare({ restoreCamera: false });
     updateScreenShareButtons(false);
+    updateCallControlStates();
+    refreshCallQualityMonitorState();
 
 
   } catch (err) {
@@ -3369,6 +3804,7 @@ async function LeaveCall() {
 }
 async function VideoOn() {
   try {
+    isVideoOn = true;
     await ensureLocalStream(true, true);
 
 
@@ -3414,14 +3850,22 @@ async function VideoOn() {
         }));
       }
     }
+    updateCallControlStates();
   } catch (err) {
     console.error('couldnt enable video:', err);
   }
 }
 async function VideoOff() {
-  if (!localStream) return;
+  isVideoOn = false;
+  if (!localStream) {
+    updateCallControlStates();
+    return;
+  }
   const videoTrack = localStream.getVideoTracks()[0];
-  if (!videoTrack) return;
+  if (!videoTrack) {
+    updateCallControlStates();
+    return;
+  }
   try {
     videoTrack.stop();
   } catch { }
@@ -3467,6 +3911,7 @@ async function VideoOff() {
   }
   const localVideo = getLocalPreviewVideo();
   if (localVideo) localVideo.srcObject = localStream;
+  updateCallControlStates();
 }
 let pushToTalkActive = false;
 const pressedShortcutKeys = new Set();
@@ -3569,65 +4014,67 @@ function UnmuteAudio() {
   }
 }
 
+function updateCallControlStates() {
+  document.querySelectorAll('button[onclick="Mute()"]').forEach((btn) => {
+    btn.textContent = isMuted ? 'Unmute' : 'Mute';
+    btn.classList.toggle('active', isMuted);
+  });
+
+  document.querySelectorAll('button[onclick="Deafen()"]').forEach((btn) => {
+    btn.textContent = isDeafened ? 'Undeafen' : 'Deafen';
+    btn.classList.toggle('active', isDeafened);
+  });
+
+  document.querySelectorAll('button[onclick="ToggleVideo()"], button[onclick="VideoOn()"], button[onclick="VideoOff()"]').forEach((btn) => {
+    if (btn.getAttribute('onclick') === 'ToggleVideo()') {
+      btn.textContent = isVideoOn ? 'Stop Video' : 'Video';
+      btn.classList.toggle('active', isVideoOn);
+    }
+  });
+
+  const localCallStatus = document.getElementById('localCallStatus');
+  const serverLocalCallStatus = document.getElementById('serverLocalCallStatus');
+  const videoLabel = isVideoOn ? 'Video on' : 'Audio only';
+  if (localCallStatus) localCallStatus.textContent = isMuted ? 'Muted' : videoLabel;
+  if (serverLocalCallStatus) serverLocalCallStatus.textContent = isMuted ? 'Muted' : videoLabel;
+}
+
 let isMuted = false;
 function Mute() {
   isMuted = !isMuted;
   if (isMuted) {
     MuteAudio();
-    const btn = document.querySelector('button[onclick="Mute()"]');
-    if (btn) {
-      btn.textContent = "Unmute";
-      btn.style.color = "red";
-    }
   } else {
     UnmuteAudio();
-    const btn = document.querySelector('button[onclick="Mute()"]');
-    if (btn) {
-      btn.textContent = "Mute";
-      btn.style.color = "white";
-    }
   }
+  updateCallControlStates();
 }
 
 let isDeafened = false;
 function Deafen() {
   isDeafened = !isDeafened;
-  const remotes = document.querySelectorAll('audio[id^="remote_"]');
+  const remotes = document.querySelectorAll('[data-remote-media="true"], audio[id^="remote_"], video[id^="remote_"], #remoteVideo');
   remotes.forEach(audio => {
     audio.muted = isDeafened;
   });
 
-  const btn = document.querySelector('button[onclick="Deafen()"]');
-  if (btn) {
-    if (isDeafened) {
-      btn.textContent = "Undeafen";
-      btn.style.color = "red";
-      if (!isMuted) Mute();
-    } else {
-      btn.textContent = "Deafen";
-      btn.style.color = "white";
-    }
+  if (isDeafened && !isMuted) {
+    Mute();
+  } else {
+    updateCallControlStates();
   }
 }
 
 let isVideoOn = false;
 function ToggleVideo() {
   isVideoOn = !isVideoOn;
-  const btn = document.querySelector('#activeCallUI button:nth-child(2)');
 
   if (isVideoOn) {
     VideoOn();
-    if (btn) {
-      btn.textContent = "Stop Video";
-      btn.style.color = "red";
-    }
   } else {
     VideoOff();
-    if (btn) {
-      btn.textContent = "Video";
-      btn.style.color = "white";
-    }
   }
+  updateCallControlStates();
 }
 
 let screenShareState = null;
@@ -3874,7 +4321,12 @@ async function collectPeerStats(peerConnection) {
   const summary = {
     bytesSent: 0,
     bytesReceived: 0,
+    packetsReceived: 0,
     packetsLost: 0,
+    jitter: null,
+    framesDropped: 0,
+    framesDecoded: 0,
+    availableOutgoingBitrate: null,
     currentRoundTripTime: null,
     candidatePairState: '',
   };
@@ -3883,15 +4335,227 @@ async function collectPeerStats(peerConnection) {
     if (report.type === 'outbound-rtp') summary.bytesSent += report.bytesSent || 0;
     if (report.type === 'inbound-rtp') {
       summary.bytesReceived += report.bytesReceived || 0;
+      summary.packetsReceived += report.packetsReceived || 0;
       summary.packetsLost += report.packetsLost || 0;
+      if (typeof report.jitter === 'number') {
+        summary.jitter = Math.max(summary.jitter || 0, report.jitter);
+      }
+      summary.framesDropped += report.framesDropped || 0;
+      summary.framesDecoded += report.framesDecoded || 0;
     }
-    if (report.type === 'candidate-pair' && report.selected) {
+    if (
+      report.type === 'candidate-pair' &&
+      (report.selected || (report.nominated && report.state === 'succeeded'))
+    ) {
       summary.currentRoundTripTime = report.currentRoundTripTime ?? null;
       summary.candidatePairState = report.state || '';
+      summary.availableOutgoingBitrate = report.availableOutgoingBitrate ?? null;
     }
   });
 
   return summary;
+}
+
+function getPeerQualityContext(peerName) {
+  if (peerName === 'server-mixed' || peerName === 'server mix') {
+    return 'server';
+  }
+  if (peerName === currentFriend && isPrivateCallActive()) {
+    return 'private';
+  }
+  return currentVoiceServerId || sessionStorage.getItem('UserJoined') ? 'server' : 'private';
+}
+
+function getSeverityRank(severity) {
+  if (severity === 'critical') return 2;
+  if (severity === 'warning') return 1;
+  return 0;
+}
+
+function evaluatePeerQuality(peer) {
+  const messages = [];
+  let severity = 'good';
+  const stats = peer.stats || {};
+  const peerLabel = getPeerDisplayName(peer.user === 'server mix' ? 'server-mixed' : peer.user);
+
+  const mark = (nextSeverity, message) => {
+    if (getSeverityRank(nextSeverity) > getSeverityRank(severity)) {
+      severity = nextSeverity;
+    }
+    messages.push({ severity: nextSeverity, message });
+  };
+
+  if (['failed', 'closed'].includes(peer.connectionState) || ['failed', 'closed'].includes(peer.iceConnectionState)) {
+    mark('critical', `${peerLabel} connection failed. Try leaving and rejoining the call.`);
+  } else if (['disconnected'].includes(peer.connectionState) || ['disconnected'].includes(peer.iceConnectionState)) {
+    mark('critical', `${peerLabel} disconnected. Reconnecting may restore audio.`);
+  } else if (['connecting', 'checking'].includes(peer.connectionState) || ['checking'].includes(peer.iceConnectionState)) {
+    mark('warning', `${peerLabel} is still connecting.`);
+  }
+
+  const rttMs = typeof stats.currentRoundTripTime === 'number'
+    ? Math.round(stats.currentRoundTripTime * 1000)
+    : null;
+  if (rttMs !== null) {
+    if (rttMs >= 800) {
+      mark('critical', `${peerLabel} latency is very high (${rttMs}ms).`);
+    } else if (rttMs >= 400) {
+      mark('warning', `${peerLabel} latency is elevated (${rttMs}ms).`);
+    }
+  }
+
+  const totalPackets = (stats.packetsReceived || 0) + (stats.packetsLost || 0);
+  const packetLossPercent = totalPackets > 0
+    ? Math.round(((stats.packetsLost || 0) / totalPackets) * 100)
+    : 0;
+  if (packetLossPercent >= 12) {
+    mark('critical', `${peerLabel} is dropping ${packetLossPercent}% of incoming packets.`);
+  } else if (packetLossPercent >= 5) {
+    mark('warning', `${peerLabel} is dropping ${packetLossPercent}% of incoming packets.`);
+  }
+
+  const jitterMs = typeof stats.jitter === 'number' ? Math.round(stats.jitter * 1000) : null;
+  if (jitterMs !== null) {
+    if (jitterMs >= 80) {
+      mark('critical', `${peerLabel} audio jitter is very high (${jitterMs}ms).`);
+    } else if (jitterMs >= 40) {
+      mark('warning', `${peerLabel} audio jitter is elevated (${jitterMs}ms).`);
+    }
+  }
+
+  if (
+    peer.connectionState === 'connected' &&
+    stats.bytesReceived === 0 &&
+    stats.packetsReceived === 0
+  ) {
+    mark('warning', `${peerLabel} is connected but no media has arrived yet.`);
+  }
+
+  return {
+    ...peer,
+    context: getPeerQualityContext(peer.user),
+    severity,
+    messages,
+  };
+}
+
+function getWorstQuality(evaluations) {
+  return evaluations.reduce(
+    (worst, item) => getSeverityRank(item.severity) > getSeverityRank(worst) ? item.severity : worst,
+    'good'
+  );
+}
+
+function renderCallQualitySummary(elementId, evaluations, active) {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+
+  if (!active) {
+    element.dataset.quality = 'idle';
+    element.textContent = elementId === 'serverCallQualitySummary' ? 'Not connected' : 'Connecting';
+    return;
+  }
+
+  if (!evaluations.length) {
+    element.dataset.quality = 'warning';
+    element.textContent = 'Connecting';
+    return;
+  }
+
+  const worst = getWorstQuality(evaluations);
+  element.dataset.quality = worst;
+  element.textContent =
+    worst === 'critical'
+      ? 'Connection unstable'
+      : worst === 'warning'
+        ? 'Quality warning'
+        : 'Call quality good';
+}
+
+function renderCallQualityWarnings(containerId, evaluations) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const messages = evaluations.flatMap((evaluation) => evaluation.messages);
+  container.innerHTML = '';
+  container.classList.toggle('has-warnings', messages.length > 0);
+
+  messages.slice(0, 4).forEach((item) => {
+    const warning = document.createElement('div');
+    warning.className = `call-quality-warning ${item.severity === 'critical' ? 'critical' : ''}`.trim();
+    warning.textContent = item.message;
+    container.appendChild(warning);
+  });
+}
+
+async function collectCallQualityEvaluations() {
+  const peerEntries = [...peerConnections.entries()];
+  const peerStats = await Promise.all(peerEntries.map(async ([user, pc]) => ({
+    user,
+    connectionState: pc.connectionState,
+    iceConnectionState: pc.iceConnectionState,
+    signalingState: pc.signalingState,
+    stats: await collectPeerStats(pc),
+  })));
+
+  if (serverPeerConnection) {
+    peerStats.push({
+      user: 'server-mixed',
+      connectionState: serverPeerConnection.connectionState,
+      iceConnectionState: serverPeerConnection.iceConnectionState,
+      signalingState: serverPeerConnection.signalingState,
+      stats: await collectPeerStats(serverPeerConnection),
+    });
+  }
+
+  return peerStats.map(evaluatePeerQuality);
+}
+
+async function updateCallQualityWarnings() {
+  try {
+    const evaluations = await collectCallQualityEvaluations();
+    const privateActive = isPrivateCallActive();
+    const serverActive = Boolean(currentVoiceServerId || sessionStorage.getItem('UserJoined') || serverPeerConnection);
+    const privateEvaluations = evaluations.filter((item) => item.context === 'private');
+    const serverEvaluations = evaluations.filter((item) => item.context === 'server');
+
+    renderCallQualitySummary('privateCallQualitySummary', privateEvaluations, privateActive);
+    renderCallQualityWarnings('privateCallQualityWarnings', privateActive ? privateEvaluations : []);
+    renderCallQualitySummary('serverCallQualitySummary', serverEvaluations, serverActive);
+    renderCallQualityWarnings('serverCallQualityWarnings', serverActive ? serverEvaluations : []);
+  } catch (error) {
+    console.warn('Could not update call quality warnings:', error);
+  }
+}
+
+function hasActiveCallQualityTarget() {
+  return Boolean(
+    isPrivateCallActive() ||
+    currentVoiceServerId ||
+    sessionStorage.getItem('UserJoined') ||
+    peerConnections.size ||
+    serverPeerConnection
+  );
+}
+
+function startCallQualityMonitor() {
+  window.clearInterval(callQualityMonitorTimer);
+  updateCallQualityWarnings();
+  callQualityMonitorTimer = window.setInterval(updateCallQualityWarnings, CALL_QUALITY_REFRESH_MS);
+}
+
+function refreshCallQualityMonitorState() {
+  if (hasActiveCallQualityTarget()) {
+    startCallQualityMonitor();
+    return;
+  }
+
+  window.clearInterval(callQualityMonitorTimer);
+  callQualityMonitorTimer = null;
+  renderCallQualitySummary('privateCallQualitySummary', [], false);
+  renderCallQualityWarnings('privateCallQualityWarnings', []);
+  renderCallQualitySummary('serverCallQualitySummary', [], false);
+  renderCallQualityWarnings('serverCallQualityWarnings', []);
 }
 
 async function buildCallDiagnostics() {
@@ -4559,6 +5223,10 @@ async function startPrivateCall() {
 
   if (preCallUI) preCallUI.style.display = 'none';
   if (activeCallUI) activeCallUI.style.display = 'block';
+  clearCallVolumeControls('private');
+  isVideoOn = false;
+  startCallQualityMonitor();
+  updateCallControlStates();
 
   const activeCallUsername = document.getElementById('activeCallUsername');
   const centerCallUser = document.getElementById('centerCallUser');
@@ -4643,15 +5311,8 @@ async function createPeerConnection(peerName) {
   pc.ontrack = (event) => {
     console.log(`Received track from ${peerName}: Kind=${event.track.kind}, ID=${event.track.id}`);
 
-    let remoteAudio = document.getElementById(`remote_${peerName}`);
-    if (!remoteAudio) {
-      remoteAudio = document.createElement('audio');
-      remoteAudio.id = `remote_${peerName}`;
-      remoteAudio.autoplay = true;
-      remoteAudio.controls = false;
-      document.body.appendChild(remoteAudio);
-    }
     if (event.track.kind === 'audio') {
+      const remoteAudio = createRemoteAudioElement(peerName, event.streams[0], 'private');
       remoteAudio.srcObject = event.streams[0];
     }
 
@@ -4661,6 +5322,9 @@ async function createPeerConnection(peerName) {
       const remoteVideo = document.getElementById('remoteVideo');
       if (remoteVideo) {
         remoteVideo.srcObject = event.streams[0];
+        registerRemoteMediaElement(peerName, remoteVideo, 'private');
+        ensurePeerVolumeControl(peerName, remoteVideo, 'private');
+        updateRemoteMediaStatus(peerName, event.streams[0]);
         remoteVideo.play().catch(e => console.error("Remote video play failed:", e));
         console.log("Attached remote video stream to DOM");
       } else {
@@ -4671,6 +5335,7 @@ async function createPeerConnection(peerName) {
 
   pc.onconnectionstatechange = () => {
     console.log(`Connection state with ${peerName}: ${pc.connectionState}`);
+    updateCallQualityWarnings();
     if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
       removePeerUI(peerName);
       pc.close();
@@ -4788,6 +5453,10 @@ async function AcceptCall() {
 
   if (preCallUI) preCallUI.style.display = 'none';
   if (activeCallUI) activeCallUI.style.display = 'block';
+  clearCallVolumeControls('private');
+  isVideoOn = pendingIsVideo;
+  startCallQualityMonitor();
+  updateCallControlStates();
 
   const activeCallUsername = document.getElementById('activeCallUsername');
   const centerCallUser = document.getElementById('centerCallUser');
@@ -4843,6 +5512,8 @@ async function handlePeerAnswer(peerName, answerData) {
 
     const centerCallUser = document.getElementById('centerCallUser');
     if (centerCallUser) centerCallUser.textContent = `${JWTusername} & ${peerName}`;
+    startCallQualityMonitor();
+    updateCallControlStates();
 
 
     try {
@@ -4907,13 +5578,26 @@ async function endPrivateCall(notifyPeer = true) {
       peerConnections.delete(currentFriend);
       removePeerUI(currentFriend);
     }
+    clearCallVolumeControls('private');
+    stopVoiceActivityContext('private');
+    const privateRemoteVideo = document.getElementById('remoteVideo');
+    if (privateRemoteVideo) {
+      privateRemoteVideo.srcObject = null;
+      delete privateRemoteVideo.dataset.remoteMedia;
+      delete privateRemoteVideo.dataset.peerName;
+      delete privateRemoteVideo.dataset.peerVolumeId;
+    }
 
     if (peerConnections.size === 0 && localStream) {
       cleanupVoiceProcessing({ restoreRaw: false });
       localStream.getTracks().forEach(t => t.stop());
       localStream = null;
+      stopVoiceActivityMonitor('local', 'local');
       if (localVideo) localVideo.srcObject = null;
     }
+    isVideoOn = false;
+    updateCallControlStates();
+    refreshCallQualityMonitorState();
 
   } catch (err) {
     console.error("Error ending private call:", err);
@@ -5066,6 +5750,10 @@ async function startPrivateVideoCall() {
 
   if (preCallUI) preCallUI.style.display = 'none';
   if (activeCallUI) activeCallUI.style.display = 'block';
+  clearCallVolumeControls('private');
+  isVideoOn = true;
+  startCallQualityMonitor();
+  updateCallControlStates();
 
   const activeCallUsername = document.getElementById('activeCallUsername');
   const centerCallUser = document.getElementById('centerCallUser');
@@ -6420,7 +7108,10 @@ function applySaturationLevel(saturation) {
 function applyOutputVolume(volume) {
   const normalizedVolume = normalizeSettingsNumber(volume, 100, 0, 100) / 100;
   document.querySelectorAll('audio, video').forEach((mediaElement) => {
-    if (!mediaElement.muted) {
+    if (mediaElement.dataset.remoteMedia === 'true') {
+      const peerName = mediaElement.dataset.peerName || mediaElement.dataset.peerVolumeId;
+      mediaElement.volume = Math.max(0, Math.min(1, normalizedVolume * (getPeerVolume(peerName) / 100)));
+    } else if (!mediaElement.muted) {
       mediaElement.volume = normalizedVolume;
     }
   });
@@ -6655,6 +7346,7 @@ function handleSelectStateChange(select, index) {
     cleanupVoiceProcessing({ restoreRaw: false });
     localStream.getTracks().forEach((track) => track.stop());
     localStream = null;
+    stopVoiceActivityMonitor('local', 'local');
     ensureLocalStream(true, Boolean(getLocalPreviewVideo()?.srcObject?.getVideoTracks?.().length))
       .catch((error) => showAppMessage(getApiErrorMessage(error, 'Could not switch input device.'), 'error'));
   }
