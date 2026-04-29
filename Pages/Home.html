@@ -5,15 +5,15 @@
   <meta charset="UTF-8" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../CSS/Home.css?v=9" />
+  <link rel="stylesheet" href="../CSS/Home.css?v=10" />
   <script src="../JS/AppPaths.js?v=1"></script>
   <script src="../JS/emojis.js?v=2"></script>
-  <script src="../JS/Home.js?v=118" defer></script>
+  <script src="../JS/Home.js?v=120" defer></script>
 </head>
 
 <body>
   <div id="audioPermBanner"
-    style="display:none; position:fixed; top:0; left:0; width:100%; height: 50px; background: #f04747; color: white; text-align: center; line-height: 50px; font-weight: bold; z-index: 99999; cursor: pointer; border-bottom: 2px solid #8e2020;">
+    class="extracted-inline-1">
     🎵 Sound Blocked! Click anywhere on this screen to enable ringtone. 🎵
   </div>
   <div class="outerModalMessage">
@@ -22,7 +22,7 @@
     </div>
   </div>
 
-  <div id="profilePopout" class="profile-popout" style="display: none;">
+  <div id="profilePopout" class="profile-popout extracted-inline-2">
     <div class="profile-popout-header" id="popoutHeaderColor">
       <img id="popoutAvatar" class="profile-popout-avatar" src="../assets/img/titlePic.png" alt="User Avatar" />
     </div>
@@ -36,13 +36,13 @@
 
   <div class="sections">
     <div class="allservers">
-      <svg class="servers" id="home" onclick="clearContent()" viewBox="0 0 127.14 96.36" fill="currentColor"
-        style="padding: 12px;">
+      <svg class="servers extracted-inline-3" id="home" onclick="clearContent()" viewBox="0 0 127.14 96.36" fill="currentColor"
+       >
         <path
           d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.31,60,73.31,53s5-12.74,11.43-12.74S96.2,46,96.12,53,91.08,65.69,84.69,65.69Z" />
       </svg>
-      <svg class="servers" id="openModalBtn" onclick="openModal()" viewBox="0 0 24 24" fill="currentColor"
-        style="color: #23a559;">
+      <svg class="servers extracted-inline-4" id="openModalBtn" onclick="openModal()" viewBox="0 0 24 24" fill="currentColor"
+       >
         <path fill-rule="evenodd" clip-rule="evenodd"
           d="M13 5a1 1 0 1 0-2 0v6H5a1 1 0 1 0 0 2h6v6a1 1 0 1 0 2 0v-6h6a1 1 0 1 0 0-2h-6V5Z" />
       </svg>
@@ -53,7 +53,7 @@
       </form>
       <div class="positionSecond">
         <div class="friendsDiv">
-          <svg class="topImages" viewBox="0 0 24 24" fill="currentColor" style="padding: 2px;">
+          <svg class="topImages extracted-inline-5" viewBox="0 0 24 24" fill="currentColor">
             <path
               d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
           </svg>
@@ -84,7 +84,7 @@
         <p class="addFriend" onclick="showAddFriends()">Add Friend</p>
         <button onclick="LogOut()" class="logOut">Log Out</button>
       </div>
-      <div class="pendingRequestsDiv" style="display: none">
+      <div class="pendingRequestsDiv extracted-inline-6">
         <p class="addFriendHeader">PENDING REQUESTS</p>
         <div class="pendingList"></div>
       </div>
@@ -118,7 +118,7 @@
 
       <div class="privateMessage">
         <div id="preCallUI">
-          <div style="display: flex; flex-direction: row; align-items: center;">
+          <div class="extracted-inline-7">
             <h2 class="messageUser"></h2>
 
           </div>
@@ -132,42 +132,36 @@
           </div>
         </div>
 
-        <div id="activeCallUI" style="display: none; background-color: #000000;">
-          <div style="
-                display: flex;
-                flex-direction: row;
-              justify-content: space-between;
-              ">
-            <div style="
-                  display: flex;
-                  flex-direction: row;
-                ">
-              <h2 class="messageUser" id="activeCallUsername" style="color: white;"></h2>
+        <div id="activeCallUI" class="extracted-inline-8">
+          <div class="extracted-inline-9">
+            <div class="extracted-inline-10">
+              <h2 class="messageUser extracted-inline-11" id="activeCallUsername"></h2>
             </div>
 
           </div>
           <div>
-            <h2 id="centerCallUser" style="text-align: center; color: white; margin-top: 10px; font-size: 2em;"></h2>
+            <h2 id="centerCallUser" class="extracted-inline-12"></h2>
 
             <div id="videoContainer"
-              style="position: relative; display: flex; flex-direction: row; justify-content: center; align-items: center; height: 60vh; width: 100%;">
+              class="extracted-inline-13">
               <video id="remoteVideo" autoplay playsinline
-                style="width: 48%; height: 100%; background: black; margin: 5px; object-fit: cover;"></video>
+                class="extracted-inline-14"></video>
               <video id="localVideo" autoplay playsinline muted
-                style="width: 48%; height: 100%; background: #222; margin: 5px; object-fit: cover;"></video>
+                class="extracted-inline-15"></video>
 
             </div>
 
             <div
-              style="display: flex; flex-direction: row; justify-content: center; margin-top: 20px; padding-bottom: 20px;">
+              class="extracted-inline-16">
               <button class="call-control-btn" onclick="Mute()">Mute/Unmute</button>
               <button class="call-control-btn" onclick="ToggleVideo()">Video</button>
-              <button class="call-control-btn" onclick="ShareScreen()">Share Screen</button>
+              <button class="call-control-btn" data-action="screen-share" onclick="ShareScreen()">Share Screen</button>
+              <button class="call-control-btn screen-swap-btn" onclick="SwapScreenShare()">Swap Share</button>
               <button class="call-control-btn danger" onclick="endPrivateCall()">End Call</button>
             </div>
           </div>
         </div>
-        <div id="searchResultsSidebar" class="search-sidebar" style="display: none;">
+        <div id="searchResultsSidebar" class="search-sidebar extracted-inline-2">
           <div class="search-sidebar-header">
             <span id="searchResultCount">0 Results</span>
             <div class="search-header-buttons">
@@ -188,7 +182,7 @@
               <div class="plus-icon">+</div>
             </button>
             <input type="text" name="friendMessagesData" class="chatInput" placeholder="Message" autocomplete="off" />
-            <div id="emojiPicker" class="emoji-picker" style="display: none;">
+            <div id="emojiPicker" class="emoji-picker extracted-inline-2">
               <div class="emoji-picker-header">
                 <div class="emoji-tabs">
                   <div class="emoji-tab active" data-tab="emoji">Emoji</div>
@@ -226,14 +220,14 @@
               <button type="button" class="chat-icon-btn" onclick="toggleEmojiPicker()">😊</button>
             </div>
 
-            <button type="submit" style="display: none;"></button>
+            <button type="submit" class="extracted-inline-2"></button>
           </div>
         </form>
       </div>
 
 
 
-      <div class="friendsMainView" style="display: none;">
+      <div class="friendsMainView extracted-inline-2">
         <form action="" class="friendsSearchForm">
           <input type="text" placeholder="Search" class="friendsSearchInput" />
         </form>
@@ -251,25 +245,22 @@
       <div class="CurrentServerMenu">
         <h1 class="currentServerName"></h1>
 
-        <div id="channelsList" style="overflow-y: auto; flex-grow: 1"></div>
+        <div id="channelsList" class="extracted-inline-17"></div>
 
-        <div class="account" style="
-              margin-top: 10px;
-              padding-top: 10px;
-              border-top: 1px solid #202225;
-            ">
-          <p id="inServerUsername" style="margin-bottom: 5px">USERNAME</p>
-          <div style="display: flex; gap: 5px; flex-wrap: wrap">
+        <div class="account extracted-inline-18">
+          <p id="inServerUsername" class="extracted-inline-19">USERNAME</p>
+          <div class="extracted-inline-20">
             <button class="call-control-btn" onclick="VideoOn()">Video On</button>
             <button class="call-control-btn" onclick="VideoOff()">Video Off</button>
             <button class="call-control-btn" onclick="Mute()">Mute</button>
             <button class="call-control-btn" onclick="Deafen()">Deafen</button>
-            <button class="call-control-btn" onclick="ShareScreen()">Share Screen</button>
+            <button class="call-control-btn" data-action="screen-share" onclick="ShareScreen()">Share Screen</button>
+            <button class="call-control-btn screen-swap-btn" onclick="SwapScreenShare()">Swap Share</button>
             <button class="call-control-btn danger" onclick="LeaveCall()">Leave</button>
           </div>
         </div>
 
-        <button onclick="getInviteLink(selectedServerID)" class="inviteBtn" style="margin-top: 10px">
+        <button onclick="getInviteLink(selectedServerID)" class="inviteBtn extracted-inline-21">
           📎 Invite
         </button>
       </div>
@@ -314,7 +305,7 @@
       </div>
     </div>
   </div>
-  <div class="outerJoinModal" style="display: none">
+  <div class="outerJoinModal extracted-inline-6">
     <div class="innerJoinModal">
       <p class="closeJoin" onclick="closeJoinModal()">x</p>
       <h2 class="joinServerHead">Join a Server</h2>
@@ -364,32 +355,32 @@
   </div>
 
 
-  <div id="incomingCallModal" class="outerModal" style="display: none; z-index: 1000;">
-    <div class="innerModal" style="height: auto; text-align: center; padding: 20px;">
-      <h2 style="color: white; margin-bottom: 10px;">Incoming Call</h2>
-      <p id="incomingCallUser" style="color: #b9bbbe; font-size: 1.2em; margin-bottom: 20px;"></p>
-      <div style="display: flex; justify-content: center; gap: 20px;">
+  <div id="incomingCallModal" class="outerModal extracted-inline-22">
+    <div class="innerModal extracted-inline-23">
+      <h2 class="extracted-inline-24">Incoming Call</h2>
+      <p id="incomingCallUser" class="extracted-inline-25"></p>
+      <div class="extracted-inline-26">
         <button onclick="AcceptCall()"
-          style="background-color: #3ba55c; padding: 10px 30px; color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold;">Accept</button>
+          class="extracted-inline-27">Accept</button>
         <button onclick="DeclineCall()"
-          style="background-color: #ed4245; padding: 10px 30px; color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold;">Decline</button>
+          class="extracted-inline-28">Decline</button>
       </div>
     </div>
   </div>
 
-  <div id="createDMModal" class="outerModal" style="display: none;">
-    <div class="innerModal" style="width: 440px; height: auto;">
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px;">
-        <h2 style="color: white; font-size: 20px; font-weight: bold;">Select Friends</h2>
-        <p onclick="closeCreateDMModal()" style="color: #b9bbbe; cursor: pointer; font-size: 20px;">x</p>
+  <div id="createDMModal" class="outerModal extracted-inline-2">
+    <div class="innerModal extracted-inline-29">
+      <div class="extracted-inline-30">
+        <h2 class="extracted-inline-31">Select Friends</h2>
+        <p onclick="closeCreateDMModal()" class="extracted-inline-32">x</p>
       </div>
-      <div style="padding: 0 16px 16px 16px;">
-        <p style="color: #b9bbbe; font-size: 12px; margin-bottom: 15px; text-transform: uppercase;">Friends</p>
-        <div id="dmFriendsList" style="max-height: 200px; overflow-y: auto;">
+      <div class="extracted-inline-33">
+        <p class="extracted-inline-34">Friends</p>
+        <div id="dmFriendsList" class="extracted-inline-35">
 
         </div>
         <button onclick="CreateDM()"
-          style="width: 100%; background-color: #5865f2; color: white; padding: 10px; border: none; border-radius: 3px; cursor: pointer; margin-top: 15px;">Create
+          class="extracted-inline-36">Create
           DM</button>
       </div>
     </div>
@@ -399,9 +390,9 @@
   <script src="../node_modules/@microsoft/signalr/dist/browser/signalr.min.js"></script>
   <script src="../JS/Auth.js?v=3"></script>
 
-  <div id="uploadModal" class="outerModal" style="display: none;">
-    <div class="innerModal" style="width: 440px; text-align: center;">
-      <h2 style="color: white; margin-bottom: 20px;">Upload a File</h2>
+  <div id="uploadModal" class="outerModal extracted-inline-2">
+    <div class="innerModal extracted-inline-37">
+      <h2 class="extracted-inline-38">Upload a File</h2>
       <div id="uploadDropZone" class="upload-drop-zone">
         <div class="upload-icon-container">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -413,22 +404,22 @@
         <p class="upload-text">Upload a file</p>
         <p class="upload-subtext">or drag and drop</p>
       </div>
-      <input type="file" id="modalFileInput" style="display: none;" accept="image/*">
+      <input type="file" id="modalFileInput" accept="image/*" class="extracted-inline-2">
 
-      <div id="uploadPreview" style="display: none; margin-top: 15px;">
-        <p id="uploadFileName" style="color: #dcddde; font-size: 14px; margin-bottom: 10px;"></p>
-        <img id="uploadImagePreview" style="max-width: 100%; max-height: 200px; border-radius: 5px; display: none;">
+      <div id="uploadPreview" class="extracted-inline-39">
+        <p id="uploadFileName" class="extracted-inline-40"></p>
+        <img id="uploadImagePreview" class="extracted-inline-41">
       </div>
 
-      <div class="modal-buttons" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
-        <button onclick="closeUploadModal()" class="cancel-btn"
-          style="background: transparent; color: white; border: none; cursor: pointer; padding: 10px 20px;">Cancel</button>
-        <button onclick="submitUploadModal()" class="upload-btn"
-          style="background: #5865F2; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer;">Upload</button>
+      <div class="modal-buttons extracted-inline-42">
+        <button onclick="closeUploadModal()" class="cancel-btn extracted-inline-43"
+         >Cancel</button>
+        <button onclick="submitUploadModal()" class="upload-btn extracted-inline-44"
+         >Upload</button>
       </div>
     </div>
   </div>
-  <div id="settingsModal" class="outerModal" style="display: none;">
+  <div id="settingsModal" class="outerModal extracted-inline-2">
     <div class="settings-container">
       <div class="settings-sidebar custom-scroll">
         <div class="settings-sidebar-header">
@@ -522,17 +513,23 @@
                 <div class="detail-info">
                   <label>Email</label>
                   <div class="detail-value" id="settingsEmailValue">Not added</div>
+                  <div class="verification-status" id="settingsEmailVerificationStatus">Unverified</div>
                 </div>
-                <button class="edit-detail-btn" id="editContactInfoBtn">Edit</button>
+                <div class="detail-actions">
+                  <button class="edit-detail-btn" id="requestEmailVerificationBtn">Verify</button>
+                  <button class="edit-detail-btn" id="editContactInfoBtn">Edit</button>
+                </div>
               </div>
 
-              <div class="account-detail-row">
+              <div class="account-detail-row" id="phoneVerificationRow" style="display: none;">
                 <div class="detail-info">
                   <label>Phone Number</label>
                   <div class="detail-value" id="settingsPhoneValue">Not added</div>
+                  <div class="verification-status" id="settingsPhoneVerificationStatus">Unverified</div>
                 </div>
                 <div class="detail-actions">
                   <span class="remove-link" id="removePhoneNumberBtn">Remove</span>
+                  <button class="edit-detail-btn" id="requestPhoneVerificationBtn">Verify</button>
                   <button class="edit-detail-btn" id="editContactInfoBtnSecondary">Edit</button>
                 </div>
               </div>
@@ -554,6 +551,24 @@
 
           <h3 class="settings-section-header">Password and Authentication</h3>
           <button class="change-password-btn">Change Password</button>
+          <div class="security-action-panel">
+            <div class="security-action-copy">
+              <div class="security-action-title">Email Verification</div>
+              <div class="verification-status" id="emailVerificationPrimaryStatus">Unverified</div>
+            </div>
+            <button class="settings-btn-primary button-auto-width" id="primaryEmailVerificationBtn">Verify Email</button>
+          </div>
+          <div class="security-action-panel">
+            <div class="security-action-copy">
+              <div class="security-action-title">Authenticator App</div>
+              <div class="verification-status" id="twoFactorStatusText">Disabled</div>
+            </div>
+            <div class="security-action-buttons">
+              <button class="settings-btn-primary button-auto-width" id="enableTwoFactorBtn">Enable</button>
+              <button class="settings-btn-danger button-auto-width" id="disableTwoFactorBtn">Disable</button>
+              <button class="settings-btn-primary button-auto-width" id="regenerateBackupCodesBtn">Backup Codes</button>
+            </div>
+          </div>
 
           <div class="settings-separator"></div>
 
@@ -566,7 +581,7 @@
           </div>
         </div>
 
-        <div id="view-profiles" class="settings-view" style="display: none;">
+        <div id="view-profiles" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Profiles</h2>
 
           <div class="settings-tab-bar" data-settings-tab-bar="profileView">
@@ -596,31 +611,31 @@
           <div class="form-group">
             <label class="form-label">Profile Picture</label>
             <p class="form-desc">Upload an avatar or provide a direct image URL.</p>
-            <input type="text" id="profilePictureUrlInput" class="textInput"
-              style="width: 100%; margin: 0; margin-top: 10px;" placeholder="https://..." />
-            <input type="file" id="profileAvatarFileInput" accept="image/*" style="display: none;" />
-            <button type="button" id="uploadProfileAvatarBtn" class="settings-btn-primary"
-              style="margin-top: 10px; width: auto;">Upload Avatar</button>
+            <input type="text" id="profilePictureUrlInput" class="textInput extracted-inline-45"
+              placeholder="https://..." />
+            <input type="file" id="profileAvatarFileInput" accept="image/*" / class="extracted-inline-2">
+            <button type="button" id="uploadProfileAvatarBtn" class="settings-btn-primary extracted-inline-46"
+             >Upload Avatar</button>
           </div>
 
-          <div class="form-group" style="margin-top: 20px;">
+          <div class="form-group extracted-inline-47">
             <label class="form-label">Profile Banner</label>
             <p class="form-desc">Upload a banner image, or leave it blank and use a color.</p>
-            <input type="text" id="profileBannerUrlInput" class="textInput"
-              style="width: 100%; margin: 0; margin-top: 10px;" placeholder="https://..." />
-            <input type="file" id="profileBannerFileInput" accept="image/*" style="display: none;" />
-            <button type="button" id="uploadProfileBannerBtn" class="settings-btn-primary"
-              style="margin-top: 10px; width: auto;">Upload Banner</button>
+            <input type="text" id="profileBannerUrlInput" class="textInput extracted-inline-45"
+              placeholder="https://..." />
+            <input type="file" id="profileBannerFileInput" accept="image/*" / class="extracted-inline-2">
+            <button type="button" id="uploadProfileBannerBtn" class="settings-btn-primary extracted-inline-46"
+             >Upload Banner</button>
           </div>
 
-          <div class="form-group" style="margin-top: 20px;">
+          <div class="form-group extracted-inline-47">
             <label class="form-label">About Me</label>
             <p class="form-desc">Write a little about yourself.</p>
             <textarea id="profileDescriptionInput" class="settings-textarea" placeholder="Hello, World!"></textarea>
           </div>
 
-          <button id="saveProfileSettingsBtn" class="settings-btn-primary"
-            style="margin-top: 20px; padding: 10px 20px;">Save Profile</button>
+          <button id="saveProfileSettingsBtn" class="settings-btn-primary extracted-inline-48"
+           >Save Profile</button>
 
           <div class="settings-separator"></div>
 
@@ -633,15 +648,15 @@
           </div>
           </div>
 
-          <div class="settings-tab-panel" data-tab-panel="server-profiles" style="display: none;">
-            <div class="empty-state-card" style="padding: 20px; border: 1px dashed #4f545c; background: transparent;">
-              <div class="empty-icon" style="font-size: 24px; margin-bottom: 10px;">SVR</div>
+          <div class="settings-tab-panel extracted-inline-2" data-tab-panel="server-profiles">
+            <div class="empty-state-card extracted-inline-49">
+              <div class="empty-icon extracted-inline-50">SVR</div>
               <p>Open a server to manage server-specific profile settings here.</p>
             </div>
           </div>
         </div>
 
-        <div id="view-privacy" class="settings-view" style="display: none;">
+        <div id="view-privacy" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Privacy & Safety</h2>
 
           <div class="privacy-card">
@@ -741,7 +756,7 @@
           </div>
         </div>
 
-        <div id="view-family" class="settings-view" style="display: none;">
+        <div id="view-family" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Family Center</h2>
           <div class="empty-state-card">
             <div class="empty-icon">👪</div>
@@ -752,9 +767,9 @@
           </div>
         </div>
 
-        <div id="view-authorized-apps" class="settings-view" style="display: none;">
+        <div id="view-authorized-apps" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Authorized Apps</h2>
-          <p class="form-desc" style="margin-bottom: 20px;">Apps you've authorized to access your account.</p>
+          <p class="form-desc extracted-inline-51">Apps you've authorized to access your account.</p>
 
           <div class="apps-card">
             <div class="app-item">
@@ -774,9 +789,9 @@
           </div>
         </div>
 
-        <div id="view-devices" class="settings-view" style="display: none;">
+        <div id="view-devices" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Devices</h2>
-          <p class="form-desc" style="margin-bottom: 20px;">Here are all the devices that are currently logged in with
+          <p class="form-desc extracted-inline-51">Here are all the devices that are currently logged in with
             your account.</p>
 
           <div class="devices-card">
@@ -803,19 +818,19 @@
           </div>
         </div>
 
-        <div id="view-connections" class="settings-view" style="display: none;">
+        <div id="view-connections" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Connections</h2>
-          <p class="form-desc" style="margin-bottom: 20px;">Connect your accounts to unlock special Discord
+          <p class="form-desc extracted-inline-51">Connect your accounts to unlock special Discord
             integrations.</p>
 
           <div class="connections-card">
             <div class="connections-grid">
-              <div class="connection-icon" style="background-color: #1ed760;">sp</div>
-              <div class="connection-icon" style="background-color: #0078d4;">xb</div>
-              <div class="connection-icon" style="background-color: #003791;">ps</div>
-              <div class="connection-icon" style="background-color: #6441a5;">tw</div>
-              <div class="connection-icon" style="background-color: #ff4500;">rd</div>
-              <div class="connection-icon" style="background-color: #333;">gh</div>
+              <div class="connection-icon extracted-inline-52">sp</div>
+              <div class="connection-icon extracted-inline-53">xb</div>
+              <div class="connection-icon extracted-inline-54">ps</div>
+              <div class="connection-icon extracted-inline-55">tw</div>
+              <div class="connection-icon extracted-inline-56">rd</div>
+              <div class="connection-icon extracted-inline-57">gh</div>
             </div>
           </div>
 
@@ -828,7 +843,7 @@
           </div>
         </div>
 
-        <div id="view-clips" class="settings-view" style="display: none;">
+        <div id="view-clips" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Clips</h2>
 
           <div class="clips-card">
@@ -849,11 +864,11 @@
           </div>
         </div>
 
-        <div id="view-appearance" class="settings-view" style="display: none;">
+        <div id="view-appearance" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Appearance</h2>
 
           <h3 class="settings-section-header">Theme</h3>
-          <div class="radio-group" data-settings-radio="themeMode" style="margin-bottom: 20px;">
+          <div class="radio-group extracted-inline-51" data-settings-radio="themeMode">
             <div class="radio-item active" data-setting-value="dark">
               <div class="radio-content">
                 <div class="radio-title">Dark</div>
@@ -877,31 +892,31 @@
           <div class="settings-separator"></div>
 
           <h3 class="settings-section-header">Custom Theme Colors</h3>
-          <p class="form-desc" style="margin-bottom: 20px;">Personalize your Discord experience with custom colors.
+          <p class="form-desc extracted-inline-51">Personalize your Discord experience with custom colors.
             These override the default themes above.</p>
 
-          <div class="form-group" style="display: flex; gap: 20px; align-items: center;">
-            <div style="display: flex; flex-direction: column;">
+          <div class="form-group extracted-inline-58">
+            <div class="extracted-inline-59">
               <label class="form-label" for="customBgColor">Background Color</label>
               <input type="color" id="customBgColor" value="#313338"
-                style="width: 60px; height: 40px; cursor: pointer; border: none; outline: none; background: none; padding: 0;">
+                class="extracted-inline-60">
             </div>
-            <div style="display: flex; flex-direction: column;">
+            <div class="extracted-inline-59">
               <label class="form-label" for="customTextColor">Text Color</label>
               <input type="color" id="customTextColor" value="#dbdee1"
-                style="width: 60px; height: 40px; cursor: pointer; border: none; outline: none; background: none; padding: 0;">
+                class="extracted-inline-60">
             </div>
-            <button id="saveCustomThemeBtn" class="settings-btn-primary"
-              style="margin-top: 15px; padding: 8px 16px;">Save Theme</button>
-            <button id="resetCustomThemeBtn" class="settings-btn-danger"
-              style="margin-top: 15px; padding: 8px 16px;">Reset to Default</button>
+            <button id="saveCustomThemeBtn" class="settings-btn-primary extracted-inline-61"
+             >Save Theme</button>
+            <button id="resetCustomThemeBtn" class="settings-btn-danger extracted-inline-61"
+             >Reset to Default</button>
           </div>
 
           <div class="settings-separator"></div>
 
           <h3 class="settings-section-header">Message Display</h3>
           <div class="radio-group" data-settings-radio="messageDisplay">
-            <div class="radio-item active" data-setting-value="cozy" style="margin-bottom: 10px;">
+            <div class="radio-item active extracted-inline-62" data-setting-value="cozy">
               <div class="radio-content">
                 <div class="radio-title">Cozy</div>
                 <div class="radio-desc">Modern, beautiful, and easy on your eyes.</div>
@@ -920,10 +935,10 @@
           <div class="settings-separator"></div>
 
           <h3 class="settings-section-header">Chat Font Scaling</h3>
-          <div class="slider-container" style="padding: 10px 0;">
+          <div class="slider-container extracted-inline-63">
             <input type="range" min="12" max="24" value="16" class="settings-slider" id="fontScalingSlider">
             <div
-              style="display: flex; justify-content: space-between; margin-top: 5px; color: #b9bbbe; font-size: 12px;">
+              class="extracted-inline-64">
               <span>12px</span>
               <span>16px</span>
               <span>20px</span>
@@ -931,11 +946,11 @@
             </div>
           </div>
 
-          <h3 class="settings-section-header" style="margin-top: 20px;">Zoom Level</h3>
-          <div class="slider-container" style="padding: 10px 0;">
+          <h3 class="settings-section-header extracted-inline-47">Zoom Level</h3>
+          <div class="slider-container extracted-inline-63">
             <input type="range" min="50" max="150" value="100" class="settings-slider" id="zoomLevelSlider">
             <div
-              style="display: flex; justify-content: space-between; margin-top: 5px; color: #b9bbbe; font-size: 12px;">
+              class="extracted-inline-64">
               <span>50%</span>
               <span>100%</span>
               <span>150%</span>
@@ -943,15 +958,15 @@
           </div>
         </div>
 
-        <div id="view-accessibility" class="settings-view" style="display: none;">
+        <div id="view-accessibility" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Accessibility</h2>
 
           <h3 class="settings-section-header">Saturation</h3>
           <p class="form-desc">Adjust the saturation of colors in the application.</p>
-          <div class="slider-container" style="padding: 10px 0 20px 0;">
+          <div class="slider-container extracted-inline-65">
             <input type="range" min="0" max="100" value="100" class="settings-slider" id="saturationSlider">
             <div
-              style="display: flex; justify-content: space-between; margin-top: 5px; color: #b9bbbe; font-size: 12px;">
+              class="extracted-inline-64">
               <span>0%</span>
               <span>100%</span>
             </div>
@@ -976,7 +991,7 @@
             <div class="toggle-switch active"></div>
           </div>
 
-          <div class="toggle-item" style="margin-top: 20px;">
+          <div class="toggle-item extracted-inline-47">
             <div class="toggle-info">
               <div class="toggle-label">Play animated emoji</div>
             </div>
@@ -994,7 +1009,7 @@
           </div>
         </div>
 
-        <div id="view-voice-video" class="settings-view" style="display: none;">
+        <div id="view-voice-video" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Voice & Video</h2>
 
           <h3 class="settings-section-header">Voice Settings</h3>
@@ -1033,26 +1048,34 @@
 
           <h3 class="settings-section-header">Mic Test</h3>
           <p class="form-desc">Having trouble with your microphone? Check if we can hear you.</p>
-          <button class="settings-btn-primary" id="settingsMicTestBtn" style="width: auto;">Let's Check</button>
-          <p class="form-desc" id="settingsMicTestStatus" style="margin-top: 10px;"></p>
+          <button class="settings-btn-primary extracted-inline-66" id="settingsMicTestBtn">Let's Check</button>
+          <p class="form-desc extracted-inline-67" id="settingsMicTestStatus"></p>
 
           <div class="settings-separator"></div>
 
           <h3 class="settings-section-header">Input Mode</h3>
-          <div class="radio-group">
-            <div class="radio-item active">
+          <div class="radio-group" data-settings-radio="inputMode">
+            <div class="radio-item active" data-setting-value="voice-activity">
               <div class="radio-content">
                 <div class="radio-title">Voice Activity</div>
               </div>
               <div class="radio-circle selected"></div>
             </div>
-            <div class="radio-item">
+            <div class="radio-item" data-setting-value="push-to-talk">
               <div class="radio-content">
                 <div class="radio-title">Push to Talk</div>
               </div>
               <div class="radio-circle"></div>
             </div>
           </div>
+
+          <p class="form-desc" id="pushToTalkStatus">Push-to-talk applies only while you are in an active voice or video call.</p>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Call Diagnostics</h3>
+          <button class="settings-btn-primary button-auto-width" id="runCallDiagnosticsBtn">Run Diagnostics</button>
+          <div class="call-diagnostics-panel" id="callDiagnosticsPanel"></div>
 
           <div class="settings-separator"></div>
 
@@ -1065,7 +1088,7 @@
             <div class="toggle-switch"></div>
           </div>
 
-          <div class="form-group" style="margin-top: 20px;">
+          <div class="form-group extracted-inline-47">
             <label class="form-label" for="voiceChangerPresetSelect">Preset</label>
             <select class="settings-select" id="voiceChangerPresetSelect" data-settings-select="voiceChangerPreset">
               <option value="normal">Normal</option>
@@ -1114,11 +1137,11 @@
             <div class="toggle-switch active"></div>
           </div>
 
-          <button class="settings-btn-primary" id="voicePreviewBtn" style="width: auto; margin-top: 12px;">Test Voice</button>
-          <p class="form-desc" id="voicePreviewStatus" style="margin-top: 10px;"></p>
+          <button class="settings-btn-primary extracted-inline-68" id="voicePreviewBtn">Test Voice</button>
+          <p class="form-desc extracted-inline-67" id="voicePreviewStatus"></p>
         </div>
 
-        <div id="view-chat" class="settings-view" style="display: none;">
+        <div id="view-chat" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Chat</h2>
 
           <h3 class="settings-section-header">Display</h3>
@@ -1151,7 +1174,7 @@
             <div class="toggle-switch active"></div>
           </div>
 
-          <div class="toggle-item">
+          <div class="toggle-item" data-setting-key="linkPreviews">
             <div class="toggle-info">
               <div class="toggle-label">Show link previews</div>
               <div class="toggle-desc">Generate preview info for links pasted into chat.</div>
@@ -1160,7 +1183,7 @@
           </div>
         </div>
 
-        <div id="view-notifications" class="settings-view" style="display: none;">
+        <div id="view-notifications" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Notifications</h2>
 
           <div class="toggle-item">
@@ -1222,7 +1245,7 @@
           </div>
         </div>
 
-        <div id="view-keybinds" class="settings-view" style="display: none;">
+        <div id="view-keybinds" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Keybinds</h2>
           <p class="form-desc">Add a keybind to quickly access your favorite actions.</p>
 
@@ -1236,19 +1259,19 @@
               <div class="keybind-keys">
                 <span class="key-box">CTRL</span> + <span class="key-box">V</span>
               </div>
-              <button class="settings-btn-danger" style="padding: 4px 8px;">✕</button>
+              <button class="settings-btn-danger extracted-inline-69">✕</button>
             </div>
             <div class="keybind-row">
               <div class="keybind-action">Toggle Mute</div>
               <div class="keybind-keys">
                 <span class="key-box">CTRL</span> + <span class="key-box">SHIFT</span> + <span class="key-box">M</span>
               </div>
-              <button class="settings-btn-danger" style="padding: 4px 8px;">✕</button>
+              <button class="settings-btn-danger extracted-inline-69">✕</button>
             </div>
           </div>
         </div>
 
-        <div id="view-language" class="settings-view" style="display: none;">
+        <div id="view-language" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Language</h2>
 
           <div class="form-group">
@@ -1268,7 +1291,7 @@
           </div>
         </div>
 
-        <div id="view-streamer-mode" class="settings-view" style="display: none;">
+        <div id="view-streamer-mode" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Streamer Mode</h2>
 
           <div class="toggle-item">
@@ -1316,7 +1339,7 @@
           </div>
         </div>
 
-        <div id="view-advanced" class="settings-view" style="display: none;">
+        <div id="view-advanced" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Advanced</h2>
 
           <div class="toggle-item">
@@ -1348,7 +1371,7 @@
           </div>
         </div>
 
-        <div id="view-activity-privacy" class="settings-view" style="display: none;">
+        <div id="view-activity-privacy" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Activity Privacy</h2>
           <p class="form-desc">How we use your activity data.</p>
 
@@ -1371,13 +1394,13 @@
           </div>
         </div>
 
-        <div id="view-registered-games" class="settings-view" style="display: none;">
+        <div id="view-registered-games" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Registered Games</h2>
-          <p class="form-desc" style="margin-bottom: 20px;">If you're playing a game that we're not detecting, you can
+          <p class="form-desc extracted-inline-51">If you're playing a game that we're not detecting, you can
             add it here!</p>
 
-          <div class="empty-state-card" style="padding: 20px; border: 1px dashed #4f545c; background: transparent;">
-            <div class="empty-icon" style="font-size: 24px; margin-bottom: 10px;">🎮</div>
+          <div class="empty-state-card extracted-inline-49">
+            <div class="empty-icon extracted-inline-50">🎮</div>
             <p>No game detected</p>
           </div>
 
