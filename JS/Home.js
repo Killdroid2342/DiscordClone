@@ -15,6 +15,9 @@ let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let selectedChannelID;
 let currentServerName;
+let currentServerRole = 'user';
+let currentServerChannels = [];
+let currentServerCategories = [];
 let currentServerVerificationLevel = 'none';
 let currentServerRequireVerifiedEmail = false;
 let currentServerMinimumAccountAgeMinutes = 0;
@@ -370,6 +373,7 @@ async function openServer(server, fallbackRole = 'user') {
 
   selectedServerID = server.serverID;
   currentServerName = server.serverName;
+  currentServerRole = role;
   applyServerRuleState(server);
 
   document.querySelector('.secondColumn').style.display = 'none';
@@ -405,7 +409,7 @@ async function openServer(server, fallbackRole = 'user') {
   const joinedServer = sessionStorage.getItem('UserJoined');
   if (joinedServer && joinedServer === selectedServerID) {
     console.log('Auto-rejoining voice for', selectedServerID);
-    JoinVoiceCalls();
+    JoinVoiceCalls(sessionStorage.getItem('UserJoinedChannel'));
   }
 }
 
@@ -1539,11 +1543,13 @@ let serverPeerConnection = null;
 let voiceConnection = null;
 let currentVoiceUsers = [];
 let currentVoiceServerId = sessionStorage.getItem('UserJoined') || null;
+let currentVoiceChannelId = sessionStorage.getItem('UserJoinedChannel') || null;
 let watchedVoiceServerId = null;
 let voiceRosterPollInterval = null;
 let voiceConnectionOpenPromise = null;
 const voiceUsersByServer = new Map();
 let peerConnections = new Map();
+let stageAudienceMode = false;
 let voiceProcessingState = null;
 const PEER_VOLUME_STORAGE_KEY = 'discordClone_peer_volumes_v1';
 const CALL_QUALITY_REFRESH_MS = 3500;
@@ -2837,12 +2843,15 @@ async function initializeVoiceConnection() {
 
       const joinedServer = sessionStorage.getItem('UserJoined');
       if (joinedServer) {
+        const joinedChannel = sessionStorage.getItem('UserJoinedChannel');
         currentVoiceServerId = joinedServer;
+        currentVoiceChannelId = joinedChannel;
         applyMicrophoneGate();
         console.log(`Re-joining voice for server ${joinedServer} as ${JWTusername}`);
         voiceConnection.send(JSON.stringify({
           Type: 'join',
           ServerId: joinedServer,
+          ChannelId: joinedChannel,
           Username: JWTusername
         }));
       }
@@ -3657,7 +3666,7 @@ async function ensureLocalStream(wantAudio = true, wantVideo = false) {
     startVoiceActivityMonitor('local', localStream, 'local');
   }
 }
-async function JoinVoiceCalls() {
+async function JoinVoiceCalls(channelId = selectedChannelID) {
   enableAudioPlayback();
   try {
     const targetServerId = selectedServerID;
@@ -3666,10 +3675,21 @@ async function JoinVoiceCalls() {
       return;
     }
 
+    const targetChannel =
+      getChannelById(channelId) ||
+      currentServerChannels.find((channel) => isVoiceLikeChannelType(channel.type));
+    if (!targetChannel || !isVoiceLikeChannelType(targetChannel.type)) {
+      showAppMessage('Select a voice or stage channel first.', 'error');
+      return;
+    }
+
     const joinedVoiceServerId =
       currentVoiceServerId || sessionStorage.getItem('UserJoined');
+    const joinedVoiceChannelId =
+      currentVoiceChannelId || sessionStorage.getItem('UserJoinedChannel');
     if (
       joinedVoiceServerId === targetServerId &&
+      joinedVoiceChannelId === targetChannel.id &&
       voiceConnection &&
       voiceConnection.readyState === WebSocket.OPEN
     ) {
@@ -3677,7 +3697,7 @@ async function JoinVoiceCalls() {
       return;
     }
 
-    if (joinedVoiceServerId && joinedVoiceServerId !== targetServerId) {
+    if (joinedVoiceServerId && (joinedVoiceServerId !== targetServerId || joinedVoiceChannelId !== targetChannel.id)) {
       await leaveVoiceServer(joinedVoiceServerId);
     }
 
@@ -3690,16 +3710,27 @@ async function JoinVoiceCalls() {
 
     if (voiceConnection && voiceConnection.readyState === WebSocket.OPEN) {
       currentVoiceServerId = targetServerId;
+      currentVoiceChannelId = targetChannel.id;
+      selectedChannelID = targetChannel.id;
+      stageAudienceMode = targetChannel.type === 'stage' && !canCurrentRoleSpeakInStage(targetChannel);
+      if (stageAudienceMode) {
+        isMuted = true;
+      }
       sessionStorage.setItem('UserJoined', targetServerId);
+      sessionStorage.setItem('UserJoinedChannel', targetChannel.id);
       applyMicrophoneGate();
       voiceConnection.send(
         JSON.stringify({
           Type: 'join',
           ServerId: targetServerId,
+          ChannelId: targetChannel.id,
           Username: JWTusername,
         })
       );
-      console.log(`joined voice in server: ${targetServerId}`);
+      console.log(`joined ${targetChannel.type} channel ${targetChannel.name} in server: ${targetServerId}`);
+      if (stageAudienceMode) {
+        showAppMessage('Joined stage as audience.', 'info');
+      }
     } else {
       throw new Error('Voice connection not ready after initialization');
     }
@@ -3727,6 +3758,7 @@ async function leaveVoiceServer(serverIdToLeave) {
         JSON.stringify({
           Type: 'leave',
           ServerId: activeServerId,
+          ChannelId: currentVoiceChannelId || sessionStorage.getItem('UserJoinedChannel'),
           Username: JWTusername,
         })
       );
@@ -3754,6 +3786,8 @@ async function leaveVoiceServer(serverIdToLeave) {
     peerConnections.clear();
     currentVoiceUsers = [];
     currentVoiceServerId = null;
+    currentVoiceChannelId = null;
+    stageAudienceMode = false;
     pushToTalkActive = false;
     pressedShortcutKeys.clear();
     setVoiceUsersForServer(activeServerId, []);
@@ -3783,6 +3817,7 @@ async function leaveVoiceServer(serverIdToLeave) {
 
 
     sessionStorage.removeItem('UserJoined');
+    sessionStorage.removeItem('UserJoinedChannel');
     renderSelectedServerVoiceUsers();
 
 
@@ -3959,6 +3994,7 @@ function applyMicrophoneGate() {
   if (!localStream) return;
   const shouldTransmit =
     !isMuted &&
+    !stageAudienceMode &&
     (!isPushToTalkMode() || (hasActiveVoiceOrCall() && pushToTalkActive));
 
   localStream.getAudioTracks().forEach((track) => {
@@ -4016,7 +4052,7 @@ function UnmuteAudio() {
 
 function updateCallControlStates() {
   document.querySelectorAll('button[onclick="Mute()"]').forEach((btn) => {
-    btn.textContent = isMuted ? 'Unmute' : 'Mute';
+    btn.textContent = stageAudienceMode ? 'Audience' : isMuted ? 'Unmute' : 'Mute';
     btn.classList.toggle('active', isMuted);
   });
 
@@ -4036,7 +4072,7 @@ function updateCallControlStates() {
   const serverLocalCallStatus = document.getElementById('serverLocalCallStatus');
   const videoLabel = isVideoOn ? 'Video on' : 'Audio only';
   if (localCallStatus) localCallStatus.textContent = isMuted ? 'Muted' : videoLabel;
-  if (serverLocalCallStatus) serverLocalCallStatus.textContent = isMuted ? 'Muted' : videoLabel;
+  if (serverLocalCallStatus) serverLocalCallStatus.textContent = stageAudienceMode ? 'Audience' : isMuted ? 'Muted' : videoLabel;
 }
 
 let isMuted = false;
@@ -4590,6 +4626,7 @@ async function buildCallDiagnostics() {
     websocket: voiceConnection ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][voiceConnection.readyState] : 'CLOSED',
     selectedServerID,
     currentVoiceServerId,
+    currentVoiceChannelId,
     watchedVoiceServerId,
     users: currentVoiceUsers,
     inputMode: readSettingsState().inputMode,
@@ -4597,6 +4634,7 @@ async function buildCallDiagnostics() {
     muted: isMuted,
     deafened: isDeafened,
     screenSharing: Boolean(screenShareState),
+    stageAudienceMode,
     localAudio: localAudio ? `${localAudio.readyState} enabled=${localAudio.enabled}` : 'none',
     localVideo: localVideoTrack ? `${localVideoTrack.readyState} enabled=${localVideoTrack.enabled}` : 'none',
     ice: serverDiagnostics,
@@ -4612,11 +4650,13 @@ function renderCallDiagnostics(diagnostics) {
     ['Updated', diagnostics.generatedAt],
     ['Voice socket', diagnostics.websocket],
     ['Server', diagnostics.currentVoiceServerId || diagnostics.selectedServerID || 'none'],
+    ['Voice channel', diagnostics.currentVoiceChannelId || 'none'],
     ['Roster watch', diagnostics.watchedVoiceServerId || 'none'],
     ['Users', diagnostics.users.length ? diagnostics.users.join(', ') : 'none'],
     ['Input mode', diagnostics.inputMode],
     ['PTT', diagnostics.pushToTalkActive ? 'pressed' : 'idle'],
     ['Mute / Deafen', `${diagnostics.muted ? 'muted' : 'unmuted'} / ${diagnostics.deafened ? 'deafened' : 'listening'}`],
+    ['Stage mode', diagnostics.stageAudienceMode ? 'audience' : 'speaker/free'],
     ['Screen share', diagnostics.screenSharing ? 'active' : 'off'],
     ['Local audio', diagnostics.localAudio],
     ['Local video', diagnostics.localVideo],
@@ -4723,6 +4763,61 @@ function formatServerRulesSummary() {
   return rules.join(' | ');
 }
 
+function normalizeRoleName(value) {
+  return String(value || 'user').trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function isVoiceLikeChannelType(type) {
+  return type === 'voice' || type === 'stage';
+}
+
+function getChannelTypeIcon(type) {
+  if (type === 'stage') return '[S]';
+  if (type === 'voice') return '[V]';
+  return '#';
+}
+
+function parseRoleNameList(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeRoleName).filter(Boolean);
+  }
+
+  if (!value) {
+    return [];
+  }
+
+  try {
+    return (JSON.parse(value) || []).map(normalizeRoleName).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function getChannelById(channelId) {
+  return currentServerChannels.find((channel) => channel.id === channelId) || null;
+}
+
+function getCurrentServerRoleName() {
+  return normalizeRoleName(currentServerRole || 'user');
+}
+
+function canCurrentRoleSpeakInStage(channel) {
+  if (!channel || channel.type !== 'stage') {
+    return true;
+  }
+
+  const role = getCurrentServerRoleName();
+  if (role === 'owner') {
+    return true;
+  }
+
+  if (!channel.stageSpeakerRestricted) {
+    return true;
+  }
+
+  return parseRoleNameList(channel.stageSpeakerRolesJson).includes(role);
+}
+
 function renderServerManagementControls(container) {
   if (!container || !selectedServerID) return;
 
@@ -4737,6 +4832,7 @@ function renderServerManagementControls(container) {
   const actions = [
     ['+ Channel', createChannelFromPrompt],
     ['+ Category', createCategoryFromPrompt],
+    ['Voice Perms', () => openVoiceChannelPermissionsDialog()],
     ['Invite', createLimitedInviteFromPrompt],
     ['Rules', updateServerVerificationFromPrompt],
     ['Leave', leaveSelectedServer],
@@ -4875,6 +4971,7 @@ async function createChannelFromPrompt() {
         options: [
           { value: 'text', label: 'Text' },
           { value: 'voice', label: 'Voice' },
+          { value: 'stage', label: 'Stage' },
         ],
       },
     ],
@@ -4882,7 +4979,7 @@ async function createChannelFromPrompt() {
   });
   const name = values?.name?.trim();
   if (!name) return;
-  const type = values?.type === 'voice' ? 'voice' : 'text';
+  const type = ['voice', 'stage'].includes(values?.type) ? values.type : 'text';
 
   try {
     await axios.post(`${homeApiBase}/api/Server/CreateChannel`, {
@@ -4894,6 +4991,229 @@ async function createChannelFromPrompt() {
   } catch (error) {
     showAppMessage(getApiErrorMessage(error, 'Could not create channel.'), 'error');
   }
+}
+
+async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
+  const voiceChannels = currentServerChannels.filter((channel) => isVoiceLikeChannelType(channel.type));
+  if (!selectedServerID || voiceChannels.length === 0) {
+    showAppMessage('Create a voice or stage channel first.', 'error');
+    return;
+  }
+
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog voice-permissions-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Voice Channel Permissions';
+  dialog.appendChild(heading);
+
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = 'Choose which roles can connect to voice and stage channels.';
+  dialog.appendChild(copy);
+
+  const form = document.createElement('form');
+  form.className = 'account-action-form';
+
+  const channelLabel = document.createElement('label');
+  channelLabel.textContent = 'Channel';
+  const channelSelect = document.createElement('select');
+  channelSelect.className = 'account-action-select';
+  voiceChannels.forEach((channel) => {
+    const option = document.createElement('option');
+    option.value = channel.id;
+    option.textContent = `${getChannelTypeIcon(channel.type)} ${channel.name}`;
+    channelSelect.appendChild(option);
+  });
+  channelSelect.value =
+    voiceChannels.some((channel) => channel.id === initialChannelId)
+      ? initialChannelId
+      : voiceChannels[0].id;
+  channelLabel.appendChild(channelSelect);
+  form.appendChild(channelLabel);
+
+  const loading = document.createElement('p');
+  loading.className = 'form-desc';
+  loading.textContent = 'Loading permissions...';
+  form.appendChild(loading);
+
+  const rowsContainer = document.createElement('div');
+  rowsContainer.className = 'voice-permission-rows';
+  form.appendChild(rowsContainer);
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.className = 'account-action-cancel';
+  cancelButton.textContent = 'Cancel';
+  const saveButton = document.createElement('button');
+  saveButton.type = 'submit';
+  saveButton.className = 'account-action-submit';
+  saveButton.textContent = 'Save';
+  actions.appendChild(cancelButton);
+  actions.appendChild(saveButton);
+  form.appendChild(actions);
+
+  let activePermissions = null;
+
+  const close = () => overlay.remove();
+  cancelButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const renderPermissions = async () => {
+    rowsContainer.innerHTML = '';
+    loading.textContent = 'Loading permissions...';
+    activePermissions = null;
+
+    try {
+      const res = await axios.get(
+        `${homeApiBase}/api/Server/GetChannelVoicePermissions?channelId=${encodeURIComponent(channelSelect.value)}`
+      );
+      activePermissions = res.data;
+      loading.textContent = '';
+
+      const isStage = activePermissions.type === 'stage';
+      const connectRestricted = document.createElement('label');
+      connectRestricted.className = 'voice-permission-toggle';
+      const connectToggle = document.createElement('input');
+      connectToggle.type = 'checkbox';
+      connectToggle.name = 'voiceAccessRestricted';
+      connectToggle.checked = Boolean(activePermissions.voiceAccessRestricted);
+      connectRestricted.appendChild(connectToggle);
+      connectRestricted.appendChild(document.createTextNode(' Restrict who can connect'));
+      rowsContainer.appendChild(connectRestricted);
+
+      let speakToggle = null;
+      if (isStage) {
+        const speakRestricted = document.createElement('label');
+        speakRestricted.className = 'voice-permission-toggle';
+        speakToggle = document.createElement('input');
+        speakToggle.type = 'checkbox';
+        speakToggle.name = 'stageSpeakerRestricted';
+        speakToggle.checked = Boolean(activePermissions.stageSpeakerRestricted);
+        speakRestricted.appendChild(speakToggle);
+        speakRestricted.appendChild(document.createTextNode(' Restrict who can speak on stage'));
+        rowsContainer.appendChild(speakRestricted);
+      }
+
+      const allowedRoles = new Set(parseRoleNameList(activePermissions.voiceAllowedRoleNames));
+      const speakerRoles = new Set(parseRoleNameList(activePermissions.stageSpeakerRoleNames));
+      const roleRows = document.createElement('div');
+      roleRows.className = 'voice-permission-role-list';
+
+      (activePermissions.roles || []).forEach((role) => {
+        const roleName = normalizeRoleName(role.name);
+        const row = document.createElement('div');
+        row.className = 'voice-permission-row';
+        row.dataset.role = roleName;
+
+        const name = document.createElement('span');
+        name.className = 'voice-permission-role-name';
+        name.textContent = roleName;
+        row.appendChild(name);
+
+        const connectLabel = document.createElement('label');
+        const connectInput = document.createElement('input');
+        connectInput.type = 'checkbox';
+        connectInput.dataset.permission = 'connect';
+        connectInput.checked = !connectToggle.checked || allowedRoles.has(roleName);
+        connectInput.disabled = !connectToggle.checked;
+        connectLabel.appendChild(connectInput);
+        connectLabel.appendChild(document.createTextNode(' Connect'));
+        row.appendChild(connectLabel);
+
+        if (isStage) {
+          const speakLabel = document.createElement('label');
+          const speakInput = document.createElement('input');
+          speakInput.type = 'checkbox';
+          speakInput.dataset.permission = 'speak';
+          speakInput.checked = !speakToggle.checked || speakerRoles.has(roleName);
+          speakInput.disabled = !speakToggle.checked;
+          speakLabel.appendChild(speakInput);
+          speakLabel.appendChild(document.createTextNode(' Speak'));
+          row.appendChild(speakLabel);
+        }
+
+        roleRows.appendChild(row);
+      });
+
+      connectToggle.addEventListener('change', () => {
+        roleRows.querySelectorAll('input[data-permission="connect"]').forEach((input) => {
+          input.disabled = !connectToggle.checked;
+          if (!connectToggle.checked) input.checked = true;
+        });
+      });
+
+      if (speakToggle) {
+        speakToggle.addEventListener('change', () => {
+          roleRows.querySelectorAll('input[data-permission="speak"]').forEach((input) => {
+            input.disabled = !speakToggle.checked;
+            if (!speakToggle.checked) input.checked = true;
+          });
+        });
+      }
+
+      rowsContainer.appendChild(roleRows);
+    } catch (error) {
+      loading.textContent = getApiErrorMessage(error, 'Could not load channel permissions.');
+    }
+  };
+
+  channelSelect.addEventListener('change', renderPermissions);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!activePermissions) return;
+
+    const voiceAccessRestricted = Boolean(form.elements.voiceAccessRestricted?.checked);
+    const stageSpeakerRestricted = Boolean(form.elements.stageSpeakerRestricted?.checked);
+    const roleRows = [...rowsContainer.querySelectorAll('.voice-permission-row')];
+    const voiceAllowedRoleNames = roleRows
+      .filter((row) => row.querySelector('input[data-permission="connect"]')?.checked)
+      .map((row) => row.dataset.role);
+    const stageSpeakerRoleNames = roleRows
+      .filter((row) => row.querySelector('input[data-permission="speak"]')?.checked)
+      .map((row) => row.dataset.role);
+
+    if (voiceAccessRestricted && voiceAllowedRoleNames.length === 0) {
+      showAppMessage('Allow at least one role to connect.', 'error');
+      return;
+    }
+    if (activePermissions.type === 'stage' && stageSpeakerRestricted && stageSpeakerRoleNames.length === 0) {
+      showAppMessage('Allow at least one role to speak on stage.', 'error');
+      return;
+    }
+
+    try {
+      setBusyState(saveButton, true, 'Saving...');
+      await axios.post(`${homeApiBase}/api/Server/UpdateChannelVoicePermissions`, {
+        channelId: channelSelect.value,
+        voiceAccessRestricted,
+        voiceAllowedRoleNames,
+        stageSpeakerRestricted: activePermissions.type === 'stage' && stageSpeakerRestricted,
+        stageSpeakerRoleNames,
+      });
+      await fetchServerDetails();
+      close();
+      showAppMessage('Voice permissions updated.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not save voice permissions.'), 'error');
+    } finally {
+      setBusyState(saveButton, false);
+    }
+  });
+
+  dialog.appendChild(form);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  renderPermissions();
 }
 
 async function createCategoryFromPrompt() {
@@ -4963,8 +5283,11 @@ async function fetchServerDetails() {
       `${homeApiBase}/api/Server/GetServerDetails?serverId=${encodeURIComponent(selectedServerID)}`
     );
     const { categories, channels, server } = response.data;
+    currentServerCategories = Array.isArray(categories) ? categories : [];
+    currentServerChannels = Array.isArray(channels) ? channels : [];
     if (server) {
       applyServerRuleState(server);
+      currentServerRole = server.role || currentServerRole || 'user';
     }
     if (server?.serverName) {
       currentServerName = server.serverName;
@@ -4978,32 +5301,43 @@ async function fetchServerDetails() {
       channelEl.className = 'channel-list-item';
       channelEl.dataset.channelId = channel.id;
       channelEl.dataset.channelType = channel.type;
+      const label = document.createElement('span');
+      label.className = 'channel-name';
+      label.textContent = `${getChannelTypeIcon(channel.type)} ${channel.name}`;
+      channelEl.appendChild(label);
       if (channel.type === 'text') {
-        channelEl.textContent = '# ' + channel.name;
         channelEl.onclick = () => {
           selectedChannelID = channel.id;
           document.querySelector('.chatHeader').textContent = '# ' + channel.name;
           fetchServerMessages();
-          Array.from(channelsList.querySelectorAll('div')).forEach(d => {
-            if (d.textContent.startsWith('#') || d.textContent.startsWith('🔊')) d.style.color = '#8e9297';
-          });
-          channelEl.style.color = 'white';
+          Array.from(channelsList.querySelectorAll('.channel-list-item')).forEach(d => d.classList.remove('active'));
+          channelEl.classList.add('active');
         };
-      } else {
-        channelEl.textContent = '🔊 ' + channel.name;
+      } else if (isVoiceLikeChannelType(channel.type)) {
+        const permissionButton = document.createElement('button');
+        permissionButton.type = 'button';
+        permissionButton.className = 'channel-inline-action';
+        permissionButton.textContent = 'Perms';
+        permissionButton.title = 'Voice permissions';
+        permissionButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          openVoiceChannelPermissionsDialog(channel.id);
+        });
+        channelEl.appendChild(permissionButton);
+
         channelEl.onclick = () => {
           selectedChannelID = channel.id;
-          Array.from(channelsList.querySelectorAll('div')).forEach(d => {
-            if (d.textContent.startsWith('#') || d.textContent.startsWith('🔊')) d.style.color = '#8e9297';
-          });
-          channelEl.style.color = 'white';
-          JoinVoiceCalls();
+          document.querySelector('.chatHeader').textContent =
+            channel.type === 'stage' ? '[S] ' + channel.name : '[V] ' + channel.name;
+          Array.from(channelsList.querySelectorAll('.channel-list-item')).forEach(d => d.classList.remove('active'));
+          channelEl.classList.add('active');
+          JoinVoiceCalls(channel.id);
         };
       }
       return channelEl;
     };
 
-    categories.forEach(category => {
+    currentServerCategories.forEach(category => {
       const categoryEl = document.createElement('div');
       categoryEl.style.textTransform = 'uppercase';
       categoryEl.style.fontSize = '12px';
@@ -5013,20 +5347,20 @@ async function fetchServerDetails() {
       categoryEl.textContent = category.name;
       channelsList.appendChild(categoryEl);
 
-      const categoryChannels = channels.filter(c => c.categoryId === category.id);
+      const categoryChannels = currentServerChannels.filter(c => c.categoryId === category.id);
       categoryChannels.forEach(channel => {
         channelsList.appendChild(renderChannel(channel));
       });
     });
 
-    const uncategorized = channels.filter(c => !c.categoryId);
+    const uncategorized = currentServerChannels.filter(c => !c.categoryId);
     if (uncategorized.length > 0) {
       uncategorized.forEach(channel => {
         channelsList.appendChild(renderChannel(channel));
       });
     }
 
-    const firstTextChannel = channels.find(c => c.type === 'text');
+    const firstTextChannel = currentServerChannels.find(c => c.type === 'text');
     if (firstTextChannel) {
       selectedChannelID = firstTextChannel.id;
       document.querySelector('.chatHeader').textContent = '# ' + firstTextChannel.name;
@@ -5114,9 +5448,11 @@ function renderVoiceUserList(users) {
     if (icon) icon.remove();
   });
 
-  const firstVoiceChannel = document.querySelector('div[data-channel-type="voice"]');
+  const activeVoiceChannel =
+    (currentVoiceChannelId && document.querySelector(`div[data-channel-id="${currentVoiceChannelId}"]`)) ||
+    document.querySelector('div[data-channel-type="voice"], div[data-channel-type="stage"]');
 
-  if (firstVoiceChannel && users.length > 0) {
+  if (activeVoiceChannel && users.length > 0) {
     const userListContainer = document.createElement('div');
     userListContainer.className = 'voice-user-list';
     userListContainer.style.marginLeft = '20px';
@@ -5158,7 +5494,7 @@ function renderVoiceUserList(users) {
       }
     });
 
-    firstVoiceChannel.after(userListContainer);
+    activeVoiceChannel.after(userListContainer);
   }
 }
 
