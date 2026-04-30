@@ -2865,11 +2865,45 @@ button:disabled {
 
 .channel-list-item {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-left: 10px;
   padding: 6px 10px;
   border-radius: 5px;
   color: var(--text-soft);
   cursor: pointer;
+}
+
+.channel-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-inline-action {
+  flex: 0 0 auto;
+  min-height: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-soft);
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0;
+}
+
+.channel-list-item:hover .channel-inline-action,
+.channel-list-item:focus-within .channel-inline-action {
+  opacity: 1;
+}
+
+.channel-inline-action:hover {
+  background: var(--surface-raised);
+  color: var(--text-main);
 }
 
 .channel-list-item:hover,
@@ -2908,6 +2942,64 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   padding: 10px;
+}
+
+.voice-permissions-dialog {
+  width: min(100%, 560px);
+}
+
+.voice-permission-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.voice-permission-toggle {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  text-transform: none !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+.voice-permission-role-list {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.voice-permission-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 9px 10px;
+}
+
+.voice-permission-row label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  color: var(--text-muted) !important;
+  text-transform: none !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.voice-permission-role-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .server-tool-btn,
