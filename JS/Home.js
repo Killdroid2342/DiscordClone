@@ -11,6 +11,111 @@ const homeLoginPageUrl = homeAppPaths.pageUrl('LogIn.html');
 const homeApiBase = homeAppPaths.apiBase || 'http://localhost:5018';
 const homeWsBase = homeApiBase.replace(/^http/i, 'ws');
 
+const displayStateClasses = ['is-hidden', 'is-block', 'is-flex', 'is-grid', 'is-inline-flex'];
+const voiceLevelClasses = Array.from({ length: 11 }, (_, index) => `voice-level-${index}`);
+const messageFontSizeClasses = Array.from({ length: 13 }, (_, index) => `message-font-size-${index + 12}`);
+const homeRuntimeCssRules = new Map();
+let homeRuntimeCssElement = null;
+
+function getElement(target) {
+  if (!target) return null;
+  return typeof target === 'string' ? document.querySelector(target) : target;
+}
+
+function clearDisplayState(element) {
+  element?.classList.remove(...displayStateClasses);
+}
+
+function showElement(target, displayMode = null) {
+  const element = getElement(target);
+  if (!element) return;
+  clearDisplayState(element);
+  if (displayMode) {
+    element.classList.add(`is-${displayMode}`);
+  }
+}
+
+function hideElement(target) {
+  const element = getElement(target);
+  if (!element) return;
+  clearDisplayState(element);
+  element.classList.add('is-hidden');
+}
+
+function setElementVisible(target, isVisible, displayMode = null) {
+  if (isVisible) {
+    showElement(target, displayMode);
+  } else {
+    hideElement(target);
+  }
+}
+
+function hideAllElements(selector) {
+  document.querySelectorAll(selector).forEach((element) => hideElement(element));
+}
+
+function isElementVisible(target) {
+  const element = getElement(target);
+  return Boolean(
+    element &&
+    !element.classList.contains('is-hidden') &&
+    window.getComputedStyle(element).display !== 'none'
+  );
+}
+
+function getHomeRuntimeCssElement() {
+  if (!homeRuntimeCssElement) {
+    homeRuntimeCssElement = document.getElementById('homeRuntimeCss');
+  }
+  if (!homeRuntimeCssElement) {
+    homeRuntimeCssElement = document.createElement('style');
+    homeRuntimeCssElement.id = 'homeRuntimeCss';
+    document.head.appendChild(homeRuntimeCssElement);
+  }
+  return homeRuntimeCssElement;
+}
+
+function setHomeRuntimeCss(key, cssRule = '') {
+  if (cssRule) {
+    homeRuntimeCssRules.set(key, cssRule);
+  } else {
+    homeRuntimeCssRules.delete(key);
+  }
+  getHomeRuntimeCssElement().textContent = Array.from(homeRuntimeCssRules.values()).join('\n');
+}
+
+function cssString(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, ' ');
+}
+
+function setAvatarFallback(element) {
+  element?.classList.add('default-avatar-bg');
+}
+
+function applyDynamicProfileBanner(color, imageUrl = '') {
+  const nextColor = normalizeHexColor(color, '#0c0c0c');
+  const backgroundImage = imageUrl ? `url("${cssString(imageUrl)}")` : 'none';
+
+  document
+    .querySelectorAll('.banner-color, .preview-banner, .profile-popout-header')
+    .forEach((element) => element.classList.add('profile-dynamic-banner'));
+
+  setHomeRuntimeCss(
+    'profile-banner',
+    `.profile-dynamic-banner { background-color: ${nextColor}; background-image: ${backgroundImage}; }`
+  );
+
+  const colorHex = document.querySelector('.color-hex');
+  if (colorHex) {
+    colorHex.textContent = nextColor;
+  }
+
+  return nextColor;
+}
+
 let inServerUsername = document.getElementById('inServerUsername');
 let selectedServerID;
 let selectedChannelID;
@@ -29,9 +134,7 @@ let userJoined = document.querySelector('.UserJoined');
 let mainFriendsDiv = document.querySelector('.MainFriendsDiv');
 let directMessageUser = document.querySelector('.messageUser');
 const serverDetailsPanel = document.getElementById('serverDetails');
-if (serverDetailsPanel) {
-  serverDetailsPanel.style.display = 'none';
-}
+hideElement(serverDetailsPanel);
 const messageModalContent = document.querySelector('.ContentMessage');
 const messageOuterModal = document.querySelector('.outerModalMessage');
 const username = document.getElementById('username');
@@ -42,6 +145,7 @@ let signalRConnection = null;
 
 let currentChatHistory = [];
 let currentGroupId = null;
+let currentGroupName = '';
 
 function GetCookieToken(name) {
   let value = '; ' + document.cookie;
@@ -132,7 +236,7 @@ function withAccessToken(url) {
 
 function isPrivateCallActive() {
   const activeCallUI = document.getElementById('activeCallUI');
-  return Boolean(currentFriend && activeCallUI && activeCallUI.style.display !== 'none');
+  return Boolean(currentFriend && isElementVisible(activeCallUI));
 }
 
 function shouldReconnectVoiceConnection() {
@@ -204,13 +308,455 @@ function showAppMessage(message, variant = 'info', duration = 2600) {
 
   messageModalContent.textContent = message;
   messageOuterModal.dataset.variant = variant;
-  messageOuterModal.style.display = 'flex';
+  showElement(messageOuterModal, 'flex');
 
   window.clearTimeout(showAppMessage.timeoutId);
   showAppMessage.timeoutId = window.setTimeout(() => {
-    messageOuterModal.style.display = 'none';
+    hideElement(messageOuterModal);
   }, duration);
 }
+
+let desktopUnreadCount = 0;
+const messageNotificationSeenIds = new Map();
+const messageNotificationPrimedKeys = new Set();
+const unreadBadgeState = {
+  server: new Map(),
+  dm: new Map(),
+  group: new Map(),
+};
+let unreadBadgeRefreshPromise = null;
+
+function getDesktopNotificationBridge() {
+  return window.desktopNotifications || null;
+}
+
+function isToggleSettingEnabled(settingKey, fallback = true) {
+  const state = readSettingsState();
+  if (hasStoredSettingValue(state.toggles || {}, settingKey)) {
+    return Boolean(state.toggles[settingKey]);
+  }
+
+  const toggle = document.querySelector(
+    `[data-setting-key="${settingKey}"] .toggle-switch`
+  );
+  if (toggle) {
+    return toggle.classList.contains('active');
+  }
+
+  return fallback;
+}
+
+function areDesktopNotificationsEnabled() {
+  return isToggleSettingEnabled('desktopNotifications', true);
+}
+
+function shouldShowUnreadBadge() {
+  return isToggleSettingEnabled('unreadBadge', true);
+}
+
+function shouldShowMentionNotifications() {
+  return isToggleSettingEnabled('mentionNotifications', true);
+}
+
+function shouldFlashTaskbar() {
+  return isToggleSettingEnabled('taskbarFlash', true);
+}
+
+function isAppWindowFocused() {
+  return !document.hidden && document.hasFocus();
+}
+
+function cleanNotificationBody(text, fallback = 'New activity') {
+  const normalized = String(text || fallback)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (normalized.length <= 140) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 139).trim()}...`;
+}
+
+function getMessageSender(message = {}) {
+  return (
+    message.messagesUserSender ||
+    message.MessagesUserSender ||
+    message.sender ||
+    message.Sender ||
+    'Unknown'
+  );
+}
+
+function getMessageText(message = {}) {
+  return (
+    message.userText ||
+    message.friendMessagesData ||
+    message.content ||
+    message.Content ||
+    ''
+  );
+}
+
+function normalizeMentionName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase();
+}
+
+function extractMentionNames(text = '') {
+  return Array.from(
+    String(text || '').matchAll(/@([A-Za-z0-9_.-]{3,32})/g),
+    (match) => match[1]
+  );
+}
+
+function getMessageMentionNames(message = {}) {
+  const explicitMentions =
+    message.mentions ||
+    message.Mentions ||
+    message.mentionNames ||
+    message.MentionNames;
+
+  if (Array.isArray(explicitMentions)) {
+    return explicitMentions;
+  }
+
+  return extractMentionNames(getMessageText(message));
+}
+
+function messageMentionsCurrentUser(message = {}) {
+  const currentUser = normalizeMentionName(JWTusername);
+  if (!currentUser) {
+    return false;
+  }
+
+  return getMessageMentionNames(message)
+    .map(normalizeMentionName)
+    .some((mention) => mention === currentUser || mention === 'everyone' || mention === 'here');
+}
+
+function getMessageNotificationId(message = {}, scope = 'message') {
+  return String(
+    message.messageID ||
+    message.messageId ||
+    message.privateMessageID ||
+    message.PrivateMessageID ||
+    message.id ||
+    message.Id ||
+    `${scope}:${getMessageSender(message)}:${message.date || message.Date || ''}:${getMessageText(message)}`
+  );
+}
+
+function getSelectedChannelNotificationName() {
+  const channel = currentServerChannels.find((item) => item.id === selectedChannelID);
+  return channel?.name || document.querySelector('.chatHeader')?.textContent?.trim() || 'channel';
+}
+
+function isCurrentNotificationContextVisible(scope, conversationId) {
+  if (scope === 'server') {
+    return (
+      selectedChannelID === conversationId &&
+      isElementVisible('#serverDetails')
+    );
+  }
+
+  if (scope === 'group') {
+    return (
+      currentGroupId === conversationId &&
+      isElementVisible('.privateMessage')
+    );
+  }
+
+  if (scope === 'dm') {
+    return (
+      currentFriend === conversationId &&
+      !currentGroupId &&
+      isElementVisible('.privateMessage')
+    );
+  }
+
+  return false;
+}
+
+function shouldNotifyIncomingMessage({ sender, scope, conversationId }) {
+  if (!areDesktopNotificationsEnabled()) {
+    return false;
+  }
+
+  if (sender && JWTusername && sender.toLowerCase() === JWTusername.toLowerCase()) {
+    return false;
+  }
+
+  return !(
+    isAppWindowFocused() &&
+    isCurrentNotificationContextVisible(scope, conversationId)
+  );
+}
+
+function shouldCountIncomingUnreadMessage({ sender, scope, conversationId }) {
+  if (sender && JWTusername && sender.toLowerCase() === JWTusername.toLowerCase()) {
+    return false;
+  }
+
+  return !(
+    isAppWindowFocused() &&
+    isCurrentNotificationContextVisible(scope, conversationId)
+  );
+}
+
+function trackIncomingUnreadMessage(message, { scope, conversationId } = {}) {
+  const sender = getMessageSender(message);
+  if (!scope || !conversationId || !shouldCountIncomingUnreadMessage({ sender, scope, conversationId })) {
+    return false;
+  }
+
+  const mentionIncrement = messageMentionsCurrentUser(message) ? 1 : 0;
+  incrementUnreadBadgeEntry(scope, conversationId, mentionIncrement);
+  return true;
+}
+
+function updateDesktopUnreadBadge(count) {
+  const bridge = getDesktopNotificationBridge();
+  bridge?.setUnreadCount?.(count)?.catch?.((error) => {
+    console.warn('Could not update unread badge:', error);
+  });
+}
+
+function formatUnreadBadgeLabel(count) {
+  const unread = Math.max(0, Number(count) || 0);
+  return unread > 99 ? '99+' : String(unread);
+}
+
+function getStoredUnreadEntry(scope, conversationId) {
+  return unreadBadgeState[scope]?.get(String(conversationId || '')) || {
+    unread: 0,
+    mentionCount: 0,
+  };
+}
+
+function setUnreadBadgeEntry(scope, conversationId, unread = 0, mentionCount = 0) {
+  const store = unreadBadgeState[scope];
+  const key = String(conversationId || '');
+  if (!store || !key) {
+    return;
+  }
+
+  const normalizedUnread = Math.max(0, Number(unread) || 0);
+  const normalizedMentions = Math.max(0, Number(mentionCount) || 0);
+
+  if (normalizedUnread === 0 && normalizedMentions === 0) {
+    store.delete(key);
+  } else {
+    store.set(key, {
+      unread: normalizedUnread,
+      mentionCount: normalizedMentions,
+    });
+  }
+
+  syncDesktopUnreadBadgeFromState();
+}
+
+function incrementUnreadBadgeEntry(scope, conversationId, mentionIncrement = 0) {
+  const current = getStoredUnreadEntry(scope, conversationId);
+  setUnreadBadgeEntry(
+    scope,
+    conversationId,
+    current.unread + 1,
+    current.mentionCount + Math.max(0, Number(mentionIncrement) || 0)
+  );
+}
+
+function getTotalUnreadBadgeCount() {
+  return Object.values(unreadBadgeState).reduce((total, store) => {
+    for (const entry of store.values()) {
+      total += entry.unread || 0;
+    }
+    return total;
+  }, 0);
+}
+
+function syncDesktopUnreadBadgeFromState() {
+  if (!shouldShowUnreadBadge()) {
+    updateDesktopUnreadBadge(0);
+    return;
+  }
+
+  desktopUnreadCount = Math.min(99, getTotalUnreadBadgeCount());
+  updateDesktopUnreadBadge(desktopUnreadCount);
+}
+
+function stopDesktopAttentionState() {
+  getDesktopNotificationBridge()?.stopFlashing?.()?.catch?.((error) => {
+    console.warn('Could not stop taskbar flashing:', error);
+  });
+  syncDesktopUnreadBadgeFromState();
+}
+
+function clearDesktopNotificationState() {
+  Object.values(unreadBadgeState).forEach((store) => store.clear());
+  desktopUnreadCount = 0;
+  updateDesktopUnreadBadge(0);
+  stopDesktopAttentionState();
+}
+
+function incrementDesktopUnreadCount(scope, conversationId, mentionIncrement = 0) {
+  if (!shouldShowUnreadBadge()) {
+    updateDesktopUnreadBadge(0);
+    return;
+  }
+
+  if (scope && conversationId) {
+    incrementUnreadBadgeEntry(scope, conversationId, mentionIncrement);
+    return;
+  }
+
+  desktopUnreadCount = Math.min(99, desktopUnreadCount + 1);
+  updateDesktopUnreadBadge(desktopUnreadCount);
+}
+
+function showWebNotificationFallback({ title, body }) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') {
+    return;
+  }
+
+  try {
+    new Notification(title, {
+      body,
+      icon: homeDefaultAvatarUrl,
+    });
+  } catch (error) {
+    console.warn('Could not show web notification:', error);
+  }
+}
+
+function showDesktopNotification({
+  title = 'MyDiscord',
+  body = 'New activity',
+  countUnread = true,
+  badgeScope = null,
+  conversationId = null,
+  mentionIncrement = 0,
+  flash = shouldFlashTaskbar(),
+} = {}) {
+  if (!areDesktopNotificationsEnabled()) {
+    return;
+  }
+
+  const payload = {
+    title: cleanNotificationBody(title, 'MyDiscord'),
+    body: cleanNotificationBody(body, 'New activity'),
+    flash: Boolean(flash),
+  };
+
+  if (countUnread) {
+    incrementDesktopUnreadCount(badgeScope, conversationId, mentionIncrement);
+  }
+
+  const bridge = getDesktopNotificationBridge();
+  if (bridge?.notify) {
+    bridge.notify(payload).catch((error) => {
+      console.warn('Could not show desktop notification:', error);
+    });
+    return;
+  }
+
+  showWebNotificationFallback(payload);
+}
+
+function notifyIncomingChatMessage(message, { scope, conversationId, conversationName } = {}) {
+  const sender = getMessageSender(message);
+  trackIncomingUnreadMessage(message, { scope, conversationId });
+  if (!shouldNotifyIncomingMessage({ sender, scope, conversationId })) {
+    return;
+  }
+
+  const isMention = messageMentionsCurrentUser(message);
+  const useMentionNotification = isMention && shouldShowMentionNotifications();
+
+  const title =
+    useMentionNotification
+      ? scope === 'server'
+        ? `Mention from ${sender} in #${conversationName || 'channel'}`
+        : scope === 'group'
+          ? `Mention from ${sender} in ${conversationName || 'Group'}`
+          : `Mention from ${sender}`
+      : scope === 'server'
+        ? `${sender} in #${conversationName || 'channel'}`
+        : scope === 'group'
+          ? `${sender} in ${conversationName || 'Group'}`
+          : sender;
+
+  showDesktopNotification({
+    title,
+    body: getMessageText(message) || 'Sent an attachment.',
+    badgeScope: scope,
+    conversationId,
+    mentionIncrement: isMention ? 1 : 0,
+    countUnread: false,
+  });
+}
+
+function collectNewMessagesForNotifications(messages = [], { scope, conversationId }) {
+  const key = `${scope}:${conversationId || 'unknown'}`;
+  let seenIds = messageNotificationSeenIds.get(key);
+  if (!seenIds) {
+    seenIds = new Set();
+    messageNotificationSeenIds.set(key, seenIds);
+  }
+
+  const isPrimed = messageNotificationPrimedKeys.has(key);
+  const nextMessages = [];
+
+  messages.forEach((message) => {
+    const messageId = getMessageNotificationId(message, scope);
+    if (seenIds.has(messageId)) {
+      return;
+    }
+
+    seenIds.add(messageId);
+    if (isPrimed) {
+      nextMessages.push(message);
+    }
+  });
+
+  if (!isPrimed) {
+    messageNotificationPrimedKeys.add(key);
+    return [];
+  }
+
+  return nextMessages;
+}
+
+function notifyPolledMessages(messages, options) {
+  collectNewMessagesForNotifications(messages, options).forEach((message) => {
+    notifyIncomingChatMessage(message, options);
+  });
+}
+
+function notifyIncomingCall(sender, callLabel = 'call') {
+  if (!areDesktopNotificationsEnabled() || isAppWindowFocused()) {
+    return;
+  }
+
+  showDesktopNotification({
+    title: 'Incoming call',
+    body: `${sender} is starting a ${callLabel}.`,
+    countUnread: false,
+  });
+}
+
+window.addEventListener('focus', () => {
+  stopDesktopAttentionState();
+  markActiveConversationRead();
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    stopDesktopAttentionState();
+    markActiveConversationRead();
+  }
+});
 
 function setBusyState(element, isBusy, label) {
   if (!element) return;
@@ -259,11 +805,11 @@ function startRingtone() {
       playPromise.catch(e => {
         console.warn("Autoplay blocked. Waiting for interaction...", e);
         const banner = document.getElementById('audioPermBanner');
-        if (banner) banner.style.display = 'block';
+        if (banner) showElement(banner, 'block');
 
         const resumeAudio = () => {
           if (ringtoneAudio) ringtoneAudio.play().catch(err => console.error("Retry failed", err));
-          if (banner) banner.style.display = 'none';
+          if (banner) hideElement(banner);
           document.removeEventListener('click', resumeAudio);
           document.removeEventListener('keydown', resumeAudio);
         };
@@ -311,23 +857,23 @@ if (inServerUsername) {
 }
 
 function openModal() {
-  document.querySelector('.outerModal').style.display = 'flex';
+  showElement('.outerModal', 'flex');
 }
 function closeModal() {
-  document.querySelector('.outerModal').style.display = 'none';
+  hideElement('.outerModal');
 }
 
 function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
-    modal.style.display = 'flex';
+    showElement(modal, 'flex');
     refreshSettingsModal();
   }
 }
 
 function closeSettingsModal() {
   const modal = document.getElementById('settingsModal');
-  if (modal) modal.style.display = 'none';
+  if (modal) hideElement(modal);
   const searchInput = document.getElementById('settingsSearchInput');
   if (searchInput) {
     searchInput.value = '';
@@ -337,10 +883,10 @@ function closeSettingsModal() {
 
 function openSecondModal() {
   closeModal();
-  document.querySelector('.outerSecondModal').style.display = 'flex';
+  showElement('.outerSecondModal', 'flex');
 }
 function closeSecondModal() {
-  document.querySelector('.outerSecondModal').style.display = 'none';
+  hideElement('.outerSecondModal');
 }
 function BackToFirstModal() {
   closeSecondModal();
@@ -348,10 +894,10 @@ function BackToFirstModal() {
 }
 function OpenCreationModal() {
   closeSecondModal();
-  document.querySelector('.outerCreationModal').style.display = 'flex';
+  showElement('.outerCreationModal', 'flex');
 }
 function CloseCreationModal() {
-  document.querySelector('.outerCreationModal').style.display = 'none';
+  hideElement('.outerCreationModal');
 }
 function BackLastModal() {
   CloseCreationModal();
@@ -376,9 +922,9 @@ async function openServer(server, fallbackRole = 'user') {
   currentServerRole = role;
   applyServerRuleState(server);
 
-  document.querySelector('.secondColumn').style.display = 'none';
-  document.querySelector('.lastSection').style.display = 'none';
-  document.getElementById('serverDetails').style.display = 'flex';
+  hideElement('.secondColumn');
+  hideElement('.lastSection');
+  showElement('#serverDetails', 'flex');
 
   const serverTitle = document.querySelector('.currentServerName');
   if (serverTitle) {
@@ -524,9 +1070,9 @@ async function GetServer() {
     document
       .getElementById('home')
       .addEventListener('click', async function () {
-        document.querySelector('.secondColumn').style.display = 'block';
-        document.querySelector('.lastSection').style.display = 'block';
-        document.getElementById('serverDetails').style.display = 'none';
+        showElement('.secondColumn', 'flex');
+        showElement('.lastSection', 'flex');
+        hideElement('#serverDetails');
 
         stopServerMessagePolling();
       });
@@ -593,6 +1139,34 @@ function areLinkPreviewsEnabled() {
   }
 }
 
+function appendPlainMessageTextWithMentions(container, text = '') {
+  const value = String(text || '');
+  let cursor = 0;
+
+  value.replace(/@([A-Za-z0-9_.-]{3,32})/g, (match, mentionName, offset) => {
+    if (offset > cursor) {
+      container.appendChild(document.createTextNode(value.slice(cursor, offset)));
+    }
+
+    const mention = document.createElement('span');
+    mention.className = 'message-mention';
+    if (
+      normalizeMentionName(mentionName) === normalizeMentionName(JWTusername) ||
+      ['everyone', 'here'].includes(normalizeMentionName(mentionName))
+    ) {
+      mention.classList.add('is-current-user');
+    }
+    mention.textContent = match;
+    container.appendChild(mention);
+    cursor = offset + match.length;
+    return match;
+  });
+
+  if (cursor < value.length) {
+    container.appendChild(document.createTextNode(value.slice(cursor)));
+  }
+}
+
 function appendMessageTextWithLinks(container, text = '') {
   const value = String(text || '');
   let cursor = 0;
@@ -601,7 +1175,7 @@ function appendMessageTextWithLinks(container, text = '') {
     const url = normalizeUrlForPreview(match);
     const end = offset + match.length;
     if (offset > cursor) {
-      container.appendChild(document.createTextNode(value.slice(cursor, offset)));
+      appendPlainMessageTextWithMentions(container, value.slice(cursor, offset));
     }
 
     const link = document.createElement('a');
@@ -616,7 +1190,7 @@ function appendMessageTextWithLinks(container, text = '') {
   });
 
   if (cursor < value.length) {
-    container.appendChild(document.createTextNode(value.slice(cursor)));
+    appendPlainMessageTextWithMentions(container, value.slice(cursor));
   }
 }
 
@@ -705,16 +1279,16 @@ function renderCompactMessage(message, scope = 'server') {
   messageEl.className = 'compact-message';
   messageEl.dataset.messageId =
     message.messageID ||
+    message.MessageID ||
     message.privateMessageID ||
+    message.PrivateMessageID ||
     message.id ||
+    message.Id ||
     '';
 
   const header = document.createElement('div');
   header.className = 'compact-message-header';
-  const sender =
-    message.messagesUserSender ||
-    message.sender ||
-    'Unknown';
+  const sender = getMessageSender(message);
   header.textContent = `${sender} · ${formatMessageDate(message.date)}`;
   messageEl.appendChild(header);
 
@@ -727,11 +1301,7 @@ function renderCompactMessage(message, scope = 'server') {
 
   const body = document.createElement('div');
   body.className = 'compact-message-body';
-  const messageText =
-    message.userText ||
-    message.friendMessagesData ||
-    message.content ||
-    '';
+  const messageText = getMessageText(message);
   appendMessageTextWithLinks(body, messageText);
   if (message.editedAt) {
     const edited = document.createElement('span');
@@ -773,6 +1343,10 @@ function formatMessageDate(rawDate) {
 
 async function markSelectedChannelRead(messages = []) {
   if (!selectedChannelID || !messages.length) return;
+  if (!isAppWindowFocused() || !isCurrentNotificationContextVisible('server', selectedChannelID)) {
+    await refreshUnreadIndicators();
+    return;
+  }
 
   const lastMessage = messages[messages.length - 1];
   try {
@@ -781,6 +1355,7 @@ async function markSelectedChannelRead(messages = []) {
       lastReadMessageId: lastMessage.messageID || lastMessage.messageId,
       lastReadAt: new Date().toISOString(),
     });
+    setUnreadBadgeEntry('server', selectedChannelID, 0, 0);
     await refreshUnreadIndicators();
   } catch (error) {
     console.warn('Could not mark channel read:', error);
@@ -794,18 +1369,191 @@ async function refreshUnreadIndicators() {
     const res = await axios.get(
       `${homeApiBase}/api/ServerMessages/GetUnreadState?serverId=${encodeURIComponent(selectedServerID)}`
     );
-    const unreadByChannel = new Map(
-      (Array.isArray(res.data) ? res.data : []).map((item) => [item.channelId, item.unread || 0])
-    );
+    const unreadByChannel = new Map();
+    (Array.isArray(res.data) ? res.data : []).forEach((item) => {
+      const channelId = item.channelId || item.ChannelId;
+      if (!channelId) {
+        return;
+      }
+      unreadByChannel.set(channelId, {
+        unread: Number(item.unread ?? item.Unread ?? 0),
+        mentionCount: Number(item.mentionCount ?? item.MentionCount ?? item.mentionUnread ?? 0),
+      });
+    });
 
     document.querySelectorAll('[data-channel-id]').forEach((channelEl) => {
-      const unread = unreadByChannel.get(channelEl.dataset.channelId) || 0;
+      const unreadState = unreadByChannel.get(channelEl.dataset.channelId) || {
+        unread: 0,
+        mentionCount: 0,
+      };
+      const unread = unreadState.unread;
+      const mentionCount = unreadState.mentionCount;
       channelEl.classList.toggle('has-unread', unread > 0);
-      channelEl.dataset.unread = unread > 0 ? String(unread) : '';
+      channelEl.classList.toggle('has-mention', mentionCount > 0);
+      channelEl.dataset.unread = unread > 0 ? formatUnreadBadgeLabel(unread) : '';
+      channelEl.dataset.unreadLabel =
+        mentionCount > 0 ? `@${formatUnreadBadgeLabel(mentionCount)}` : formatUnreadBadgeLabel(unread);
+      channelEl.dataset.mentionCount = mentionCount > 0 ? formatUnreadBadgeLabel(mentionCount) : '';
+      setUnreadBadgeEntry('server', channelEl.dataset.channelId, unread, mentionCount);
     });
   } catch (error) {
     console.warn('Could not refresh unread indicators:', error);
   }
+}
+
+function applyConversationUnreadBadge(element, unread = 0, mentionCount = 0) {
+  if (!element) return;
+
+  const normalizedUnread = Math.max(0, Number(unread) || 0);
+  const normalizedMentions = Math.max(0, Number(mentionCount) || 0);
+  const badge = element.querySelector('.conversation-badge');
+
+  element.classList.toggle('has-unread', normalizedUnread > 0);
+  element.classList.toggle('has-mention', normalizedMentions > 0);
+
+  if (!badge) {
+    return;
+  }
+
+  if (normalizedMentions > 0) {
+    badge.textContent = `@${formatUnreadBadgeLabel(normalizedMentions)}`;
+    badge.title = `${normalizedMentions} unread mention${normalizedMentions === 1 ? '' : 's'}`;
+    badge.classList.remove('is-hidden');
+    return;
+  }
+
+  if (normalizedUnread > 0) {
+    badge.textContent = formatUnreadBadgeLabel(normalizedUnread);
+    badge.title = `${normalizedUnread} unread message${normalizedUnread === 1 ? '' : 's'}`;
+    badge.classList.remove('is-hidden');
+    return;
+  }
+
+  badge.textContent = '';
+  badge.title = '';
+  badge.classList.add('is-hidden');
+}
+
+function getUnreadValue(item = {}, key = 'unread') {
+  return Number(item[key] ?? item[key.charAt(0).toUpperCase() + key.slice(1)] ?? 0);
+}
+
+function escapeCssIdentifier(value) {
+  if (window.CSS?.escape) {
+    return CSS.escape(String(value));
+  }
+
+  return String(value).replace(/["\\]/g, '\\$&');
+}
+
+async function refreshDmUnreadBadges() {
+  try {
+    const response = await axios.get(`${homeApiBase}/api/PrivateMessageFriend/GetUnreadBadges`);
+    const badges = Array.isArray(response.data) ? response.data : [];
+    const seen = new Set();
+
+    badges.forEach((item) => {
+      const targetUsername = item.targetUsername || item.TargetUsername;
+      if (!targetUsername) {
+        return;
+      }
+      seen.add(targetUsername.toLowerCase());
+
+      const unread = getUnreadValue(item);
+      const mentionCount = getUnreadValue(item, 'mentionCount');
+      setUnreadBadgeEntry('dm', targetUsername, unread, mentionCount);
+      applyConversationUnreadBadge(
+        document.querySelector(`[data-dm-username="${escapeCssIdentifier(targetUsername)}"]`),
+        unread,
+        mentionCount
+      );
+    });
+
+    document.querySelectorAll('[data-dm-username]').forEach((item) => {
+      const username = item.dataset.dmUsername || '';
+      if (!seen.has(username.toLowerCase())) {
+        setUnreadBadgeEntry('dm', username, 0, 0);
+        applyConversationUnreadBadge(item, 0, 0);
+      }
+    });
+  } catch (error) {
+    console.warn('Could not refresh DM unread badges:', error);
+  }
+}
+
+async function refreshGroupUnreadBadges() {
+  try {
+    const response = await axios.get(`${homeApiBase}/api/GroupChat/GetUnreadBadges`);
+    const badges = Array.isArray(response.data) ? response.data : [];
+    const seen = new Set();
+
+    badges.forEach((item) => {
+      const groupId = String(item.groupId || item.GroupId || '');
+      if (!groupId) {
+        return;
+      }
+      seen.add(groupId.toLowerCase());
+
+      const unread = getUnreadValue(item);
+      const mentionCount = getUnreadValue(item, 'mentionCount');
+      setUnreadBadgeEntry('group', groupId, unread, mentionCount);
+      applyConversationUnreadBadge(
+        document.querySelector(`[data-group-id="${escapeCssIdentifier(groupId)}"]`),
+        unread,
+        mentionCount
+      );
+    });
+
+    document.querySelectorAll('[data-group-id]').forEach((item) => {
+      const groupId = item.dataset.groupId || '';
+      if (!seen.has(groupId.toLowerCase())) {
+        setUnreadBadgeEntry('group', groupId, 0, 0);
+        applyConversationUnreadBadge(item, 0, 0);
+      }
+    });
+  } catch (error) {
+    console.warn('Could not refresh group unread badges:', error);
+  }
+}
+
+function refreshAllUnreadBadges() {
+  if (unreadBadgeRefreshPromise) {
+    return unreadBadgeRefreshPromise;
+  }
+
+  unreadBadgeRefreshPromise = Promise.allSettled([
+    refreshUnreadIndicators(),
+    refreshDmUnreadBadges(),
+    refreshGroupUnreadBadges(),
+  ]).finally(() => {
+    unreadBadgeRefreshPromise = null;
+    syncDesktopUnreadBadgeFromState();
+  });
+
+  return unreadBadgeRefreshPromise;
+}
+
+function markActiveConversationRead() {
+  if (!JWTusername || !isAppWindowFocused()) {
+    return;
+  }
+
+  if (currentGroupId && isCurrentNotificationContextVisible('group', currentGroupId)) {
+    GetGroupMessages(currentGroupId);
+    return;
+  }
+
+  if (currentFriend && isCurrentNotificationContextVisible('dm', currentFriend)) {
+    GetPrivateMessage();
+    return;
+  }
+
+  if (selectedChannelID && isCurrentNotificationContextVisible('server', selectedChannelID)) {
+    fetchServerMessages();
+    return;
+  }
+
+  refreshAllUnreadBadges();
 }
 
 async function fetchServerMessages() {
@@ -813,11 +1561,17 @@ async function fetchServerMessages() {
     const messageRes = await axios.get(
       `${homeApiBase}/api/ServerMessages/GetServerMessages?channelId=${encodeURIComponent(selectedChannelID)}`
     );
+    const messages = Array.isArray(messageRes.data) ? messageRes.data : [];
+    notifyPolledMessages(messages, {
+      scope: 'server',
+      conversationId: selectedChannelID,
+      conversationName: getSelectedChannelNotificationName(),
+    });
     chatMessages.innerHTML = '';
-    messageRes.data.forEach((message) => {
+    messages.forEach((message) => {
       chatMessages.appendChild(renderCompactMessage(message, 'server'));
     });
-    await markSelectedChannelRead(messageRes.data);
+    await markSelectedChannelRead(messages);
   } catch (e) {
     console.error('couldnt fetch channel messages:', e);
   }
@@ -940,7 +1694,7 @@ async function runOptimisticMessageSend({
 function showAddFriends() {
   clearContent();
   const addDiv = document.querySelector('.addFriendsDiv');
-  if (addDiv) addDiv.style.display = 'block';
+  if (addDiv) showElement(addDiv, 'block');
 }
 
 function clearContent() {
@@ -955,7 +1709,7 @@ function clearContent() {
 
   sections.forEach(selector => {
     document.querySelectorAll(selector).forEach(el => {
-      el.style.display = 'none';
+      hideElement(el);
     });
   });
 
@@ -967,13 +1721,13 @@ function clearContent() {
 const friendsDiv = document.querySelector('.friendsDiv');
 if (friendsDiv) {
   friendsDiv.addEventListener('click', () => {
-    document.querySelector('.secondColumn').style.display = 'block';
-    document.querySelector('.lastSection').style.display = 'block';
-    document.getElementById('serverDetails').style.display = 'none';
+    showElement('.secondColumn', 'flex');
+    showElement('.lastSection', 'flex');
+    hideElement('#serverDetails');
 
-    document.querySelector('.nav').style.display = 'flex';
+    showElement('.nav', 'flex');
     const privateMsg = document.querySelector('.privateMessage');
-    if (privateMsg) privateMsg.style.display = 'none';
+    if (privateMsg) hideElement(privateMsg);
 
     ShowFriendsMainView();
   });
@@ -982,7 +1736,7 @@ function showPendingRequests() {
   clearContent();
   const pendingDiv = document.querySelector('.pendingRequestsDiv');
   if (pendingDiv) {
-    pendingDiv.style.display = 'block';
+    showElement(pendingDiv, 'block');
     fetchPendingRequests();
   }
 }
@@ -1001,14 +1755,14 @@ async function fetchPendingRequests() {
     res.data.forEach(reqUser => {
       const item = document.createElement('div');
       item.className = 'friend-item';
-      item.style.cursor = 'default';
+      item.classList.add('is-static');
 
       const left = document.createElement('div');
       left.className = 'friend-item-left';
 
       const avatar = document.createElement('div');
       avatar.className = 'friend-item-avatar';
-      avatar.style.backgroundImage = homeDefaultAvatarBackground;
+      setAvatarFallback(avatar);
       avatar.onclick = (e) => openProfilePopout(reqUser, e.pageX, e.pageY);
 
       const info = document.createElement('div');
@@ -1030,33 +1784,17 @@ async function fetchPendingRequests() {
 
       const actions = document.createElement('div');
       actions.className = 'friend-item-actions';
-      actions.style.display = 'flex';
-      actions.style.gap = '10px';
 
       const acceptBtn = document.createElement('button');
+      acceptBtn.className = 'friend-request-btn accept';
       acceptBtn.title = 'Accept';
       acceptBtn.innerHTML = '✓';
-      acceptBtn.style.background = '#3ba55c';
-      acceptBtn.style.color = 'white';
-      acceptBtn.style.border = 'none';
-      acceptBtn.style.borderRadius = '50%';
-      acceptBtn.style.width = '36px';
-      acceptBtn.style.height = '36px';
-      acceptBtn.style.cursor = 'pointer';
-      acceptBtn.style.fontSize = '18px';
       acceptBtn.onclick = () => acceptRequest(reqUser);
 
       const declineBtn = document.createElement('button');
+      declineBtn.className = 'friend-request-btn decline';
       declineBtn.title = 'Decline';
       declineBtn.innerHTML = '✕';
-      declineBtn.style.background = '#ed4245';
-      declineBtn.style.color = 'white';
-      declineBtn.style.border = 'none';
-      declineBtn.style.borderRadius = '50%';
-      declineBtn.style.width = '36px';
-      declineBtn.style.height = '36px';
-      declineBtn.style.cursor = 'pointer';
-      declineBtn.style.fontSize = '18px';
       declineBtn.onclick = () => declineRequest(reqUser);
 
       actions.appendChild(acceptBtn);
@@ -1118,8 +1856,8 @@ async function SearchFriends(event) {
 function showDeleteFriend() {
   clearContent();
   const pendingDiv = document.querySelector('.pendingRequestsDiv');
-  if (pendingDiv) pendingDiv.style.display = 'none';
-  document.querySelector('.removeFriendsDiv').style.display = 'block';
+  if (pendingDiv) hideElement(pendingDiv);
+  showElement('.removeFriendsDiv', 'block');
 
 }
 async function RemoveFriends(event) {
@@ -1158,27 +1896,40 @@ async function GetFriends() {
       console.log('GetFriends response:', friends);
       if (Array.isArray(friends)) {
         friends.forEach((friend) => {
-          let friendsTag = document.createElement('p');
-          friendsTag.textContent = friend;
+          const friendsTag = document.createElement('button');
+          friendsTag.type = 'button';
+          friendsTag.className = 'testaddeduser conversation-list-item';
+          friendsTag.dataset.dmUsername = friend;
+
+          const label = document.createElement('span');
+          label.className = 'conversation-label';
+          label.textContent = friend;
+
+          const badge = document.createElement('span');
+          badge.className = 'conversation-badge is-hidden';
+          badge.setAttribute('aria-hidden', 'true');
+
+          friendsTag.appendChild(label);
+          friendsTag.appendChild(badge);
           friendsTag.addEventListener('click', async () => {
             console.log("Friend clicked:", friend);
             clearContent();
 
 
-            const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
-            pendingRequests.forEach(el => {
-              el.style.cssText = 'display: none !important;';
-              void el.offsetWidth;
-            });
+            hideAllElements('.pendingRequestsDiv');
             console.log("Pending requests forced hidden");
 
             currentFriend = friend;
+            currentGroupId = null;
+            currentGroupName = '';
+            setUnreadBadgeEntry('dm', friend, 0, 0);
+            applyConversationUnreadBadge(friendsTag, 0, 0);
             InitWebSocket();
             await GetPrivateMessage();
-            document.querySelector('.nav').style.display = 'none';
+            hideElement('.nav');
 
             const privateMsg = document.querySelector('.privateMessage');
-            if (privateMsg) privateMsg.style.display = 'flex';
+            if (privateMsg) showElement(privateMsg, 'flex');
             directMessageUser.innerText = currentFriend;
           });
           mainFriendsDiv.appendChild(friendsTag);
@@ -1186,6 +1937,7 @@ async function GetFriends() {
       }
 
       await GetGroups();
+      await refreshDmUnreadBadges();
     }
   } catch (e) {
     console.log('private msg handling broke:', e);
@@ -1251,10 +2003,32 @@ function InitWebSocket() {
   };
   socket.onmessage = function (event) {
     const message = JSON.parse(event.data);
+    const sender = getMessageSender(message);
+    notifyIncomingChatMessage(message, {
+      scope: 'dm',
+      conversationId: sender,
+      conversationName: sender,
+    });
+
+    if (currentGroupId || currentFriend !== sender) {
+      refreshDmUnreadBadges();
+      return;
+    }
+
     const messagesDisplay = document.querySelector('.messagesDisplay');
-    const messageElement = createMessageElement(message.MessagesUserSender, message.friendMessagesData, message.date);
+    const messageElement = createMessageElement(sender, getMessageText(message), message.date || message.Date);
     messagesDisplay.appendChild(messageElement);
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    currentChatHistory.push({
+      privateMessageID: message.PrivateMessageID || message.privateMessageID,
+      messagesUserSender: sender,
+      friendMessagesData: getMessageText(message),
+      date: message.date || message.Date,
+    });
+
+    if (isAppWindowFocused() && isCurrentNotificationContextVisible('dm', sender)) {
+      markDmRead(sender, message.PrivateMessageID || message.privateMessageID);
+    }
   };
   socket.onclose = function () {
     console.log('chat disconnected');
@@ -1333,6 +2107,26 @@ async function PrivateMessage(event) {
     }).catch(() => {});
   }
 }
+
+async function markDmRead(targetUsername, lastReadMessageId = null) {
+  if (!targetUsername) {
+    return;
+  }
+
+  await axios.post(`${homeApiBase}/api/PrivateMessageFriend/MarkDmRead`, {
+    targetUsername,
+    lastReadMessageId,
+    lastReadAt: new Date().toISOString(),
+  }).catch((error) => console.warn('Could not mark DM read:', error));
+
+  setUnreadBadgeEntry('dm', targetUsername, 0, 0);
+  applyConversationUnreadBadge(
+    document.querySelector(`[data-dm-username="${escapeCssIdentifier(targetUsername)}"]`),
+    0,
+    0
+  );
+}
+
 async function GetPrivateMessage() {
   try {
     const res = await axios.get(
@@ -1345,13 +2139,15 @@ async function GetPrivateMessage() {
       messagesDisplay.appendChild(renderCompactMessage(message, 'dm'));
     });
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
-    if (res.data.length > 0) {
+    if (
+      res.data.length > 0 &&
+      isAppWindowFocused() &&
+      isCurrentNotificationContextVisible('dm', currentFriend)
+    ) {
       const lastMessage = res.data[res.data.length - 1];
-      await axios.post(`${homeApiBase}/api/PrivateMessageFriend/MarkDmRead`, {
-        targetUsername: currentFriend,
-        lastReadMessageId: lastMessage.privateMessageID,
-        lastReadAt: new Date().toISOString(),
-      }).catch((error) => console.warn('Could not mark DM read:', error));
+      await markDmRead(currentFriend, lastMessage.privateMessageID || lastMessage.PrivateMessageID);
+    } else {
+      await refreshDmUnreadBadges();
     }
 
 
@@ -1362,13 +2158,11 @@ async function GetPrivateMessage() {
     }
 
     document.getElementById('home').addEventListener('click', function () {
-      document.querySelector('.secondColumn').style.display = 'block';
-      document.querySelector('.lastSection').style.display = 'block';
-      document.getElementById('serverDetails').style.display = 'none';
-      document.querySelector('.privateMessage').style.display = 'none';
-      document.querySelector('.nav').style.display = 'flex';
-      document.querySelector('.nav').style.display = 'flex';
-
+      showElement('.secondColumn', 'flex');
+      showElement('.lastSection', 'flex');
+      hideElement('#serverDetails');
+      hideElement('.privateMessage');
+      showElement('.nav', 'flex');
     });
   } catch (e) {
     console.error('ugh something went wrong with private msgs:', e);
@@ -1384,11 +2178,11 @@ function handleSearchInput(e) {
   const countSpan = document.getElementById('searchResultCount');
 
   if (!query) {
-    sidebar.style.display = 'none';
+    hideElement(sidebar);
     return;
   }
 
-  sidebar.style.display = 'flex';
+  showElement(sidebar, 'flex');
   resultsList.innerHTML = '';
 
   const results = currentChatHistory.filter(msg =>
@@ -1400,9 +2194,7 @@ function handleSearchInput(e) {
 
   if (results.length === 0) {
     const noRes = document.createElement('div');
-    noRes.style.padding = '20px';
-    noRes.style.color = '#b9bbbe';
-    noRes.style.textAlign = 'center';
+    noRes.className = 'search-empty-state';
     noRes.textContent = 'No results found.';
     resultsList.appendChild(noRes);
   } else {
@@ -1410,31 +2202,22 @@ function handleSearchInput(e) {
       const el = document.createElement('div');
       el.className = 'search-result-item';
 
-      el.style.padding = '10px';
-      el.style.borderBottom = '1px solid #2f3136';
-      el.style.cursor = 'pointer';
-
       const header = document.createElement('div');
-      header.style.display = 'flex';
-      header.style.justifyContent = 'space-between';
-      header.style.marginBottom = '4px';
+      header.className = 'search-result-item-header';
 
       const name = document.createElement('span');
-      name.style.fontWeight = 'bold';
-      name.style.color = 'white';
+      name.className = 'search-result-item-name';
       name.textContent = msg.messagesUserSender;
 
       const date = document.createElement('span');
-      date.style.fontSize = '0.8em';
-      date.style.color = '#72767d';
+      date.className = 'search-result-item-date';
       date.textContent = msg.date;
 
       header.appendChild(name);
       header.appendChild(date);
 
       const content = document.createElement('div');
-      content.style.color = '#dcddde';
-      content.style.fontSize = '0.9em';
+      content.className = 'search-result-item-content';
       content.textContent = msg.friendMessagesData;
 
       el.appendChild(header);
@@ -1448,10 +2231,12 @@ function handleSearchInput(e) {
 }
 
 function closeSearchResults() {
-  document.getElementById('searchResultsSidebar').style.display = 'none';
+  hideElement('#searchResultsSidebar');
   document.getElementById('dmSearchInput').value = '';
 }
 GetFriends();
+refreshAllUnreadBadges();
+setInterval(refreshAllUnreadBadges, 10000);
 
 if (JWTusername) {
   setTimeout(() => {
@@ -1464,10 +2249,10 @@ if (JWTusername) {
 
 
 function openJoinModal() {
-  document.querySelector('.outerJoinModal').style.display = 'flex';
+  showElement('.outerJoinModal', 'flex');
 }
 function closeJoinModal() {
-  document.querySelector('.outerJoinModal').style.display = 'none';
+  hideElement('.outerJoinModal');
 }
 
 async function getInviteLink(serverId) {
@@ -1533,7 +2318,7 @@ async function JoinServer(event) {
 let localStream = null;
 function getLocalPreviewVideo() {
   const privateCallUI = document.getElementById('activeCallUI');
-  const isPrivateCallOpen = privateCallUI && privateCallUI.style.display !== 'none';
+  const isPrivateCallOpen = isElementVisible(privateCallUI);
   return isPrivateCallOpen
     ? document.getElementById('localVideo')
     : document.getElementById('serverLocalVideo') || document.getElementById('localVideo');
@@ -1785,7 +2570,7 @@ function createRemoteAudioElement(peerName, stream, context = inferVolumeControl
     audio.id = `remote_${peerName}`;
     audio.autoplay = true;
     audio.controls = false;
-    audio.style.display = 'none';
+    audio.className = 'remote-audio-node';
     document.body.appendChild(audio);
   }
 
@@ -1836,7 +2621,9 @@ function getNormalizedVoiceLevel(level) {
 function setElementVoiceState(element, isSpeaking, level) {
   if (!element) return;
   element.classList.toggle('is-speaking', isSpeaking);
-  element.style.setProperty('--voice-level', String(level.toFixed(2)));
+  const voiceLevel = Math.max(0, Math.min(10, Math.round(level * 10)));
+  element.classList.remove(...voiceLevelClasses);
+  element.classList.add(`voice-level-${voiceLevel}`);
 }
 
 function getIdleLocalVoiceStatus() {
@@ -2169,7 +2956,7 @@ function isServerViewOpen() {
   return Boolean(
     selectedServerID &&
     serverDetailsPanel &&
-    serverDetailsPanel.style.display !== 'none'
+    isElementVisible(serverDetailsPanel)
   );
 }
 
@@ -2221,7 +3008,7 @@ function enableAudioPlayback() {
 }
 
 async function openCreateDMModal() {
-  document.getElementById('createDMModal').style.display = 'flex';
+  showElement('#createDMModal', 'flex');
   const list = document.getElementById('dmFriendsList');
   list.innerHTML = 'Loading...';
 
@@ -2232,7 +3019,7 @@ async function openCreateDMModal() {
     list.innerHTML = '';
 
     if (!Array.isArray(res.data) || res.data.length === 0) {
-      list.innerHTML = '<p style="color: #b9bbbe; padding: 10px;">No friends found.</p>';
+      list.innerHTML = '<p class="search-empty-state">No friends found.</p>';
       return;
     }
 
@@ -2241,7 +3028,7 @@ async function openCreateDMModal() {
       div.className = 'dmFriendItem';
       div.innerHTML = `
               <input type="checkbox" class="dmFriendInput" value="${friend}">
-              <div style="width: 32px; height: 32px; border-radius: 50%; background-color: #5865f2; margin-right: 10px; background-image: ${homeDefaultAvatarBackground}; background-size: cover;"></div>
+              <div class="server-member-avatar default-avatar-bg"></div>
               <span>${friend}</span>
           `;
       div.onclick = (e) => {
@@ -2255,12 +3042,12 @@ async function openCreateDMModal() {
     });
   } catch (e) {
     console.error(e);
-    list.innerHTML = '<p style="color: red; padding: 10px;">Failed to load friends.</p>';
+    list.innerHTML = '<p class="error-state">Failed to load friends.</p>';
   }
 }
 
 function closeCreateDMModal() {
-  document.getElementById('createDMModal').style.display = 'none';
+  hideElement('#createDMModal');
 }
 
 
@@ -2305,15 +3092,16 @@ async function CreateDM() {
     clearContent();
     currentFriend = friend;
     currentGroupId = null;
+    currentGroupName = '';
+    setUnreadBadgeEntry('dm', friend, 0, 0);
 
 
-    document.querySelector('.secondColumn').style.display = 'block';
-    document.querySelector('.lastSection').style.display = 'block';
-    document.getElementById('serverDetails').style.display = 'none';
-    document.querySelector('.nav').style.display = 'none';
+    showElement('.secondColumn', 'flex');
+    showElement('.lastSection', 'flex');
+    hideElement('#serverDetails');
+    hideElement('.nav');
 
-    const privateMsg = document.querySelector('.privateMessage');
-    if (privateMsg) privateMsg.style.display = 'flex';
+    showElement('.privateMessage', 'flex');
 
     if (directMessageUser) directMessageUser.innerText = currentFriend;
 
@@ -2332,15 +3120,29 @@ async function GetGroups() {
 
     if (Array.isArray(groups)) {
       groups.forEach(group => {
-        const p = document.createElement('p');
-        p.textContent = `📢 ${group.name}`;
-        p.style.cursor = 'pointer';
-        p.className = 'group-chat-item';
+        const p = document.createElement('button');
+        p.type = 'button';
+        p.className = 'group-chat-item conversation-list-item';
+        p.dataset.groupId = group.id;
+
+        const label = document.createElement('span');
+        label.className = 'conversation-label';
+        label.textContent = `Group: ${group.name}`;
+
+        const badge = document.createElement('span');
+        badge.className = 'conversation-badge is-hidden';
+        badge.setAttribute('aria-hidden', 'true');
+
+        p.appendChild(label);
+        p.appendChild(badge);
         p.addEventListener('click', () => {
+          setUnreadBadgeEntry('group', group.id, 0, 0);
+          applyConversationUnreadBadge(p, 0, 0);
           OpenGroupChat(group);
         });
         mainFriendsDiv.appendChild(p);
       });
+      await refreshGroupUnreadBadges();
     }
   } catch (e) {
     console.error("Failed to load groups", e);
@@ -2349,7 +3151,7 @@ async function GetGroups() {
 
 
 setInterval(() => {
-  if (document.querySelector('.nav').style.display !== 'none') {
+  if (isElementVisible('.nav')) {
     GetGroups();
   }
 }, 5000);
@@ -2361,23 +3163,20 @@ function OpenGroupChat(group) {
   clearContent();
 
 
-  const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
-  pendingRequests.forEach(el => {
-    el.style.cssText = 'display: none !important;';
-    void el.offsetWidth;
-  });
+  hideAllElements('.pendingRequestsDiv');
 
   currentGroupId = group.id;
+  currentGroupName = group.name || 'Group';
   currentFriend = null;
   currentServerName = null;
 
-  document.querySelector('.secondColumn').style.display = 'block';
-  document.querySelector('.lastSection').style.display = 'block';
-  document.getElementById('serverDetails').style.display = 'none';
-  document.querySelector('.nav').style.display = 'none';
+  showElement('.secondColumn', 'flex');
+  showElement('.lastSection', 'flex');
+  hideElement('#serverDetails');
+  hideElement('.nav');
 
   const privateMsg = document.querySelector('.privateMessage');
-  if (privateMsg) privateMsg.style.display = 'flex';
+  if (privateMsg) showElement(privateMsg, 'flex');
 
 
   if (directMessageUser) {
@@ -2388,14 +3187,8 @@ function OpenGroupChat(group) {
 
 
     const callBtn = document.createElement('button');
+    callBtn.className = 'group-call-btn';
     callBtn.innerText = '📞 Start Call';
-    callBtn.style.marginLeft = '10px';
-    callBtn.style.backgroundColor = '#2f3136';
-    callBtn.style.color = 'white';
-    callBtn.style.border = 'none';
-    callBtn.style.padding = '5px 10px';
-    callBtn.style.borderRadius = '5px';
-    callBtn.style.cursor = 'pointer';
     callBtn.onclick = () => {
       startGroupCall(group.id);
     };
@@ -2478,6 +3271,7 @@ async function leaveCurrentGroup(groupId) {
   try {
     await axios.post(`${homeApiBase}/api/GroupChat/LeaveGroup`, { groupId });
     currentGroupId = null;
+    currentGroupName = '';
     clearContent();
     ShowFriendsMainView();
     await GetGroups();
@@ -2510,10 +3304,23 @@ function InitGroupWebSocket() {
 
 
       const messagesDisplay = document.querySelector('.messagesDisplay');
+      notifyIncomingChatMessage(message, {
+        scope: 'group',
+        conversationId: message.GroupId,
+        conversationName: currentGroupName,
+      });
       const messageElement = createMessageElement(message.Sender, message.Content, message.Date);
       messagesDisplay.appendChild(messageElement);
       messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
-      currentChatHistory.push({ messagesUserSender: message.Sender, friendMessagesData: message.Content, date: message.Date });
+      currentChatHistory.push({
+        id: message.Id || message.id,
+        messagesUserSender: message.Sender,
+        friendMessagesData: message.Content,
+        date: message.Date,
+      });
+      if (isAppWindowFocused() && isCurrentNotificationContextVisible('group', message.GroupId)) {
+        markGroupRead(message.GroupId, message.Id || message.id);
+      }
     }
   };
   socket.onclose = function () {
@@ -2549,6 +3356,7 @@ async function handleGroupSignaling(msg) {
   switch (msg.Type) {
     case 'call-init':
       if (msg.Sender !== JWTusername) {
+        notifyIncomingCall(msg.Sender, 'group call');
         if (await askConfirm('Join Group Call', `${msg.Sender} started a group call. Join?`, { confirmText: 'Join' })) {
           joinGroupCall(msg.GroupId, msg.Sender);
         }
@@ -2594,26 +3402,21 @@ function showGroupCallUI() {
   if (!container) {
     container = document.createElement('div');
     container.id = 'groupVideoGrid';
-    container.style.cssText = `
-            position: fixed; top: 50px; left: 240px; right: 0; bottom: 60px;
-            background: rgba(0,0,0,0.9); z-index: 1000;
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 10px; padding: 10px; overflow-y: auto;
-        `;
+    container.className = 'group-video-grid';
     document.body.appendChild(container);
 
     const closeBtn = document.createElement('button');
     closeBtn.innerText = "Leave Call";
-    closeBtn.style.cssText = "position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; background: red; color: white; border: none; border-radius: 5px; cursor: pointer;";
+    closeBtn.className = 'group-video-leave';
     closeBtn.onclick = leaveGroupCall;
     container.appendChild(closeBtn);
   }
-  container.style.display = 'grid';
+  showElement(container, 'grid');
 }
 
 function leaveGroupCall() {
   const container = document.getElementById('groupVideoGrid');
-  if (container) container.style.display = 'none';
+  if (container) hideElement(container);
 
   if (localGroupStream) {
     localGroupStream.getTracks().forEach(t => t.stop());
@@ -2633,16 +3436,16 @@ function addLocalVideoToGrid(stream) {
   vid.srcObject = stream;
   vid.muted = true;
   vid.autoplay = true;
-  vid.style.cssText = "width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 2px solid #5865f2;";
+  vid.className = 'group-video local';
 
   const wrapper = document.createElement('div');
-  wrapper.style.position = 'relative';
+  wrapper.className = 'group-video-card';
   wrapper.appendChild(vid);
 
 
   const label = document.createElement('span');
   label.innerText = 'Me';
-  label.style.cssText = "position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.5); color: white; padding: 2px 5px; border-radius: 4px; font-size: 12px;";
+  label.className = 'group-video-label';
   wrapper.appendChild(label);
 
   container.appendChild(wrapper);
@@ -2655,16 +3458,16 @@ function addRemoteVideoToGrid(stream, username) {
   const vid = document.createElement('video');
   vid.srcObject = stream;
   vid.autoplay = true;
-  vid.style.cssText = "width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 2px solid #ed4245;";
+  vid.className = 'group-video remote';
 
   const wrapper = document.createElement('div');
-  wrapper.style.position = 'relative';
+  wrapper.className = 'group-video-card';
   wrapper.id = `wrapper-${username}`;
   wrapper.appendChild(vid);
 
   const label = document.createElement('span');
   label.innerText = username;
-  label.style.cssText = "position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.5); color: white; padding: 2px 5px; border-radius: 4px; font-size: 12px;";
+  label.className = 'group-video-label';
   wrapper.appendChild(label);
 
   container.insertBefore(wrapper, container.lastChild);
@@ -2751,6 +3554,25 @@ async function handleGroupCandidate(msg) {
   }
 }
 
+async function markGroupRead(groupId, lastReadMessageId = null) {
+  if (!groupId) {
+    return;
+  }
+
+  await axios.post(`${homeApiBase}/api/GroupChat/MarkGroupRead`, {
+    groupId,
+    lastReadMessageId,
+    lastReadAt: new Date().toISOString(),
+  }).catch((error) => console.warn('Could not mark group read:', error));
+
+  setUnreadBadgeEntry('group', groupId, 0, 0);
+  applyConversationUnreadBadge(
+    document.querySelector(`[data-group-id="${escapeCssIdentifier(groupId)}"]`),
+    0,
+    0
+  );
+}
+
 async function GetGroupMessages(groupId) {
   try {
     const res = await axios.get(`${homeApiBase}/api/GroupChat/GetGroupMessages?groupId=${encodeURIComponent(groupId)}`);
@@ -2762,13 +3584,15 @@ async function GetGroupMessages(groupId) {
       messagesDisplay.appendChild(renderCompactMessage(message, 'group'));
     });
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
-    if (res.data.length > 0) {
+    if (
+      res.data.length > 0 &&
+      isAppWindowFocused() &&
+      isCurrentNotificationContextVisible('group', groupId)
+    ) {
       const lastMessage = res.data[res.data.length - 1];
-      await axios.post(`${homeApiBase}/api/GroupChat/MarkGroupRead`, {
-        groupId,
-        lastReadMessageId: lastMessage.id,
-        lastReadAt: new Date().toISOString(),
-      }).catch((error) => console.warn('Could not mark group read:', error));
+      await markGroupRead(groupId, lastMessage.id || lastMessage.Id);
+    } else {
+      await refreshGroupUnreadBadges();
     }
   } catch (e) {
     console.error('Failed to load group messages', e);
@@ -2994,7 +3818,7 @@ async function initializeVoiceConnection() {
 
           case 'call-ended':
             console.log(`Call ended by ${message.Username}`);
-            if (activeCallUI && activeCallUI.style.display !== 'none') {
+            if (isElementVisible(activeCallUI)) {
               endPrivateCall(false);
             }
             break;
@@ -3298,7 +4122,7 @@ function createRemoteMediaElement(peerName, stream, context = inferVolumeControl
   const privateCallUI = document.getElementById('activeCallUI');
   const privateRemoteVideo = document.getElementById('remoteVideo');
 
-  if (context === 'private' && privateCallUI && privateCallUI.style.display !== 'none' && privateRemoteVideo) {
+  if (context === 'private' && isElementVisible(privateCallUI) && privateRemoteVideo) {
     console.log(`Redirecting stream from ${peerName} to Private Call Video UI`);
     privateRemoteVideo.srcObject = stream;
     registerRemoteMediaElement(peerName, privateRemoteVideo, 'private');
@@ -3958,8 +4782,8 @@ function hasActiveVoiceOrCall() {
     localStream &&
     (
       currentVoiceServerId ||
-      (privateCallUI && privateCallUI.style.display !== 'none') ||
-      (groupCallUI && groupCallUI.style.display !== 'none')
+      isElementVisible(privateCallUI) ||
+      isElementVisible(groupCallUI)
     )
   );
 }
@@ -4835,6 +5659,7 @@ function renderServerManagementControls(container) {
     ['Voice Perms', () => openVoiceChannelPermissionsDialog()],
     ['Invite', createLimitedInviteFromPrompt],
     ['Rules', updateServerVerificationFromPrompt],
+    ['Audit', openAuditLogsDialog],
     ['Leave', leaveSelectedServer],
   ];
 
@@ -5260,6 +6085,194 @@ async function createLimitedInviteFromPrompt() {
   }
 }
 
+function formatAuditAction(actionType = '') {
+  return String(actionType || 'audit_event')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatAuditKey(key = '') {
+  return String(key || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatAuditValue(value) {
+  if (value == null || value === '') {
+    return '';
+  }
+
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, item]) => `${formatAuditKey(key)}: ${formatAuditValue(item)}`)
+      .filter((item) => !item.endsWith(': '))
+      .join('; ');
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'On' : 'Off';
+  }
+
+  return String(value);
+}
+
+function formatAuditDetails(detailsJson) {
+  if (!detailsJson) {
+    return '';
+  }
+
+  try {
+    const details = JSON.parse(detailsJson);
+    if (!details || typeof details !== 'object') {
+      return String(details || '');
+    }
+
+    return Object.entries(details)
+      .map(([key, value]) => {
+        const formattedValue = formatAuditValue(value);
+        return formattedValue ? `${formatAuditKey(key)}: ${formattedValue}` : '';
+      })
+      .filter(Boolean)
+      .join(' | ');
+  } catch {
+    return String(detailsJson);
+  }
+}
+
+function formatAuditTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown time';
+  }
+
+  return date.toLocaleString();
+}
+
+function getAuditTargetLabel(log = {}) {
+  if (log.targetUsername) {
+    return `@${log.targetUsername}`;
+  }
+
+  if (log.targetType && log.targetId) {
+    return `${log.targetType}: ${log.targetId}`;
+  }
+
+  return log.targetType || 'Server';
+}
+
+function renderAuditLogRow(log = {}) {
+  const row = document.createElement('div');
+  row.className = 'audit-log-row';
+
+  const marker = document.createElement('div');
+  marker.className = 'audit-log-marker';
+  marker.textContent = String(log.actionType || '?').slice(0, 1).toUpperCase();
+
+  const content = document.createElement('div');
+  content.className = 'audit-log-content';
+
+  const title = document.createElement('div');
+  title.className = 'audit-log-title';
+  title.textContent = formatAuditAction(log.actionType);
+
+  const meta = document.createElement('div');
+  meta.className = 'audit-log-meta';
+  meta.textContent = `${log.actorUsername || 'Unknown'} -> ${getAuditTargetLabel(log)} - ${formatAuditTimestamp(log.createdAt)}`;
+
+  const details = document.createElement('div');
+  details.className = 'audit-log-details';
+  details.textContent = formatAuditDetails(log.detailsJson);
+
+  content.appendChild(title);
+  content.appendChild(meta);
+  if (details.textContent) {
+    content.appendChild(details);
+  }
+
+  row.appendChild(marker);
+  row.appendChild(content);
+  return row;
+}
+
+function openAuditLogsDialog() {
+  if (!selectedServerID) {
+    return;
+  }
+
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog audit-log-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Audit Logs';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = currentServerName || 'Server activity';
+
+  const list = document.createElement('div');
+  list.className = 'audit-log-list';
+  list.textContent = 'Loading audit logs...';
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const doneButton = document.createElement('button');
+  doneButton.type = 'button';
+  doneButton.className = 'account-action-cancel';
+  doneButton.textContent = 'Done';
+  const refreshButton = document.createElement('button');
+  refreshButton.type = 'button';
+  refreshButton.className = 'account-action-submit';
+  refreshButton.textContent = 'Refresh';
+  actions.appendChild(doneButton);
+  actions.appendChild(refreshButton);
+
+  const close = () => overlay.remove();
+  doneButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const loadLogs = async () => {
+    list.textContent = 'Loading audit logs...';
+    try {
+      const res = await axios.get(
+        `${homeApiBase}/api/Server/GetAuditLogs?serverId=${encodeURIComponent(selectedServerID)}&take=75`
+      );
+      const logs = Array.isArray(res.data) ? res.data : [];
+      list.innerHTML = '';
+      if (!logs.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state-card padded';
+        empty.textContent = 'No audit entries yet.';
+        list.appendChild(empty);
+        return;
+      }
+
+      logs.forEach((log) => list.appendChild(renderAuditLogRow(log)));
+    } catch (error) {
+      list.textContent = getApiErrorMessage(error, 'Could not load audit logs.');
+    }
+  };
+
+  refreshButton.addEventListener('click', loadLogs);
+
+  dialog.appendChild(heading);
+  dialog.appendChild(copy);
+  dialog.appendChild(list);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  loadLogs();
+}
+
 async function leaveSelectedServer() {
   if (!selectedServerID || !await askConfirm('Leave Server', 'Leave this server?', { danger: true, confirmText: 'Leave' })) return;
 
@@ -5268,9 +6281,9 @@ async function leaveSelectedServer() {
       serverId: selectedServerID,
     });
     selectedServerID = null;
-    document.querySelector('.secondColumn').style.display = 'block';
-    document.querySelector('.lastSection').style.display = 'block';
-    document.getElementById('serverDetails').style.display = 'none';
+    showElement('.secondColumn', 'flex');
+    showElement('.lastSection', 'flex');
+    hideElement('#serverDetails');
     await GetServer();
   } catch (error) {
     showAppMessage(getApiErrorMessage(error, 'Could not leave server.'), 'error');
@@ -5309,9 +6322,14 @@ async function fetchServerDetails() {
         channelEl.onclick = () => {
           selectedChannelID = channel.id;
           document.querySelector('.chatHeader').textContent = '# ' + channel.name;
-          fetchServerMessages();
+          setUnreadBadgeEntry('server', channel.id, 0, 0);
+          channelEl.classList.remove('has-unread', 'has-mention');
+          channelEl.dataset.unread = '';
+          channelEl.dataset.unreadLabel = '';
+          channelEl.dataset.mentionCount = '';
           Array.from(channelsList.querySelectorAll('.channel-list-item')).forEach(d => d.classList.remove('active'));
           channelEl.classList.add('active');
+          fetchServerMessages();
         };
       } else if (isVoiceLikeChannelType(channel.type)) {
         const permissionButton = document.createElement('button');
@@ -5339,11 +6357,7 @@ async function fetchServerDetails() {
 
     currentServerCategories.forEach(category => {
       const categoryEl = document.createElement('div');
-      categoryEl.style.textTransform = 'uppercase';
-      categoryEl.style.fontSize = '12px';
-      categoryEl.style.fontWeight = 'bold';
-      categoryEl.style.color = '#8e9297';
-      categoryEl.style.padding = '15px 5px 5px 10px';
+      categoryEl.className = 'channel-category-label';
       categoryEl.textContent = category.name;
       channelsList.appendChild(categoryEl);
 
@@ -5365,7 +6379,11 @@ async function fetchServerDetails() {
       selectedChannelID = firstTextChannel.id;
       document.querySelector('.chatHeader').textContent = '# ' + firstTextChannel.name;
       fetchServerMessages();
+      const firstChannelEl = channelsList.querySelector(`[data-channel-id="${escapeCssIdentifier(firstTextChannel.id)}"]`);
+      firstChannelEl?.classList.add('active');
     }
+
+    await refreshUnreadIndicators();
 
     await fetchServerMembers();
     watchVoiceServer(selectedServerID).catch((err) => {
@@ -5401,20 +6419,10 @@ async function fetchServerMembers() {
       const memberEl = document.createElement('div');
       memberEl.dataset.username = member.username;
       memberEl.classList.add('server-member-row');
-      memberEl.style.padding = '10px';
-      memberEl.style.color = member.role === 'owner' ? '#ff7b00' : '#b9bbbe';
-      memberEl.style.cursor = 'pointer';
-      memberEl.style.display = 'flex';
-      memberEl.style.alignItems = 'center';
+      memberEl.classList.toggle('is-owner', member.role === 'owner');
 
       const avatar = document.createElement('div');
-      avatar.style.width = '32px';
-      avatar.style.height = '32px';
-      avatar.style.borderRadius = '50%';
-      avatar.style.backgroundColor = '#' + Math.floor(Math.random() * 16777215).toString(16);
-      avatar.style.marginRight = '10px';
-      avatar.style.backgroundImage = homeDefaultAvatarBackground;
-      avatar.style.backgroundSize = 'cover';
+      avatar.className = 'server-member-avatar default-avatar-bg';
       avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
 
       const name = document.createElement('span');
@@ -5455,26 +6463,13 @@ function renderVoiceUserList(users) {
   if (activeVoiceChannel && users.length > 0) {
     const userListContainer = document.createElement('div');
     userListContainer.className = 'voice-user-list';
-    userListContainer.style.marginLeft = '20px';
-    userListContainer.style.marginBottom = '5px';
 
     users.forEach(username => {
       const userDiv = document.createElement('div');
-      userDiv.style.color = '#dbdee1';
-      userDiv.style.fontSize = '12px';
-      userDiv.style.padding = '2px 0';
-      userDiv.style.cursor = 'pointer';
-      userDiv.style.display = 'flex';
-      userDiv.style.alignItems = 'center';
+      userDiv.className = 'voice-user-row';
 
       const avatar = document.createElement('div');
-      avatar.style.width = '20px';
-      avatar.style.height = '20px';
-      avatar.style.borderRadius = '50%';
-      avatar.style.backgroundColor = '#5865f2';
-      avatar.style.marginRight = '5px';
-      avatar.style.backgroundImage = homeDefaultAvatarBackground;
-      avatar.style.backgroundSize = 'cover';
+      avatar.className = 'voice-user-avatar default-avatar-bg';
 
       const nameSpan = document.createElement('span');
       nameSpan.textContent = username;
@@ -5488,8 +6483,6 @@ function renderVoiceUserList(users) {
         const icon = document.createElement('span');
         icon.className = 'voice-status-icon';
         icon.textContent = ' 🔊';
-        icon.style.marginLeft = 'auto';
-        icon.style.fontSize = '12px';
         memberEl.appendChild(icon);
       }
     });
@@ -5557,8 +6550,8 @@ async function startPrivateCall() {
   const activeCallUI = document.getElementById('activeCallUI');
 
 
-  if (preCallUI) preCallUI.style.display = 'none';
-  if (activeCallUI) activeCallUI.style.display = 'block';
+  if (preCallUI) hideElement(preCallUI);
+  if (activeCallUI) showElement(activeCallUI, 'block');
   clearCallVolumeControls('private');
   isVideoOn = false;
   startCallQualityMonitor();
@@ -5725,13 +6718,14 @@ async function handlePrivatePeerOffer(peerName, offerData, _unusedIsVideo) {
   pendingPeer = peerName;
   pendingOffer = offerData;
   pendingIsVideo = isVideo;
+  notifyIncomingCall(peerName, isVideo ? 'video call' : 'voice call');
 
 
   const modal = document.getElementById('incomingCallModal');
   const userText = document.getElementById('incomingCallUser');
   if (modal && userText) {
     userText.textContent = `${peerName} is calling... ` + (isVideo ? '(Video)' : '(Voice)');
-    modal.style.display = 'flex';
+    showElement(modal, 'flex');
     startRingtone();
   } else {
 
@@ -5743,7 +6737,7 @@ async function handlePrivatePeerOffer(peerName, offerData, _unusedIsVideo) {
 async function AcceptCall() {
   stopRingtone();
   const modal = document.getElementById('incomingCallModal');
-  if (modal) modal.style.display = 'none';
+  if (modal) hideElement(modal);
 
   if (!pendingPeer || !pendingOffer) return;
 
@@ -5787,8 +6781,8 @@ async function AcceptCall() {
   const preCallUI = document.getElementById('preCallUI');
   const activeCallUI = document.getElementById('activeCallUI');
 
-  if (preCallUI) preCallUI.style.display = 'none';
-  if (activeCallUI) activeCallUI.style.display = 'block';
+  if (preCallUI) hideElement(preCallUI);
+  if (activeCallUI) showElement(activeCallUI, 'block');
   clearCallVolumeControls('private');
   isVideoOn = pendingIsVideo;
   startCallQualityMonitor();
@@ -5801,23 +6795,24 @@ async function AcceptCall() {
   if (centerCallUser) centerCallUser.textContent = `${JWTusername} & ${peerName}`;
 
   currentFriend = peerName;
+  currentGroupId = null;
+  currentGroupName = '';
 
 
   try {
     clearContent();
 
-    const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
-    pendingRequests.forEach(el => el.style.cssText = 'display: none !important;');
+    hideAllElements('.pendingRequestsDiv');
 
 
     InitWebSocket();
     await GetPrivateMessage();
 
     const nav = document.querySelector('.nav');
-    if (nav) nav.style.display = 'none';
+    if (nav) hideElement(nav);
 
     const privateMsg = document.querySelector('.privateMessage');
-    if (privateMsg) privateMsg.style.display = 'block';
+    if (privateMsg) showElement(privateMsg, 'flex');
 
     if (typeof directMessageUser !== 'undefined' && directMessageUser) {
       directMessageUser.innerText = currentFriend;
@@ -5829,8 +6824,7 @@ async function AcceptCall() {
 
 function DeclineCall() {
   stopRingtone();
-  const modal = document.getElementById('incomingCallModal');
-  if (modal) modal.style.display = 'none';
+  hideElement('#incomingCallModal');
 
   console.log(`Declined call from ${pendingPeer}`);
   pendingPeer = null;
@@ -5853,19 +6847,18 @@ async function handlePeerAnswer(peerName, answerData) {
 
 
     try {
-      if (document.querySelector('.nav') && document.querySelector('.nav').style.display !== 'none') {
+      if (isElementVisible('.nav')) {
         clearContent();
-        const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
-        pendingRequests.forEach(el => el.style.cssText = 'display: none !important;');
+        hideAllElements('.pendingRequestsDiv');
 
         InitWebSocket();
         await GetPrivateMessage();
 
         const nav = document.querySelector('.nav');
-        if (nav) nav.style.display = 'none';
+        if (nav) hideElement(nav);
 
         const privateMsg = document.querySelector('.privateMessage');
-        if (privateMsg) privateMsg.style.display = 'flex';
+    if (privateMsg) showElement(privateMsg, 'flex');
 
         if (typeof directMessageUser !== 'undefined' && directMessageUser) {
           directMessageUser.innerText = peerName;
@@ -5899,8 +6892,8 @@ async function endPrivateCall(notifyPeer = true) {
     }));
   }
 
-  if (activeCallUI) activeCallUI.style.display = 'none';
-  if (preCallUI) preCallUI.style.display = 'flex';
+  if (activeCallUI) hideElement(activeCallUI);
+  if (preCallUI) showElement(preCallUI, 'flex');
 
   console.log('Private call UI ended, cleaning up...');
 
@@ -5955,15 +6948,15 @@ async function ShowFriendsMainView() {
 
   viewsToHide.forEach(selector => {
     const el = document.querySelector(selector);
-    if (el) el.style.display = 'none';
+    if (el) hideElement(el);
   });
 
-  document.querySelectorAll('.pendingRequestsDiv').forEach(el => el.style.cssText = 'display: none !important;');
+  hideAllElements('.pendingRequestsDiv');
 
   const friendsView = document.querySelector('.friendsMainView');
   if (friendsView) {
-    friendsView.style.display = 'flex';
-    document.querySelector('.nav').style.display = 'flex';
+    showElement(friendsView, 'flex');
+    showElement('.nav', 'flex');
 
     await FetchAndRenderFriendsMain();
   }
@@ -5988,7 +6981,7 @@ async function FetchAndRenderFriendsMain() {
     if (countEl) countEl.textContent = friends.length;
 
     if (friends.length === 0) {
-      if (listEl) listEl.innerHTML = '<p style=\'color: #b9bbbe; padding: 20px; text-align: center;\'>No friends found.</p>';
+      if (listEl) listEl.innerHTML = '<p class="search-empty-state">No friends found.</p>';
       return;
     }
 
@@ -6008,7 +7001,7 @@ async function FetchAndRenderFriendsMain() {
 
       const avatar = document.createElement('div');
       avatar.className = 'friend-item-avatar';
-      avatar.style.backgroundImage = homeDefaultAvatarBackground;
+      setAvatarFallback(avatar);
       avatar.onclick = (e) => openProfilePopout(friendName, e.pageX, e.pageY);
 
       const info = document.createElement('div');
@@ -6055,19 +7048,20 @@ async function FetchAndRenderFriendsMain() {
 
 function OpenDM(friendName) {
   clearContent();
-  const pendingRequests = document.querySelectorAll('.pendingRequestsDiv');
-  pendingRequests.forEach(el => el.style.cssText = 'display: none !important;');
+  hideAllElements('.pendingRequestsDiv');
 
   const friendsView = document.querySelector('.friendsMainView');
-  if (friendsView) friendsView.style.display = 'none';
+  if (friendsView) hideElement(friendsView);
 
   currentFriend = friendName;
+  currentGroupId = null;
+  currentGroupName = '';
   InitWebSocket();
   GetPrivateMessage();
-  document.querySelector('.nav').style.display = 'none';
+  hideElement('.nav');
 
   const privateMsg = document.querySelector('.privateMessage');
-  if (privateMsg) privateMsg.style.display = 'flex';
+  if (privateMsg) showElement(privateMsg, 'flex');
 
   if (typeof directMessageUser !== 'undefined') directMessageUser.innerText = currentFriend;
 }
@@ -6084,8 +7078,8 @@ async function startPrivateVideoCall() {
   const preCallUI = document.getElementById('preCallUI');
   const activeCallUI = document.getElementById('activeCallUI');
 
-  if (preCallUI) preCallUI.style.display = 'none';
-  if (activeCallUI) activeCallUI.style.display = 'block';
+  hideElement(preCallUI);
+  showElement(activeCallUI, 'block');
   clearCallVolumeControls('private');
   isVideoOn = true;
   startCallQualityMonitor();
@@ -6148,7 +7142,7 @@ window.startPrivateVideoCall = startPrivateVideoCall;
 
 function updateVideoDiagnostics() {
   const debugEl = document.getElementById('videoDebug');
-  if (!debugEl || document.getElementById('activeCallUI').style.display === 'none') return;
+  if (!debugEl || !isElementVisible('#activeCallUI')) return;
 
   let localStatus = 'Local: Disconnected';
   if (localStream) {
@@ -6235,11 +7229,11 @@ function openUploadModal() {
   const fileInput = document.getElementById('modalFileInput');
 
   currentUploadFile = null;
-  document.getElementById('uploadPreview').style.display = 'none';
-  document.getElementById('uploadDropZone').style.display = 'block';
+  hideElement('#uploadPreview');
+  showElement('#uploadDropZone', 'block');
   fileInput.value = '';
 
-  modal.style.display = 'flex';
+  showElement(modal, 'flex');
 
   dropZone.onclick = () => fileInput.click();
 
@@ -6269,7 +7263,7 @@ function openUploadModal() {
 }
 
 function closeUploadModal() {
-  document.getElementById('uploadModal').style.display = 'none';
+  hideElement('#uploadModal');
 }
 
 function handleFileSelection(file) {
@@ -6282,14 +7276,14 @@ function handleFileSelection(file) {
 
   const reader = new FileReader();
   reader.onload = (e) => {
-    document.getElementById('uploadDropZone').style.display = 'none';
+    hideElement('#uploadDropZone');
     const preview = document.getElementById('uploadPreview');
-    preview.style.display = 'block';
+    showElement(preview, 'block');
 
     document.getElementById('uploadFileName').textContent = file.name;
     const img = document.getElementById('uploadImagePreview');
     img.src = e.target.result;
-    img.style.display = 'block';
+    showElement(img, 'block');
   };
   reader.readAsDataURL(file);
 }
@@ -6400,7 +7394,7 @@ function setupEmojiPicker() {
 
       if (filtered.length === 0) {
         const msg = document.createElement('div');
-        msg.style.cssText = 'color: #b9bbbe; padding: 20px; text-align: center; grid-column: span 8;';
+        msg.className = 'emoji-empty-state';
         msg.textContent = 'No emojis found';
         container.appendChild(msg);
       }
@@ -6418,16 +7412,11 @@ function setupEmojiPicker() {
       filteredGifs.forEach(item => {
         const div = document.createElement('div');
         div.className = 'gif-item';
-        div.style.cssText = `
-           background-image: url('${item.url}');
-           background-size: cover;
-           background-position: center;
-           width: 100%;
-           height: 100px;
-           border-radius: 4px;
-           cursor: pointer;
-           grid-column: span 4; 
-        `;
+        const img = document.createElement('img');
+        img.className = 'gif-item-img';
+        img.src = item.url;
+        img.alt = item.keywords?.[0] || 'GIF';
+        div.appendChild(img);
 
         div.onclick = () => {
           const input = document.querySelector('.chatInput');
@@ -6449,7 +7438,7 @@ function setupEmojiPicker() {
 
       if (filteredGifs.length === 0) {
         const msg = document.createElement('div');
-        msg.style.cssText = 'color: #b9bbbe; padding: 20px; text-align: center; grid-column: span 8;';
+        msg.className = 'emoji-empty-state';
         msg.textContent = 'No GIFs found';
         container.appendChild(msg);
       }
@@ -6473,7 +7462,7 @@ function setupEmojiPicker() {
 
       const sidebar = document.querySelector('.emoji-sidebar');
       if (sidebar) {
-        sidebar.style.display = currentTab === 'emoji' ? 'flex' : 'none';
+        setElementVisible(sidebar, currentTab === 'emoji', 'flex');
       }
 
       if (searchInput) {
@@ -6487,7 +7476,7 @@ function setupEmojiPicker() {
   document.addEventListener('click', (e) => {
     const btn = document.querySelector('.chat-icon-btn');
     if (!picker.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
-      picker.style.display = 'none';
+      hideElement(picker);
       if (searchInput) searchInput.value = '';
     }
   });
@@ -6520,7 +7509,7 @@ function handleSearchSubmit(query) {
   if (!sidebar || !list) return;
 
   list.innerHTML = '';
-  sidebar.style.display = 'flex';
+  showElement(sidebar, 'flex');
 
   const messages = document.querySelectorAll('.messagesDisplay p');
   let matchCount = 0;
@@ -6594,17 +7583,17 @@ function createSearchResultCard(username, text, date, query) {
 
 function closeSearchResults() {
   const sidebar = document.getElementById('searchResultsSidebar');
-  if (sidebar) sidebar.style.display = 'none';
+  if (sidebar) hideElement(sidebar);
 }
 
 function toggleEmojiPicker() {
   const picker = document.getElementById('emojiPicker');
-  if (picker.style.display === 'none') {
-    picker.style.display = 'flex';
+  if (!isElementVisible(picker)) {
+    showElement(picker, 'flex');
     const searchInput = document.getElementById('emojiSearchInput');
     if (searchInput) searchInput.focus();
   } else {
-    picker.style.display = 'none';
+    hideElement(picker);
   }
 }
 
@@ -6612,12 +7601,12 @@ const profilePopout = document.getElementById('profilePopout');
 
 function closeProfilePopout() {
   if (profilePopout) {
-    profilePopout.style.display = 'none';
+    hideElement(profilePopout);
   }
 }
 
 document.addEventListener('click', (e) => {
-  if (profilePopout && profilePopout.style.display === 'block') {
+  if (isElementVisible(profilePopout)) {
     if (!profilePopout.contains(e.target) && !e.target.closest('.message-avatar') && !e.target.closest('.friend-item-avatar') && !e.target.closest('.message-username') && !e.target.closest('.card-avatar')) {
       closeProfilePopout();
     }
@@ -6651,11 +7640,17 @@ window.openProfilePopout = async function (username, x, y) {
     document.getElementById('popoutDescription').innerText = "Failed to load profile.";
   }
 
-  profilePopout.style.display = 'block';
+  const startX = Math.max(0, Number(x) || 0);
+  const startY = Math.max(0, Number(y) || 0);
+  setHomeRuntimeCss(
+    'profile-popout-position',
+    `#profilePopout { left: ${Math.round(startX)}px; top: ${Math.round(startY)}px; }`
+  );
+  showElement(profilePopout, 'block');
 
   const rect = profilePopout.getBoundingClientRect();
-  let finalX = x;
-  let finalY = y;
+  let finalX = startX;
+  let finalY = startY;
 
   if (finalX + rect.width > window.innerWidth) {
     finalX = window.innerWidth - rect.width - 20;
@@ -6664,8 +7659,10 @@ window.openProfilePopout = async function (username, x, y) {
     finalY = window.innerHeight - rect.height - 20;
   }
 
-  profilePopout.style.left = `${finalX}px`;
-  profilePopout.style.top = `${finalY}px`;
+  setHomeRuntimeCss(
+    'profile-popout-position',
+    `#profilePopout { left: ${Math.round(finalX)}px; top: ${Math.round(finalY)}px; }`
+  );
 }
 
 
@@ -7289,9 +8286,9 @@ function updateSettingsIdentityFields() {
   if (settingsUsernameValue) settingsUsernameValue.innerText = JWTusername;
   if (settingsEmailValue) settingsEmailValue.innerText = state.contact.email || 'Not added';
   if (settingsPhoneValue) settingsPhoneValue.innerText = state.contact.phoneNumber || 'Not added';
-  if (phoneVerificationRow) phoneVerificationRow.style.display = phoneAvailable ? '' : 'none';
+  setElementVisible(phoneVerificationRow, phoneAvailable);
   if (requestPhoneVerificationBtn) requestPhoneVerificationBtn.disabled = !phoneAvailable;
-  if (removePhoneNumberBtn) removePhoneNumberBtn.style.display = phoneAvailable ? '' : 'none';
+  setElementVisible(removePhoneNumberBtn, phoneAvailable);
   if (settingsEmailVerificationStatus) {
     settingsEmailVerificationStatus.textContent = state.contact.email
       ? (state.contact.emailVerified ? 'Verified' : 'Unverified')
@@ -7317,8 +8314,8 @@ function updateSettingsIdentityFields() {
       : 'Disabled';
     twoFactorStatusText.classList.toggle('verified', Boolean(state.twoFactor.enabled));
   }
-  if (enableTwoFactorBtn) enableTwoFactorBtn.style.display = state.twoFactor.enabled ? 'none' : '';
-  if (disableTwoFactorBtn) disableTwoFactorBtn.style.display = state.twoFactor.enabled ? '' : 'none';
+  setElementVisible(enableTwoFactorBtn, !state.twoFactor.enabled);
+  setElementVisible(disableTwoFactorBtn, state.twoFactor.enabled);
   if (regenerateBackupCodesBtn) regenerateBackupCodesBtn.disabled = !state.twoFactor.enabled;
   if (presenceStatusSelect) presenceStatusSelect.value = state.presenceStatus || 'online';
   if (previewName) previewName.textContent = JWTusername;
@@ -7328,10 +8325,12 @@ function updateSettingsIdentityFields() {
   }
 }
 
-function updateProfileVisuals(profilePictureUrl, description, profileBannerUrl = '', profileBannerColor = '') {
+function updateProfileVisuals(profilePictureUrl, description, profileBannerUrl = null, profileBannerColor = '') {
   const nextAvatarUrl = profilePictureUrl || homeDefaultAvatarUrl;
   const nextDescription = description || 'Click to add custom status';
-  const nextBannerColor = profileBannerColor || readSettingsState().profileBannerColor || '#0c0c0c';
+  const settingsState = readSettingsState();
+  const nextBannerColor = profileBannerColor || settingsState.profileBannerColor || '#0c0c0c';
+  const nextBannerUrl = profileBannerUrl === null ? settingsState.profileBannerUrl || '' : profileBannerUrl;
 
   document
     .querySelectorAll('.settings-avatar, .preview-avatar img, #popoutAvatar')
@@ -7352,12 +8351,7 @@ function updateProfileVisuals(profilePictureUrl, description, profileBannerUrl =
     customStatus.textContent = nextDescription;
   }
 
-  document.querySelectorAll('.preview-banner, .banner-color, #popoutHeaderColor').forEach((banner) => {
-    banner.style.backgroundColor = nextBannerColor;
-    banner.style.backgroundImage = profileBannerUrl ? `url("${profileBannerUrl}")` : '';
-    banner.style.backgroundSize = 'cover';
-    banner.style.backgroundPosition = 'center';
-  });
+  applyDynamicProfileBanner(nextBannerColor, nextBannerUrl);
 }
 
 function filterSettingsSidebarItems(query = '') {
@@ -7367,7 +8361,7 @@ function filterSettingsSidebarItems(query = '') {
   document.querySelectorAll('.settings-sidebar .settings-section').forEach((section) => {
     const items = Array.from(section.querySelectorAll('.settings-item[data-target]'));
     if (!items.length) {
-      section.style.display = normalizedQuery ? 'none' : '';
+      setElementVisible(section, !normalizedQuery);
       return;
     }
 
@@ -7375,7 +8369,7 @@ function filterSettingsSidebarItems(query = '') {
     items.forEach((item) => {
       const matches =
         !normalizedQuery || item.textContent.toLowerCase().includes(normalizedQuery);
-      item.style.display = matches ? '' : 'none';
+      setElementVisible(item, matches);
 
       if (matches) {
         visibleItemCount += 1;
@@ -7387,10 +8381,10 @@ function filterSettingsSidebarItems(query = '') {
 
     const groupTitle = section.querySelector('.settings-group-title');
     if (groupTitle) {
-      groupTitle.style.display = visibleItemCount ? '' : 'none';
+      setElementVisible(groupTitle, Boolean(visibleItemCount));
     }
 
-    section.style.display = visibleItemCount ? '' : 'none';
+    setElementVisible(section, Boolean(visibleItemCount));
   });
 
   return firstMatch;
@@ -7408,37 +8402,32 @@ function applyProfileTab(tabKey) {
   });
 
   document.querySelectorAll('[data-tab-panel]').forEach((panel) => {
-    panel.style.display = panel.dataset.tabPanel === targetTab ? 'block' : 'none';
+    setElementVisible(panel, panel.dataset.tabPanel === targetTab, 'block');
   });
 }
 
 function applyMessageDisplay(mode) {
   const isCompact = mode === 'compact';
-  const rootStyle = document.documentElement.style;
-
-  rootStyle.setProperty('--message-group-margin-top', isCompact ? '8px' : '17px');
-  rootStyle.setProperty('--message-group-padding', isCompact ? '1px 16px' : '2px 16px');
-  rootStyle.setProperty('--message-avatar-size', isCompact ? '32px' : '40px');
-  rootStyle.setProperty('--message-header-margin-bottom', isCompact ? '2px' : '4px');
-  rootStyle.setProperty('--message-username-size', isCompact ? '14px' : '16px');
-  rootStyle.setProperty('--message-text-line-height', isCompact ? '1.15rem' : '1.375rem');
+  document.documentElement.classList.toggle('message-display-compact', isCompact);
 }
 
 function applyMessageFontSize(fontSize) {
-  document.documentElement.style.setProperty('--message-text-size', `${fontSize}px`);
+  const normalizedFontSize = Math.round(normalizeSettingsNumber(fontSize, 16, 12, 24));
+  document.documentElement.classList.remove(...messageFontSizeClasses);
+  document.documentElement.classList.add(`message-font-size-${normalizedFontSize}`);
 }
 
 function applyZoomLevel(zoomLevel) {
-  if (document.body) {
-    document.body.style.zoom = `${zoomLevel}%`;
-  }
+  const normalizedZoom = normalizeSettingsNumber(zoomLevel, 100, 50, 150);
+  setHomeRuntimeCss('app-zoom', `body { zoom: ${normalizedZoom}%; }`);
 }
 
 function applySaturationLevel(saturation) {
-  if (document.body) {
-    document.body.style.filter =
-      saturation === 100 ? '' : `saturate(${Math.max(0, saturation)}%)`;
-  }
+  const normalizedSaturation = normalizeSettingsNumber(saturation, 100, 0, 100);
+  setHomeRuntimeCss(
+    'app-saturation',
+    normalizedSaturation === 100 ? '' : `body { filter: saturate(${normalizedSaturation}%); }`
+  );
 }
 
 function applyOutputVolume(volume) {
@@ -7490,14 +8479,8 @@ function applySliderValue(slider, value, index = 0) {
 
 function applyProfileBannerColor(color) {
   const nextColor = normalizeHexColor(color, '#0c0c0c');
-  document.querySelectorAll('.banner-color, .preview-banner, .profile-popout-header').forEach((element) => {
-    element.style.backgroundColor = nextColor;
-  });
-
-  const colorHex = document.querySelector('.color-hex');
-  if (colorHex) {
-    colorHex.textContent = nextColor;
-  }
+  const bannerUrl = readSettingsState().profileBannerUrl || '';
+  applyDynamicProfileBanner(nextColor, bannerUrl);
 }
 
 function applyReducedMotion(isEnabled) {
@@ -7589,6 +8572,25 @@ function handleToggleStateChange(settingKey, isActive) {
 
   if (settingKey === 'voiceChangerEnabled' || settingKey === 'voiceChangerPerCallEnabled') {
     updateVoiceChangerStateFromControls();
+  }
+
+  if (settingKey === 'desktopNotifications' && !isActive) {
+    stopDesktopAttentionState();
+  }
+
+  if (settingKey === 'unreadBadge' && !isActive) {
+    desktopUnreadCount = 0;
+    updateDesktopUnreadBadge(0);
+  }
+
+  if (settingKey === 'unreadBadge' && isActive) {
+    refreshAllUnreadBadges();
+  }
+
+  if (settingKey === 'taskbarFlash' && !isActive) {
+    getDesktopNotificationBridge()?.stopFlashing?.()?.catch?.((error) => {
+      console.warn('Could not stop taskbar flashing:', error);
+    });
   }
 }
 
@@ -8002,8 +9004,7 @@ function createKeybindRow(keybind, keybinds) {
   });
 
   const removeButton = document.createElement('button');
-  removeButton.className = 'settings-btn-danger';
-  removeButton.style.padding = '4px 8px';
+  removeButton.className = 'settings-btn-danger settings-btn-compact';
   removeButton.textContent = 'Remove';
   removeButton.addEventListener('click', () => {
     const nextKeybinds = keybinds.filter((item) => item !== keybind);
@@ -8034,8 +9035,7 @@ function renderSettingsKeybinds(keybinds = null) {
 
   if (!activeKeybinds.length) {
     const empty = document.createElement('div');
-    empty.className = 'empty-state-card';
-    empty.style.padding = '16px';
+    empty.className = 'empty-state-card padded';
     empty.textContent = 'No keybinds added.';
     list.appendChild(empty);
   }
@@ -9125,12 +10125,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // ===== Settings Tab Switching =====
 function switchSettingsTab(target) {
   document.querySelectorAll('.settings-view').forEach((view) => {
-    view.style.display = 'none';
+    hideElement(view);
   });
 
   const targetView = document.getElementById('view-' + target);
   if (targetView) {
-    targetView.style.display = 'block';
+    showElement(targetView, 'block');
   }
 
   document.querySelectorAll('.settings-item').forEach((item) => {
@@ -9260,7 +10260,7 @@ function setupSettingsInteractivity() {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       const modal = document.getElementById('settingsModal');
-      if (modal && modal.style.display === 'flex') {
+      if (isElementVisible(modal)) {
         closeSettingsModal();
       }
     }
@@ -9538,21 +10538,25 @@ function buildThemePalette(backgroundColor, textColor) {
 
 function applyTheme(bgColor, textColor) {
   const theme = buildThemePalette(bgColor, textColor);
-  const rootStyle = document.documentElement.style;
 
-  rootStyle.setProperty('--main-bg', theme.background);
-  rootStyle.setProperty('--second-bg', theme.secondBackground);
-  rootStyle.setProperty('--surface-raised', theme.raisedSurface);
-  rootStyle.setProperty('--surface-floating', theme.floatingSurface);
-  rootStyle.setProperty('--input-bg', theme.inputSurface);
-  rootStyle.setProperty('--input-strong', theme.inputStrongSurface);
-  rootStyle.setProperty('--border-subtle', theme.borderSubtle);
-  rootStyle.setProperty('--border-strong', theme.borderStrong);
-  rootStyle.setProperty('--text-main', theme.mainText);
-  rootStyle.setProperty('--text-muted', theme.mutedText);
-  rootStyle.setProperty('--text-soft', theme.softText);
-  rootStyle.setProperty('--text-inverse', theme.inverseText);
-  rootStyle.setProperty('--theme-shadow', theme.shadowColor);
+  setHomeRuntimeCss(
+    'theme',
+    `:root {
+  --main-bg: ${theme.background};
+  --second-bg: ${theme.secondBackground};
+  --surface-raised: ${theme.raisedSurface};
+  --surface-floating: ${theme.floatingSurface};
+  --input-bg: ${theme.inputSurface};
+  --input-strong: ${theme.inputStrongSurface};
+  --border-subtle: ${theme.borderSubtle};
+  --border-strong: ${theme.borderStrong};
+  --text-main: ${theme.mainText};
+  --text-muted: ${theme.mutedText};
+  --text-soft: ${theme.softText};
+  --text-inverse: ${theme.inverseText};
+  --theme-shadow: ${theme.shadowColor};
+}`
+  );
 
   return theme;
 }

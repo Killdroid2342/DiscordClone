@@ -3,12 +3,13 @@
 
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../CSS/Home.css?v=11" />
+  <link rel="stylesheet" href="../CSS/Home.css?v=12" />
   <script src="../JS/AppPaths.js?v=1"></script>
   <script src="../JS/emojis.js?v=2"></script>
-  <script src="../JS/Home.js?v=121" defer></script>
+  <script src="../JS/Home.js?v=123" defer></script>
 </head>
 
 <body>
@@ -1216,14 +1217,14 @@
         <div id="view-notifications" class="settings-view extracted-inline-2">
           <h2 class="settings-page-title">Notifications</h2>
 
-          <div class="toggle-item">
+          <div class="toggle-item" data-setting-key="desktopNotifications">
             <div class="toggle-info">
               <div class="toggle-label">Enable Desktop Notifications</div>
             </div>
             <div class="toggle-switch active"></div>
           </div>
 
-          <div class="toggle-item">
+          <div class="toggle-item" data-setting-key="unreadBadge">
             <div class="toggle-info">
               <div class="toggle-label">Enable Unread Message Badge</div>
               <div class="toggle-desc">Shows a red badge on the app icon when you have unread messages.</div>
@@ -1231,12 +1232,28 @@
             <div class="toggle-switch active"></div>
           </div>
 
-          <div class="toggle-item">
+          <div class="toggle-item" data-setting-key="mentionNotifications">
+            <div class="toggle-info">
+              <div class="toggle-label">Enable Mention Notifications</div>
+              <div class="toggle-desc">Show a stronger notification when a message mentions you.</div>
+            </div>
+            <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item" data-setting-key="taskbarFlash">
             <div class="toggle-info">
               <div class="toggle-label">Enable Taskbar Flashing</div>
               <div class="toggle-desc">Flash the app icon on the taskbar when you have a notification.</div>
             </div>
             <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="toggle-item" data-setting-key="emailNotifications">
+            <div class="toggle-info">
+              <div class="toggle-label">Enable Email Notifications</div>
+              <div class="toggle-desc">Send email alerts for direct messages, group DMs, and direct mentions after your email is verified.</div>
+            </div>
+            <div class="toggle-switch"></div>
           </div>
 
           <div class="settings-separator"></div>
