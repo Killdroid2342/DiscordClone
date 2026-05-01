@@ -260,3 +260,23 @@ input[type='checkbox'] {
     padding: 24px;
   }
 }
+
+@media (max-width: 420px) {
+  .background {
+    min-height: 100dvh;
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .logInFormDiv {
+    width: 100%;
+    min-height: 100dvh;
+    justify-content: center;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .outerModal {
+    padding: 12px;
+  }
+}
