@@ -121,6 +121,7 @@ let selectedServerID;
 let selectedChannelID;
 let currentServerName;
 let currentServerRole = 'user';
+let currentServerRoles = [];
 let currentServerChannels = [];
 let currentServerCategories = [];
 let currentServerVerificationLevel = 'none';
@@ -388,6 +389,18 @@ function getMessageSender(message = {}) {
   );
 }
 
+function getMessageId(message = {}) {
+  return (
+    message.messageID ||
+    message.MessageID ||
+    message.privateMessageID ||
+    message.PrivateMessageID ||
+    message.id ||
+    message.Id ||
+    ''
+  );
+}
+
 function getMessageText(message = {}) {
   return (
     message.userText ||
@@ -397,6 +410,16 @@ function getMessageText(message = {}) {
     ''
   );
 }
+
+const REPORT_REASON_OPTIONS = [
+  { value: 'spam', label: 'Spam' },
+  { value: 'harassment', label: 'Harassment' },
+  { value: 'hate', label: 'Hate or abuse' },
+  { value: 'explicit', label: 'Explicit content' },
+  { value: 'threat', label: 'Threat or harm' },
+  { value: 'impersonation', label: 'Impersonation' },
+  { value: 'other', label: 'Other' },
+];
 
 function normalizeMentionName(value) {
   return String(value || '')
@@ -905,12 +928,12 @@ function BackLastModal() {
 }
 
 function buildServerRoleBadge(role = 'user') {
-  const normalizedRole = role || 'user';
+  const normalizedRole = normalizeRoleName(role);
   const roleBadge = document.createElement('span');
   roleBadge.classList.add('role-badge');
   roleBadge.dataset.role = normalizedRole;
-  roleBadge.textContent = normalizedRole === 'owner' ? 'O' : 'M';
-  roleBadge.title = normalizedRole;
+  roleBadge.textContent = normalizedRole.slice(0, 1).toUpperCase();
+  roleBadge.title = formatRoleName(normalizedRole);
   return roleBadge;
 }
 
@@ -920,6 +943,7 @@ async function openServer(server, fallbackRole = 'user') {
   selectedServerID = server.serverID;
   currentServerName = server.serverName;
   currentServerRole = role;
+  currentServerRoles = [];
   applyServerRuleState(server);
 
   hideElement('.secondColumn');
@@ -1277,19 +1301,30 @@ function hydrateLinkPreviews(messageEl, text = '') {
 function renderCompactMessage(message, scope = 'server') {
   const messageEl = document.createElement('div');
   messageEl.className = 'compact-message';
-  messageEl.dataset.messageId =
-    message.messageID ||
-    message.MessageID ||
-    message.privateMessageID ||
-    message.PrivateMessageID ||
-    message.id ||
-    message.Id ||
-    '';
+  messageEl.dataset.messageId = getMessageId(message);
 
   const header = document.createElement('div');
   header.className = 'compact-message-header';
   const sender = getMessageSender(message);
-  header.textContent = `${sender} · ${formatMessageDate(message.date)}`;
+  const headerText = document.createElement('span');
+  headerText.textContent = `${sender} · ${formatMessageDate(message.date)}`;
+  header.appendChild(headerText);
+  if (sender && sender !== JWTusername && messageEl.dataset.messageId) {
+    const reportButton = document.createElement('button');
+    reportButton.type = 'button';
+    reportButton.className = 'compact-message-report-btn';
+    reportButton.textContent = 'Report';
+    reportButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openReportDialog({
+        targetType: 'message',
+        scopeType: scope,
+        message,
+        targetUsername: sender,
+      });
+    });
+    header.appendChild(reportButton);
+  }
   messageEl.appendChild(header);
 
   if (message.replyToMessageId) {
@@ -5542,6 +5577,21 @@ const SERVER_VERIFICATION_LEVELS = [
   { value: 'highest', label: 'Highest - verified phone' },
 ];
 const MAX_SERVER_RULE_MINUTES = 525600;
+const ROLE_PERMISSION_DEFINITIONS = [
+  { key: 'canManageServer', label: 'Manage server', group: 'Management' },
+  { key: 'canManageChannels', label: 'Manage channels', group: 'Management' },
+  { key: 'canManageMembers', label: 'Manage members', group: 'Management' },
+  { key: 'canBanMembers', label: 'Ban members', group: 'Management' },
+  { key: 'canCreateInvites', label: 'Create invites', group: 'Access' },
+  { key: 'canSendMessages', label: 'Send messages', group: 'Access' },
+  { key: 'canJoinVoice', label: 'Join voice', group: 'Access' },
+];
+const DEFAULT_ROLE_SORT_ORDER = {
+  owner: 0,
+  admin: 1,
+  moderator: 2,
+  user: 100,
+};
 
 function getServerVerificationLabel(level) {
   return SERVER_VERIFICATION_LEVELS.find((item) => item.value === level)?.label || 'None';
@@ -5589,6 +5639,127 @@ function formatServerRulesSummary() {
 
 function normalizeRoleName(value) {
   return String(value || 'user').trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function formatRoleName(value) {
+  return normalizeRoleName(value)
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'User';
+}
+
+function pascalizeRolePermissionKey(key) {
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function getRoleProperty(role = {}, key, fallback = '') {
+  const pascalKey = pascalizeRolePermissionKey(key);
+  return role[key] ?? role[pascalKey] ?? fallback;
+}
+
+function getServerRoleId(role = {}) {
+  return String(getRoleProperty(role, 'id', '') || '');
+}
+
+function getServerRoleName(role = {}) {
+  return normalizeRoleName(getRoleProperty(role, 'name', 'user'));
+}
+
+function getServerRolePosition(role = {}) {
+  const position = Number(getRoleProperty(role, 'position', 0));
+  return Number.isFinite(position) ? position : 0;
+}
+
+function normalizeServerRole(role = {}) {
+  const normalizedRole = {
+    id: getServerRoleId(role),
+    name: getServerRoleName(role),
+    position: getServerRolePosition(role),
+  };
+
+  ROLE_PERMISSION_DEFINITIONS.forEach(({ key }) => {
+    normalizedRole[key] = Boolean(getRoleProperty(role, key, false));
+  });
+
+  if (role.isDraft) {
+    normalizedRole.isDraft = true;
+  }
+
+  return normalizedRole;
+}
+
+function sortServerRoles(roles = []) {
+  return [...roles].sort((a, b) => {
+    const aName = getServerRoleName(a);
+    const bName = getServerRoleName(b);
+    const aRank = DEFAULT_ROLE_SORT_ORDER[aName] ?? getServerRolePosition(a) + 10;
+    const bRank = DEFAULT_ROLE_SORT_ORDER[bName] ?? getServerRolePosition(b) + 10;
+    return aRank - bRank || getServerRolePosition(a) - getServerRolePosition(b) || aName.localeCompare(bName);
+  });
+}
+
+function getRoleSortPosition(roleName = 'user') {
+  const normalizedRole = normalizeRoleName(roleName);
+  const cachedRole = currentServerRoles.find((role) => getServerRoleName(role) === normalizedRole);
+  return DEFAULT_ROLE_SORT_ORDER[normalizedRole] ?? (cachedRole ? cachedRole.position + 10 : 50);
+}
+
+function getRoleEnabledPermissionLabels(role = {}) {
+  return ROLE_PERMISSION_DEFINITIONS
+    .filter(({ key }) => Boolean(role[key]))
+    .map(({ label }) => label);
+}
+
+function getRolePermissionSummary(role = {}) {
+  const labels = getRoleEnabledPermissionLabels(role);
+  if (!labels.length) {
+    return 'No permissions';
+  }
+
+  if (labels.length <= 2) {
+    return labels.join(', ');
+  }
+
+  return `${labels.slice(0, 2).join(', ')} +${labels.length - 2}`;
+}
+
+function canManageRolesFromRoleList(roles = currentServerRoles) {
+  const currentRoleName = getCurrentServerRoleName();
+  if (currentRoleName === 'owner') {
+    return true;
+  }
+
+  const role = roles.find((item) => getServerRoleName(item) === currentRoleName);
+  return Boolean(role?.canManageServer);
+}
+
+async function fetchServerRoles({ force = false, silent = false } = {}) {
+  if (!selectedServerID) {
+    currentServerRoles = [];
+    return [];
+  }
+
+  if (!force && currentServerRoles.length) {
+    return currentServerRoles;
+  }
+
+  const serverId = selectedServerID;
+  try {
+    const response = await axios.get(
+      `${homeApiBase}/api/Server/GetRoles?serverId=${encodeURIComponent(serverId)}`
+    );
+    const roles = sortServerRoles((Array.isArray(response.data) ? response.data : []).map(normalizeServerRole));
+    if (selectedServerID === serverId) {
+      currentServerRoles = roles;
+    }
+    return roles;
+  } catch (error) {
+    if (!silent) {
+      showAppMessage(getApiErrorMessage(error, 'Could not load roles.'), 'error');
+    }
+    throw error;
+  }
 }
 
 function isVoiceLikeChannelType(type) {
@@ -5656,9 +5827,11 @@ function renderServerManagementControls(container) {
   const actions = [
     ['+ Channel', createChannelFromPrompt],
     ['+ Category', createCategoryFromPrompt],
+    ['Roles', openRolesAndPermissionsDialog],
     ['Voice Perms', () => openVoiceChannelPermissionsDialog()],
     ['Invite', createLimitedInviteFromPrompt],
     ['Rules', updateServerVerificationFromPrompt],
+    ['Reports', openServerReportsDialog],
     ['Audit', openAuditLogsDialog],
     ['Leave', leaveSelectedServer],
   ];
@@ -6085,6 +6258,432 @@ async function createLimitedInviteFromPrompt() {
   }
 }
 
+function createRoleChip(roleName, extraClass = '') {
+  const chip = document.createElement('span');
+  const normalizedRole = normalizeRoleName(roleName);
+  chip.className = `server-member-role-chip ${extraClass}`.trim();
+  chip.dataset.role = normalizedRole;
+  chip.textContent = formatRoleName(normalizedRole);
+  chip.title = normalizedRole;
+  return chip;
+}
+
+function createDraftRole() {
+  return normalizeServerRole({
+    id: 'draft',
+    name: 'new-role',
+    position: currentServerRoles.length + 1,
+    canCreateInvites: true,
+    canSendMessages: true,
+    canJoinVoice: true,
+    isDraft: true,
+  });
+}
+
+function countMembersForRole(members = [], roleName = 'user') {
+  const normalizedRole = normalizeRoleName(roleName);
+  return members.filter((member) => normalizeRoleName(member.role) === normalizedRole).length;
+}
+
+function renderRoleMembersPreview(container, members = [], roleName = 'user') {
+  const normalizedRole = normalizeRoleName(roleName);
+  const roleMembers = members.filter((member) => normalizeRoleName(member.role) === normalizedRole);
+
+  container.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'role-members-label';
+  label.textContent = `Members (${roleMembers.length})`;
+  container.appendChild(label);
+
+  const list = document.createElement('div');
+  list.className = 'role-members-preview-list';
+  if (!roleMembers.length) {
+    const empty = document.createElement('span');
+    empty.className = 'role-member-pill muted';
+    empty.textContent = 'No members';
+    list.appendChild(empty);
+  } else {
+    roleMembers.slice(0, 12).forEach((member) => {
+      const pill = document.createElement('span');
+      pill.className = 'role-member-pill';
+      pill.textContent = member.username;
+      list.appendChild(pill);
+    });
+
+    if (roleMembers.length > 12) {
+      const extra = document.createElement('span');
+      extra.className = 'role-member-pill muted';
+      extra.textContent = `+${roleMembers.length - 12}`;
+      list.appendChild(extra);
+    }
+  }
+  container.appendChild(list);
+}
+
+function openRolesAndPermissionsDialog() {
+  if (!selectedServerID) {
+    return;
+  }
+
+  closeAccountActionDialog();
+
+  let roles = [];
+  let members = [];
+  let selectedRoleId = '';
+  let draftRole = null;
+  let canManageRoles = false;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog roles-permissions-dialog';
+
+  const header = document.createElement('div');
+  header.className = 'role-manager-header';
+  const titleBlock = document.createElement('div');
+  const heading = document.createElement('h3');
+  heading.textContent = 'Roles & Permissions';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = currentServerName || 'Server roles';
+  titleBlock.appendChild(heading);
+  titleBlock.appendChild(copy);
+
+  const newRoleButton = document.createElement('button');
+  newRoleButton.type = 'button';
+  newRoleButton.className = 'account-action-submit role-new-btn';
+  newRoleButton.textContent = '+ Role';
+  header.appendChild(titleBlock);
+  header.appendChild(newRoleButton);
+
+  const status = document.createElement('div');
+  status.className = 'role-manager-status';
+  status.setAttribute('role', 'status');
+
+  const shell = document.createElement('div');
+  shell.className = 'roles-permissions-shell';
+  const roleList = document.createElement('div');
+  roleList.className = 'role-list';
+  const roleDetail = document.createElement('div');
+  roleDetail.className = 'role-detail-panel';
+  shell.appendChild(roleList);
+  shell.appendChild(roleDetail);
+
+  const footer = document.createElement('div');
+  footer.className = 'account-action-buttons';
+  const doneButton = document.createElement('button');
+  doneButton.type = 'button';
+  doneButton.className = 'account-action-cancel';
+  doneButton.textContent = 'Done';
+  const refreshButton = document.createElement('button');
+  refreshButton.type = 'button';
+  refreshButton.className = 'account-action-submit';
+  refreshButton.textContent = 'Refresh';
+  footer.appendChild(doneButton);
+  footer.appendChild(refreshButton);
+
+  const close = () => overlay.remove();
+  doneButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const setStatus = (message, variant = '') => {
+    status.textContent = message;
+    status.dataset.variant = variant;
+  };
+
+  const getSelectedRole = () => {
+    if (selectedRoleId === 'draft' && draftRole) {
+      return draftRole;
+    }
+
+    return roles.find((role) => getServerRoleId(role) === selectedRoleId) || roles[0] || null;
+  };
+
+  const selectRole = (roleId) => {
+    selectedRoleId = roleId;
+    renderRoleList();
+    renderRoleDetail();
+  };
+
+  const renderRoleList = () => {
+    roleList.innerHTML = '';
+    const listRoles = draftRole ? [draftRole, ...roles] : roles;
+    if (!listRoles.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state-card padded';
+      empty.textContent = 'No roles found.';
+      roleList.appendChild(empty);
+      return;
+    }
+
+    listRoles.forEach((role) => {
+      const roleId = role.isDraft ? 'draft' : getServerRoleId(role);
+      const roleName = getServerRoleName(role);
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'role-list-item';
+      item.dataset.role = roleName;
+      item.classList.toggle('active', roleId === selectedRoleId);
+
+      const main = document.createElement('span');
+      main.className = 'role-list-main';
+      const name = document.createElement('strong');
+      name.textContent = role.isDraft ? 'Unsaved role' : formatRoleName(roleName);
+      const summary = document.createElement('span');
+      summary.textContent = role.isDraft
+        ? 'Choose a name and permissions'
+        : getRolePermissionSummary(role);
+      main.appendChild(name);
+      main.appendChild(summary);
+
+      const count = document.createElement('span');
+      count.className = 'role-list-count';
+      count.textContent = role.isDraft ? 'New' : String(countMembersForRole(members, roleName));
+
+      item.appendChild(main);
+      item.appendChild(count);
+      item.addEventListener('click', () => selectRole(roleId));
+      roleList.appendChild(item);
+    });
+  };
+
+  const renderRoleDetail = () => {
+    roleDetail.innerHTML = '';
+    const role = getSelectedRole();
+    if (!role) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state-card padded';
+      empty.textContent = 'Select a role.';
+      roleDetail.appendChild(empty);
+      return;
+    }
+
+    const roleName = getServerRoleName(role);
+    const isOwnerRole = roleName === 'owner';
+    const isDraft = Boolean(role.isDraft);
+    const controlsLocked = !canManageRoles || isOwnerRole;
+
+    const form = document.createElement('form');
+    form.className = 'role-detail-form';
+
+    const top = document.createElement('div');
+    top.className = 'role-detail-top';
+    const title = document.createElement('div');
+    title.className = 'role-detail-title';
+    title.appendChild(createRoleChip(roleName, 'large'));
+    const summary = document.createElement('span');
+    summary.textContent = getRolePermissionSummary(role);
+    title.appendChild(summary);
+    top.appendChild(title);
+    form.appendChild(top);
+
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'role-field-label';
+    nameLabel.textContent = 'Role name';
+    const nameInput = document.createElement('input');
+    nameInput.name = 'name';
+    nameInput.value = roleName;
+    nameInput.maxLength = 40;
+    nameInput.pattern = '[A-Za-z0-9._ -]+';
+    nameInput.disabled = controlsLocked || !isDraft;
+    nameInput.required = true;
+    nameLabel.appendChild(nameInput);
+    form.appendChild(nameLabel);
+
+    const permissionGroups = document.createElement('div');
+    permissionGroups.className = 'role-permission-grid';
+    Array.from(new Set(ROLE_PERMISSION_DEFINITIONS.map((permission) => permission.group))).forEach((group) => {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'role-permission-group';
+      const groupTitle = document.createElement('h4');
+      groupTitle.textContent = group;
+      groupEl.appendChild(groupTitle);
+
+      ROLE_PERMISSION_DEFINITIONS
+        .filter((permission) => permission.group === group)
+        .forEach(({ key, label }) => {
+          const row = document.createElement('label');
+          row.className = 'role-permission-toggle';
+          const text = document.createElement('span');
+          text.textContent = label;
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.name = key;
+          input.checked = Boolean(role[key]);
+          input.disabled = controlsLocked;
+          row.appendChild(text);
+          row.appendChild(input);
+          groupEl.appendChild(row);
+        });
+
+      permissionGroups.appendChild(groupEl);
+    });
+    form.appendChild(permissionGroups);
+
+    const memberPreview = document.createElement('div');
+    memberPreview.className = 'role-members-preview';
+    renderRoleMembersPreview(memberPreview, members, roleName);
+    form.appendChild(memberPreview);
+
+    const error = document.createElement('div');
+    error.className = 'account-action-error';
+    form.appendChild(error);
+
+    const actions = document.createElement('div');
+    actions.className = 'account-action-buttons role-detail-actions';
+
+    if (!isDraft && !['owner', 'user'].includes(roleName) && canManageRoles) {
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'account-action-cancel danger-text';
+      deleteButton.textContent = 'Delete';
+      deleteButton.addEventListener('click', () => deleteSelectedRole(role, deleteButton));
+      actions.appendChild(deleteButton);
+    }
+
+    const saveButton = document.createElement('button');
+    saveButton.type = 'submit';
+    saveButton.className = 'account-action-submit';
+    saveButton.textContent = isDraft ? 'Create Role' : 'Save Permissions';
+    saveButton.disabled = controlsLocked;
+    actions.appendChild(saveButton);
+    form.appendChild(actions);
+
+    if (!canManageRoles) {
+      error.textContent = 'You need Manage server permission to edit roles.';
+    } else if (isOwnerRole) {
+      error.textContent = 'Owner permissions are managed automatically.';
+    } else if (!isDraft) {
+      nameInput.title = 'Create a new role to use a different name.';
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (controlsLocked) return;
+      error.textContent = '';
+
+      const normalizedName = normalizeRoleName(nameInput.value);
+      if (!normalizedName || normalizedName.length > 40) {
+        error.textContent = 'Role name must be 1-40 characters.';
+        return;
+      }
+      if (normalizedName === 'owner') {
+        error.textContent = 'The owner role is managed automatically.';
+        return;
+      }
+
+      const payload = {
+        roleId: isDraft ? null : getServerRoleId(role),
+        serverId: selectedServerID,
+        name: normalizedName,
+      };
+      ROLE_PERMISSION_DEFINITIONS.forEach(({ key }) => {
+        payload[key] = Boolean(form.elements[key]?.checked);
+      });
+
+      try {
+        setBusyState(saveButton, true, isDraft ? 'Creating...' : 'Saving...');
+        const response = await axios.post(`${homeApiBase}/api/Server/UpsertRole`, payload);
+        const savedRole = normalizeServerRole(response.data || {});
+        draftRole = null;
+        await loadRolesAndMembers(savedRole.id || selectedRoleId);
+        showAppMessage(isDraft ? 'Role created.' : 'Role permissions saved.', 'success');
+      } catch (errorResponse) {
+        error.textContent = getApiErrorMessage(errorResponse, 'Could not save role.');
+      } finally {
+        setBusyState(saveButton, false);
+      }
+    });
+
+    roleDetail.appendChild(form);
+  };
+
+  const deleteSelectedRole = async (role, button) => {
+    const roleName = getServerRoleName(role);
+    const confirmed = await openSimpleFormDialog({
+      title: 'Delete Role',
+      description: `Move members with ${formatRoleName(roleName)} back to User?`,
+      fields: [],
+      confirmText: 'Delete',
+      danger: true,
+      preserveExisting: true,
+    });
+    if (confirmed === null) {
+      return;
+    }
+
+    try {
+      setBusyState(button, true, 'Deleting...');
+      await axios.post(`${homeApiBase}/api/Server/DeleteRole`, {
+        serverId: selectedServerID,
+        roleId: getServerRoleId(role),
+      });
+      draftRole = null;
+      selectedRoleId = '';
+      await loadRolesAndMembers();
+      await fetchServerMembers();
+      showAppMessage('Role deleted.', 'success');
+    } catch (error) {
+      setStatus(getApiErrorMessage(error, 'Could not delete role.'), 'error');
+    } finally {
+      setBusyState(button, false);
+    }
+  };
+
+  const loadRolesAndMembers = async (nextSelectedRoleId = '') => {
+    setStatus('Loading roles...');
+    roleList.textContent = 'Loading roles...';
+    roleDetail.innerHTML = '';
+    try {
+      const [loadedRoles, membersResponse] = await Promise.all([
+        fetchServerRoles({ force: true }),
+        axios.get(`${homeApiBase}/api/Server/GetServerMembers?serverId=${encodeURIComponent(selectedServerID)}`),
+      ]);
+      roles = loadedRoles;
+      members = Array.isArray(membersResponse.data) ? membersResponse.data : [];
+      canManageRoles = canManageRolesFromRoleList(roles);
+      newRoleButton.disabled = !canManageRoles;
+      if (nextSelectedRoleId) {
+        selectedRoleId = nextSelectedRoleId;
+      } else if (!selectedRoleId || !roles.some((role) => getServerRoleId(role) === selectedRoleId)) {
+        selectedRoleId = roles.find((role) => getServerRoleName(role) !== 'owner')?.id || roles[0]?.id || '';
+      }
+      setStatus(canManageRoles ? `${roles.length} roles` : 'View-only');
+      renderRoleList();
+      renderRoleDetail();
+    } catch (error) {
+      setStatus(getApiErrorMessage(error, 'Could not load roles.'), 'error');
+      roleList.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'empty-state-card padded';
+      empty.textContent = 'Roles unavailable.';
+      roleList.appendChild(empty);
+    }
+  };
+
+  newRoleButton.addEventListener('click', () => {
+    if (!canManageRoles) {
+      return;
+    }
+    draftRole = createDraftRole();
+    selectRole('draft');
+  });
+  refreshButton.addEventListener('click', () => {
+    draftRole = null;
+    loadRolesAndMembers(selectedRoleId);
+  });
+
+  dialog.appendChild(header);
+  dialog.appendChild(status);
+  dialog.appendChild(shell);
+  dialog.appendChild(footer);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  loadRolesAndMembers();
+}
+
 function formatAuditAction(actionType = '') {
   return String(actionType || 'audit_event')
     .replace(/[_-]+/g, ' ')
@@ -6273,6 +6872,299 @@ function openAuditLogsDialog() {
   loadLogs();
 }
 
+function getActiveReportScope(targetType = 'user') {
+  if (currentGroupId && isElementVisible('.privateMessage')) {
+    return 'group';
+  }
+
+  if (selectedServerID && isElementVisible('#serverDetails')) {
+    return 'server';
+  }
+
+  if (targetType === 'message' && currentFriend && isElementVisible('.privateMessage')) {
+    return 'dm';
+  }
+
+  return 'account';
+}
+
+function buildReportPayload({ targetType, scopeType, message, targetUsername, reason, description }) {
+  const normalizedScope = scopeType || getActiveReportScope(targetType);
+  const payload = {
+    scopeType: normalizedScope,
+    targetType,
+    targetUsername,
+    reason,
+    description,
+  };
+
+  if (normalizedScope === 'server' && selectedServerID) {
+    payload.serverId = selectedServerID;
+  }
+  if (normalizedScope === 'server' && selectedChannelID) {
+    payload.channelId = selectedChannelID;
+  }
+  if (normalizedScope === 'group' && currentGroupId) {
+    payload.groupId = currentGroupId;
+  }
+  if (targetType === 'message') {
+    payload.messageId = getMessageId(message);
+  }
+
+  return payload;
+}
+
+async function openReportDialog({ targetType, scopeType = 'account', message = null, targetUsername = '' }) {
+  if (!targetType) return;
+
+  const isMessageReport = targetType === 'message';
+  const targetLabel = isMessageReport
+    ? `message from ${targetUsername || 'this user'}`
+    : `user ${targetUsername}`;
+
+  const result = await openSimpleFormDialog({
+    title: isMessageReport ? 'Report Message' : 'Report User',
+    description: `Send a report for ${targetLabel}.`,
+    fields: [
+      {
+        name: 'reason',
+        label: 'Reason',
+        options: REPORT_REASON_OPTIONS,
+      },
+      {
+        name: 'description',
+        label: 'Details (optional)',
+        type: 'textarea',
+        maxLength: 1000,
+        rows: 4,
+        required: false,
+      },
+    ],
+    confirmText: 'Submit Report',
+    danger: true,
+  });
+
+  if (!result) return;
+
+  const payload = buildReportPayload({
+    targetType,
+    scopeType,
+    message,
+    targetUsername,
+    reason: result.reason,
+    description: result.description?.trim() || null,
+  });
+
+  try {
+    await axios.post(`${homeApiBase}/api/Reports/SubmitReport`, payload);
+    showAppMessage('Report submitted.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not submit report.'), 'error');
+  }
+}
+
+function formatReportReason(reason = '') {
+  const option = REPORT_REASON_OPTIONS.find((item) => item.value === reason);
+  return option ? option.label : formatAuditAction(reason || 'report');
+}
+
+function formatReportStatus(status = '') {
+  return formatAuditAction(status || 'open');
+}
+
+function getReportTargetLabel(report = {}) {
+  if (report.targetType === 'message') {
+    return `Message from @${report.targetUsername || 'unknown'}`;
+  }
+
+  return `@${report.targetUsername || 'unknown'}`;
+}
+
+function renderReportRow(report = {}, onStatusChange) {
+  const row = document.createElement('div');
+  row.className = 'audit-log-row report-row';
+
+  const marker = document.createElement('div');
+  marker.className = 'audit-log-marker';
+  marker.textContent = String(report.status || 'open').slice(0, 1).toUpperCase();
+
+  const content = document.createElement('div');
+  content.className = 'audit-log-content';
+
+  const title = document.createElement('div');
+  title.className = 'audit-log-title';
+  title.textContent = `${getReportTargetLabel(report)} - ${formatReportReason(report.reason)}`;
+
+  const meta = document.createElement('div');
+  meta.className = 'audit-log-meta';
+  meta.textContent = `${formatReportStatus(report.status)} by ${report.reportedByUsername || 'Unknown'} - ${formatAuditTimestamp(report.createdAt)}`;
+
+  content.appendChild(title);
+  content.appendChild(meta);
+
+  if (report.messagePreview) {
+    const preview = document.createElement('div');
+    preview.className = 'audit-log-details';
+    preview.textContent = report.messagePreview;
+    content.appendChild(preview);
+  }
+
+  if (report.description) {
+    const details = document.createElement('div');
+    details.className = 'audit-log-details';
+    details.textContent = report.description;
+    content.appendChild(details);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'report-row-actions';
+  [
+    ['Review', 'reviewed'],
+    ['Resolve', 'resolved'],
+    ['Dismiss', 'dismissed'],
+  ].forEach(([label, status]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'server-tool-btn';
+    button.textContent = label;
+    button.disabled = report.status === status;
+    button.addEventListener('click', () => onStatusChange(report, status));
+    actions.appendChild(button);
+  });
+  content.appendChild(actions);
+
+  row.appendChild(marker);
+  row.appendChild(content);
+  return row;
+}
+
+function openServerReportsDialog() {
+  if (!selectedServerID) {
+    return;
+  }
+
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog audit-log-dialog report-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Reports';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = currentServerName || 'Server reports';
+
+  const statusFilter = document.createElement('select');
+  statusFilter.className = 'account-action-select report-status-filter';
+  [
+    ['open', 'Open'],
+    ['all', 'All'],
+    ['reviewed', 'Reviewed'],
+    ['resolved', 'Resolved'],
+    ['dismissed', 'Dismissed'],
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    statusFilter.appendChild(option);
+  });
+
+  const list = document.createElement('div');
+  list.className = 'audit-log-list report-list';
+  list.textContent = 'Loading reports...';
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const doneButton = document.createElement('button');
+  doneButton.type = 'button';
+  doneButton.className = 'account-action-cancel';
+  doneButton.textContent = 'Done';
+  const refreshButton = document.createElement('button');
+  refreshButton.type = 'button';
+  refreshButton.className = 'account-action-submit';
+  refreshButton.textContent = 'Refresh';
+  actions.appendChild(doneButton);
+  actions.appendChild(refreshButton);
+
+  const close = () => overlay.remove();
+  doneButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const updateStatus = async (report, status) => {
+    let note = '';
+    if (status !== 'reviewed') {
+      const result = await openSimpleFormDialog({
+        title: `${formatReportStatus(status)} Report`,
+        fields: [
+          {
+            name: 'note',
+            label: 'Resolution note (optional)',
+            type: 'textarea',
+            maxLength: 1000,
+            rows: 3,
+            required: false,
+          },
+        ],
+        confirmText: formatReportStatus(status),
+        preserveExisting: true,
+      });
+      if (!result) return;
+      note = result.note?.trim() || '';
+    }
+
+    try {
+      await axios.post(`${homeApiBase}/api/Reports/UpdateReportStatus`, {
+        serverId: selectedServerID,
+        reportId: report.id,
+        status,
+        resolutionNote: note || null,
+      });
+      await loadReports();
+      showAppMessage('Report updated.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not update report.'), 'error');
+    }
+  };
+
+  const loadReports = async () => {
+    list.textContent = 'Loading reports...';
+    try {
+      const res = await axios.get(
+        `${homeApiBase}/api/Reports/GetServerReports?serverId=${encodeURIComponent(selectedServerID)}&status=${encodeURIComponent(statusFilter.value)}&take=100`
+      );
+      const reports = Array.isArray(res.data) ? res.data : [];
+      list.innerHTML = '';
+      if (!reports.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state-card padded';
+        empty.textContent = 'No reports found.';
+        list.appendChild(empty);
+        return;
+      }
+
+      reports.forEach((report) => list.appendChild(renderReportRow(report, updateStatus)));
+    } catch (error) {
+      list.textContent = getApiErrorMessage(error, 'Could not load reports.');
+    }
+  };
+
+  statusFilter.addEventListener('change', loadReports);
+  refreshButton.addEventListener('click', loadReports);
+
+  dialog.appendChild(heading);
+  dialog.appendChild(copy);
+  dialog.appendChild(statusFilter);
+  dialog.appendChild(list);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  loadReports();
+}
+
 async function leaveSelectedServer() {
   if (!selectedServerID || !await askConfirm('Leave Server', 'Leave this server?', { danger: true, confirmText: 'Leave' })) return;
 
@@ -6385,6 +7277,7 @@ async function fetchServerDetails() {
 
     await refreshUnreadIndicators();
 
+    await fetchServerRoles({ force: true, silent: true }).catch(() => []);
     await fetchServerMembers();
     watchVoiceServer(selectedServerID).catch((err) => {
       console.error('Voice roster watch failed after loading channels:', err);
@@ -6410,27 +7303,31 @@ async function fetchServerMembers() {
     membersList.innerHTML = '<p class="serverAccounts">Members</p>';
 
     members.sort((a, b) => {
-      if (a.role === 'owner') return -1;
-      if (b.role === 'owner') return 1;
-      return a.username.localeCompare(b.username);
+      const roleDelta = getRoleSortPosition(a.role) - getRoleSortPosition(b.role);
+      return roleDelta || a.username.localeCompare(b.username);
     });
 
     members.forEach(member => {
+      const memberRole = normalizeRoleName(member.role);
       const memberEl = document.createElement('div');
       memberEl.dataset.username = member.username;
+      memberEl.dataset.role = memberRole;
       memberEl.classList.add('server-member-row');
-      memberEl.classList.toggle('is-owner', member.role === 'owner');
+      memberEl.classList.toggle('is-owner', memberRole === 'owner');
 
       const avatar = document.createElement('div');
       avatar.className = 'server-member-avatar default-avatar-bg';
       avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
 
       const name = document.createElement('span');
+      name.className = 'server-member-name';
       name.textContent = member.username;
       name.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
 
       memberEl.appendChild(avatar);
       memberEl.appendChild(name);
+      memberEl.appendChild(createRoleChip(memberRole));
+      memberEl.appendChild(renderMemberModerationBadges(member));
       memberEl.appendChild(renderMemberModerationActions(member));
 
       membersList.appendChild(memberEl);
@@ -6509,6 +7406,12 @@ async function startSignalR() {
     signalRConnection.on("UserLeft", (username) => {
       console.log("User left:", username);
       fetchServerMembers();
+    });
+
+    signalRConnection.on("MemberModerationUpdated", (serverId) => {
+      if (serverId === selectedServerID) {
+        fetchServerMembers();
+      }
     });
 
     signalRConnection.on("VoiceUsersUpdated", (serverId, users) => {
@@ -7619,6 +8522,24 @@ window.openProfilePopout = async function (username, x, y) {
   document.getElementById('popoutUsername').innerText = username;
   document.getElementById('popoutDescription').innerText = "Loading...";
   document.getElementById('popoutAvatar').src = homeDefaultAvatarUrl;
+  let reportButton = document.getElementById('profileReportBtn');
+  if (!reportButton) {
+    reportButton = document.createElement('button');
+    reportButton.id = 'profileReportBtn';
+    reportButton.type = 'button';
+    reportButton.className = 'profile-popout-report-btn';
+    document.querySelector('#profilePopout .profile-popout-body')?.appendChild(reportButton);
+  }
+  reportButton.textContent = 'Report User';
+  reportButton.hidden = username === JWTusername;
+  reportButton.onclick = () => {
+    closeProfilePopout();
+    openReportDialog({
+      targetType: 'user',
+      scopeType: getActiveReportScope('user'),
+      targetUsername: username,
+    });
+  };
 
   try {
     const res = await axios.get(`${homeApiBase}/api/Account/GetAccountProfile?username=${encodeURIComponent(username)}`);
@@ -7890,16 +8811,30 @@ function renderMemberModerationActions(member) {
   const actions = document.createElement('div');
   actions.className = 'member-actions';
 
-  if (member.username === JWTusername) {
+  if (member.username === JWTusername || normalizeRoleName(member.role) === 'owner') {
     return actions;
   }
 
-  [
+  const actionDefs = [
     ['Kick', () => moderateServerMember('KickMember', member.username)],
     ['Ban', () => moderateServerMember('BanMember', member.username)],
-    ['Role', () => changeServerMemberRole(member.username)],
+    [
+      member.isTimedOut ? 'Clear timeout' : 'Timeout',
+      () => member.isTimedOut
+        ? clearServerMemberTimeout(member.username)
+        : timeoutServerMember(member.username),
+    ],
+    [
+      member.isMuted ? 'Unmute' : 'Mute',
+      () => member.isMuted
+        ? unmuteServerMember(member.username)
+        : muteServerMember(member.username),
+    ],
+    ['Role', () => changeServerMemberRole(member.username, member.role)],
     ['Owner', () => transferServerOwnership(member.username)],
-  ].forEach(([label, handler]) => {
+  ];
+
+  actionDefs.forEach(([label, handler]) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'member-action-btn';
@@ -7912,6 +8847,42 @@ function renderMemberModerationActions(member) {
   });
 
   return actions;
+}
+
+function renderMemberModerationBadges(member) {
+  const badges = document.createElement('div');
+  badges.className = 'member-moderation-badges';
+
+  if (member.isTimedOut) {
+    badges.appendChild(createMemberModerationBadge(
+      'Timeout',
+      `Timed out ${formatModerationUntil(member.timedOutUntil)}`
+    ));
+  }
+
+  if (member.isMuted) {
+    badges.appendChild(createMemberModerationBadge(
+      'Muted',
+      member.mutedUntil ? `Muted ${formatModerationUntil(member.mutedUntil)}` : 'Muted indefinitely'
+    ));
+  }
+
+  return badges;
+}
+
+function createMemberModerationBadge(label, title) {
+  const badge = document.createElement('span');
+  badge.className = 'member-moderation-badge';
+  badge.textContent = label;
+  badge.title = title;
+  return badge;
+}
+
+function formatModerationUntil(value) {
+  if (!value) return 'indefinitely';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'until the selected time';
+  return `until ${date.toLocaleString()}`;
 }
 
 async function moderateServerMember(action, targetUsername) {
@@ -7935,9 +8906,164 @@ async function moderateServerMember(action, targetUsername) {
   }
 }
 
-async function changeServerMemberRole(targetUsername) {
-  const role = await askText('Change Role', 'Role name', 'user');
-  if (!role) return;
+async function muteServerMember(targetUsername) {
+  const details = await askModerationDetails({
+    title: 'Mute Member',
+    description: `Mute ${targetUsername} from sending messages. Leave duration blank for an indefinite mute.`,
+    allowIndefinite: true,
+    defaultDuration: '60',
+    confirmText: 'Mute',
+  });
+  if (!details) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/MuteMember`, {
+      serverId: selectedServerID,
+      targetUsername,
+      ...details,
+    });
+    await fetchServerMembers();
+    showAppMessage('Member muted.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not mute member.'), 'error');
+  }
+}
+
+async function unmuteServerMember(targetUsername) {
+  if (!await askConfirm('Unmute Member', `Unmute ${targetUsername}?`, { confirmText: 'Unmute' })) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/UnmuteMember`, {
+      serverId: selectedServerID,
+      targetUsername,
+    });
+    await fetchServerMembers();
+    showAppMessage('Member unmuted.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not unmute member.'), 'error');
+  }
+}
+
+async function timeoutServerMember(targetUsername) {
+  const details = await askModerationDetails({
+    title: 'Timeout Member',
+    description: `Timeout ${targetUsername} from messages, reactions, and voice.`,
+    allowIndefinite: false,
+    defaultDuration: '10',
+    confirmText: 'Timeout',
+  });
+  if (!details) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/TimeoutMember`, {
+      serverId: selectedServerID,
+      targetUsername,
+      ...details,
+    });
+    await fetchServerMembers();
+    showAppMessage('Member timed out.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not timeout member.'), 'error');
+  }
+}
+
+async function clearServerMemberTimeout(targetUsername) {
+  if (!await askConfirm('Clear Timeout', `Clear timeout for ${targetUsername}?`, { confirmText: 'Clear' })) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/ClearMemberTimeout`, {
+      serverId: selectedServerID,
+      targetUsername,
+    });
+    await fetchServerMembers();
+    showAppMessage('Timeout cleared.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not clear timeout.'), 'error');
+  }
+}
+
+async function askModerationDetails({ title, description, allowIndefinite, defaultDuration, confirmText }) {
+  const result = await openSimpleFormDialog({
+    title,
+    description,
+    fields: [
+      {
+        name: 'durationMinutes',
+        label: allowIndefinite ? 'Duration minutes (blank for indefinite)' : 'Duration minutes',
+        type: 'number',
+        min: 1,
+        max: 40320,
+        step: 1,
+        value: defaultDuration,
+        required: !allowIndefinite,
+      },
+      {
+        name: 'reason',
+        label: 'Reason (optional)',
+        required: false,
+      },
+    ],
+    confirmText,
+  });
+
+  if (!result) return null;
+
+  const durationText = result.durationMinutes?.trim() || '';
+  let durationMinutes = null;
+  if (durationText) {
+    durationMinutes = Number.parseInt(durationText, 10);
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 40320) {
+      showAppMessage('Duration must be between 1 minute and 28 days.', 'error');
+      return null;
+    }
+  } else if (!allowIndefinite) {
+    showAppMessage('Duration is required.', 'error');
+    return null;
+  }
+
+  return {
+    durationMinutes,
+    reason: result.reason?.trim() || null,
+  };
+}
+
+async function changeServerMemberRole(targetUsername, currentRole = 'user') {
+  let roles = [];
+  try {
+    roles = await fetchServerRoles({ force: true });
+  } catch {
+    return;
+  }
+
+  const roleOptions = roles
+    .filter((role) => getServerRoleName(role) !== 'owner')
+    .map((role) => ({
+      value: getServerRoleName(role),
+      label: formatRoleName(role.name),
+    }));
+  if (!roleOptions.length) {
+    showAppMessage('Create a role before assigning one.', 'error');
+    return;
+  }
+
+  const normalizedCurrentRole = normalizeRoleName(currentRole);
+  const result = await openSimpleFormDialog({
+    title: 'Change Role',
+    description: targetUsername,
+    fields: [
+      {
+        name: 'role',
+        label: 'Role',
+        value: roleOptions.some((option) => option.value === normalizedCurrentRole)
+          ? normalizedCurrentRole
+          : 'user',
+        options: roleOptions,
+      },
+    ],
+    confirmText: 'Save Role',
+  });
+  const role = result?.role;
+  if (!role || role === normalizedCurrentRole) return;
 
   try {
     await axios.post(`${homeApiBase}/api/Server/SetMemberRole`, {
@@ -7946,6 +9072,7 @@ async function changeServerMemberRole(targetUsername) {
       role,
     });
     await fetchServerMembers();
+    showAppMessage('Member role updated.', 'success');
   } catch (error) {
     showAppMessage(getApiErrorMessage(error, 'Could not update role.'), 'error');
   }
@@ -9114,9 +10241,18 @@ function applyRemovedSettingsItems() {
   });
 }
 
-function openSimpleFormDialog({ title, description = '', fields = [], confirmText = 'Save', danger = false }) {
+function openSimpleFormDialog({
+  title,
+  description = '',
+  fields = [],
+  confirmText = 'Save',
+  danger = false,
+  preserveExisting = false,
+}) {
   return new Promise((resolve) => {
-    closeAccountActionDialog();
+    if (!preserveExisting) {
+      closeAccountActionDialog();
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'account-action-overlay';
@@ -9142,28 +10278,34 @@ function openSimpleFormDialog({ title, description = '', fields = [], confirmTex
       const label = document.createElement('label');
       label.textContent = field.label;
 
-      const input = field.options ? document.createElement('select') : document.createElement('input');
+      const input = field.options
+        ? document.createElement('select')
+        : field.type === 'textarea'
+          ? document.createElement('textarea')
+          : document.createElement('input');
       input.name = field.name;
       input.className = field.options ? 'account-action-select' : '';
-      if (!field.options) {
+      if (!field.options && field.type !== 'textarea') {
         input.type = field.type || 'text';
       }
       input.autocomplete = field.autocomplete || 'off';
       if (field.min !== undefined) input.min = field.min;
       if (field.max !== undefined) input.max = field.max;
       if (field.step !== undefined) input.step = field.step;
+      if (field.maxLength !== undefined) input.maxLength = field.maxLength;
+      if (field.rows !== undefined && input.tagName === 'TEXTAREA') input.rows = field.rows;
       if (field.inputMode) input.inputMode = field.inputMode;
       if (field.autocapitalize) input.autocapitalize = field.autocapitalize;
       if (field.spellcheck !== undefined) input.spellcheck = field.spellcheck;
       input.required = field.required !== false;
 
       (field.options || []).forEach((option) => {
-      const optionEl = document.createElement('option');
-      optionEl.value = option.value;
-      optionEl.textContent = option.label;
-      optionEl.disabled = Boolean(option.disabled);
-      input.appendChild(optionEl);
-    });
+        const optionEl = document.createElement('option');
+        optionEl.value = option.value;
+        optionEl.textContent = option.label;
+        optionEl.disabled = Boolean(option.disabled);
+        input.appendChild(optionEl);
+      });
       input.value = field.value || '';
 
       fieldMap[field.name] = input;
@@ -9202,7 +10344,7 @@ function openSimpleFormDialog({ title, description = '', fields = [], confirmTex
     dialog.appendChild(form);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
-    form.querySelector('input, select')?.focus();
+    form.querySelector('input, select, textarea')?.focus();
   });
 }
 
@@ -9226,7 +10368,7 @@ async function askConfirm(title, description, { danger = false, confirmText = 'C
 }
 
 function closeAccountActionDialog() {
-  document.querySelector('.account-action-overlay')?.remove();
+  document.querySelectorAll('.account-action-overlay').forEach((overlay) => overlay.remove());
 }
 
 function openAccountActionDialog({ title, description, fields, confirmText, danger = false, onSubmit }) {
