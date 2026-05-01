@@ -1,12 +1,13 @@
 (function () {
   const isFileProtocol = window.location.protocol === 'file:';
+  const configuredApiBase = String(window.MYDISCORD_CONFIG?.apiBase || '').replace(/\/+$/, '');
 
   function normalizePath(path) {
     return String(path || '').replace(/^\/+/, '');
   }
 
   window.APP_PATHS = {
-    apiBase: 'http://localhost:5018',
+    apiBase: configuredApiBase || 'http://localhost:5018',
     isFileProtocol,
     assetUrl(path) {
       const normalizedPath = normalizePath(path);
