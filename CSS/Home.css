@@ -597,6 +597,9 @@
   flex-direction: column;
   background-color: var(--main-bg);
   padding: 20px;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   min-width: 400px;
 }
 
@@ -647,6 +650,111 @@
 
 .joinButton:hover {
   background-color: #4752c4;
+}
+
+.publicDiscovery {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 18px;
+}
+
+.publicDiscoveryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.publicDiscoveryHeader h3 {
+  color: var(--text-main);
+  font-size: 16px;
+}
+
+.publicDiscoverySearch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 180px) auto;
+  gap: 8px;
+}
+
+.publicDiscoverySearch .inviteLinkInput {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.publicServerListings {
+  display: grid;
+  gap: 8px;
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+.publicServerListing {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+}
+
+.publicServerIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: #5865f2;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.publicServerDetails {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.publicServerDetails strong,
+.publicServerDetails span,
+.publicServerDetails p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publicServerDetails strong {
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.publicServerDetails span {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.publicServerDetails p {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.publicJoinButton {
+  min-width: 74px;
+}
+
+.publicServerEmpty {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-muted);
+  padding: 14px;
+  text-align: center;
 }
 
 
@@ -5182,6 +5290,15 @@ body {
     min-width: 0;
     max-height: calc(100dvh - 24px);
     overflow-y: auto;
+  }
+
+  .publicDiscoverySearch,
+  .publicServerListing {
+    grid-template-columns: 1fr;
+  }
+
+  .publicJoinButton {
+    width: 100%;
   }
 }
 
