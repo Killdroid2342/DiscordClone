@@ -1,8 +1,78 @@
 const { app, BrowserWindow, ipcMain, nativeImage, Notification } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
+const util = require('node:util');
 
 let mainWindow = null;
+let logFilePath = null;
 const unreadOverlayIcons = new Map();
+const consoleWriters = {
+  error: console.error.bind(console),
+  warn: console.warn.bind(console),
+  info: console.info.bind(console),
+};
+
+function getLogFilePath() {
+  if (!logFilePath) {
+    const logDir = app.getPath('logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    logFilePath = path.join(logDir, 'main.log');
+  }
+
+  return logFilePath;
+}
+
+function formatLogValue(value) {
+  if (value instanceof Error) {
+    return value.stack || value.message;
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  return util.inspect(value, { depth: 4, breakLength: 120 });
+}
+
+function writeLog(level, ...values) {
+  const safeLevel = level === 'error' || level === 'warn' ? level : 'info';
+  const message = values.map(formatLogValue).join(' ');
+  const line = `${new Date().toISOString()} ${safeLevel.toUpperCase()} ${message}\n`;
+
+  try {
+    fs.appendFileSync(getLogFilePath(), line, 'utf8');
+  } catch (error) {
+    consoleWriters.warn('Could not write MyDiscord log file:', error);
+  }
+
+  consoleWriters[safeLevel](...values);
+}
+
+function cleanLogText(value, fallback, maxLength) {
+  return String(value || fallback || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function normalizeRendererDiagnostics(payload = {}) {
+  return {
+    type: cleanLogText(payload.type, 'renderer-error', 80),
+    message: cleanLogText(payload.message, 'Unknown renderer error', 500),
+    source: cleanLogText(payload.source, '', 500),
+    stack: cleanLogText(payload.stack, '', 2000),
+    line: Number.isFinite(Number(payload.line)) ? Number(payload.line) : null,
+    column: Number.isFinite(Number(payload.column)) ? Number(payload.column) : null,
+  };
+}
+
+process.on('uncaughtException', (error) => {
+  writeLog('error', 'Uncaught main-process exception', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  writeLog('error', 'Unhandled main-process rejection', reason);
+});
 
 function cleanNotificationText(value, fallback, maxLength) {
   const text = String(value || fallback || '')
@@ -116,6 +186,15 @@ ipcMain.handle('desktop-notifications:stop-flashing', (event) => {
   return { stopped: true };
 });
 
+ipcMain.handle('diagnostics:renderer-error', (event, payload = {}) => {
+  writeLog('error', 'Renderer diagnostic', {
+    url: event.sender.getURL(),
+    ...normalizeRendererDiagnostics(payload),
+  });
+
+  return { logged: true };
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     minWidth: 420,
@@ -133,19 +212,51 @@ function createWindow() {
   });
 
   mainWindow = win;
+  writeLog('info', 'Creating main window');
   win.loadFile('./Pages/LogIn.html');
   win.removeMenu();
   win.on('focus', () => {
     win.flashFrame(false);
+  });
+  win.on('unresponsive', () => {
+    writeLog('warn', 'Main window became unresponsive');
+  });
+  win.on('responsive', () => {
+    writeLog('info', 'Main window became responsive');
   });
   win.on('closed', () => {
     if (mainWindow === win) {
       mainWindow = null;
     }
   });
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    writeLog('error', 'Window failed to load', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+    });
+  });
+  win.webContents.on('render-process-gone', (event, details) => {
+    writeLog('error', 'Renderer process exited unexpectedly', details);
+  });
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    if (level < 2) {
+      return;
+    }
+
+    writeLog(level >= 3 ? 'error' : 'warn', 'Renderer console message', {
+      message,
+      line,
+      sourceId,
+    });
+  });
 }
 
 app.whenReady().then(() => {
+  writeLog('info', 'MyDiscord app ready', {
+    version: app.getVersion(),
+    logFilePath: getLogFilePath(),
+  });
   createWindow();
 
   app.on('activate', () => {
@@ -153,6 +264,10 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  writeLog('info', 'MyDiscord app shutting down');
 });
 
 app.on('window-all-closed', () => {
