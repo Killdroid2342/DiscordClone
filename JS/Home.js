@@ -129,6 +129,9 @@ let currentServerRequireVerifiedEmail = false;
 let currentServerMinimumAccountAgeMinutes = 0;
 let currentServerMinimumMembershipMinutes = 0;
 let currentServerRequireTwoFactorForModerators = false;
+let currentServerIsPublic = false;
+let currentServerDescription = '';
+let currentServerDiscoveryCategory = '';
 let currentFriend;
 let chatMessages = document.querySelector('.chatMessages');
 let userJoined = document.querySelector('.UserJoined');
@@ -140,6 +143,12 @@ const messageModalContent = document.querySelector('.ContentMessage');
 const messageOuterModal = document.querySelector('.outerModalMessage');
 const username = document.getElementById('username');
 let socket;
+let chatSocketMode = null;
+let chatSocketGeneration = 0;
+let chatReconnectTimer = null;
+let chatReconnectAttempts = 0;
+let voiceReconnectTimer = null;
+let voiceReconnectAttempts = 0;
 
 let chatConnection = null;
 let signalRConnection = null;
@@ -219,7 +228,16 @@ if (apiClient) {
   );
 }
 
-window.addEventListener('online', () => setAppOfflineState(false, 'Back online.'));
+window.addEventListener('online', () => {
+  setAppOfflineState(false, 'Back online.');
+  if (chatSocketMode && shouldKeepChatSocket(chatSocketMode)) {
+    connectChatSocket(chatSocketMode, { force: true });
+  }
+  if (shouldReconnectVoiceConnection()) {
+    voiceReconnectAttempts = 0;
+    scheduleVoiceReconnect();
+  }
+});
 window.addEventListener('offline', () => setAppOfflineState(true));
 window.apiClient = apiClient;
 
@@ -235,6 +253,22 @@ function withAccessToken(url) {
   return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(cookieVal)}`;
 }
 
+function getReconnectDelay(attempt, baseMs = 1000, maxMs = 30000) {
+  const exponentialDelay = Math.min(maxMs, baseMs * (2 ** Math.min(attempt, 6)));
+  const jitter = Math.floor(exponentialDelay * (0.2 + Math.random() * 0.3));
+  return Math.min(maxMs, exponentialDelay + jitter);
+}
+
+function clearTimer(timerId) {
+  if (timerId) {
+    window.clearTimeout(timerId);
+  }
+}
+
+function isSocketOpen(targetSocket) {
+  return Boolean(targetSocket && targetSocket.readyState === WebSocket.OPEN);
+}
+
 function isPrivateCallActive() {
   const activeCallUI = document.getElementById('activeCallUI');
   return Boolean(currentFriend && isElementVisible(activeCallUI));
@@ -245,20 +279,33 @@ function shouldReconnectVoiceConnection() {
 }
 
 function scheduleVoiceReconnect() {
+  clearTimer(voiceReconnectTimer);
+  voiceReconnectTimer = null;
+
   if (!shouldReconnectVoiceConnection()) {
     return;
   }
 
-  console.log("Attempting to reconnect voice in 3 seconds...");
-  setTimeout(() => {
+  if (!navigator.onLine) {
+    setAppOfflineState(true, 'Offline. Voice will reconnect when the network returns.');
+    return;
+  }
+
+  const delay = getReconnectDelay(voiceReconnectAttempts, 1000, 20000);
+  voiceReconnectAttempts += 1;
+  console.log(`Attempting to reconnect voice in ${Math.round(delay / 1000)} seconds...`);
+
+  voiceReconnectTimer = window.setTimeout(() => {
+    voiceReconnectTimer = null;
     if (!shouldReconnectVoiceConnection()) {
       return;
     }
 
     initializeVoiceConnection().catch((err) => {
       console.error('Voice reconnect failed:', err);
+      scheduleVoiceReconnect();
     });
-  }, 3000);
+  }, delay);
 }
 
 function decodeJWT(token) {
@@ -945,6 +992,7 @@ async function openServer(server, fallbackRole = 'user') {
   currentServerRole = role;
   currentServerRoles = [];
   applyServerRuleState(server);
+  applyServerListingState(server);
 
   hideElement('.secondColumn');
   hideElement('.lastSection');
@@ -2029,45 +2077,228 @@ function createMessageElement(sender, text, date) {
   return container;
 }
 
-function InitWebSocket() {
-  socket = new WebSocket(
-      withAccessToken(`${homeWsBase}/api/PrivateMessageFriend/HandlePrivateWebsocket`)
-  );
-  socket.onopen = function () {
-    console.log('connected to chat');
-  };
-  socket.onmessage = function (event) {
-    const message = JSON.parse(event.data);
-    const sender = getMessageSender(message);
-    notifyIncomingChatMessage(message, {
-      scope: 'dm',
-      conversationId: sender,
-      conversationName: sender,
-    });
+function getChatSocketUrl(mode) {
+  const path =
+    mode === 'group'
+      ? '/api/GroupChat/HandleGroupWebsocket'
+      : '/api/PrivateMessageFriend/HandlePrivateWebsocket';
+  return withAccessToken(`${homeWsBase}${path}`);
+}
 
-    if (currentGroupId || currentFriend !== sender) {
-      refreshDmUnreadBadges();
+function shouldKeepChatSocket(mode) {
+  if (!cookieVal) {
+    return false;
+  }
+
+  if (mode === 'group') {
+    return Boolean(currentGroupId);
+  }
+
+  return Boolean(currentFriend && !currentGroupId);
+}
+
+function closeChatSocket() {
+  clearTimer(chatReconnectTimer);
+  chatReconnectTimer = null;
+  chatSocketGeneration += 1;
+
+  if (socket && socket.readyState !== WebSocket.CLOSED) {
+    try {
+      socket.close(1000, 'Switching conversation');
+    } catch (error) {
+      console.warn('Could not close previous chat socket:', error);
+    }
+  }
+
+  socket = null;
+}
+
+function scheduleChatSocketReconnect(mode, reason = 'closed') {
+  clearTimer(chatReconnectTimer);
+  chatReconnectTimer = null;
+
+  if (!shouldKeepChatSocket(mode)) {
+    return;
+  }
+
+  if (!navigator.onLine) {
+    setAppOfflineState(true, 'Offline. Chat will reconnect when the network returns.');
+    return;
+  }
+
+  const delay = getReconnectDelay(chatReconnectAttempts, 800, 15000);
+  chatReconnectAttempts += 1;
+  setAppOfflineState(true, `Chat connection lost. Reconnecting in ${Math.max(1, Math.round(delay / 1000))}s...`);
+  console.warn(`Chat socket ${mode} ${reason}; reconnecting in ${delay}ms`);
+
+  chatReconnectTimer = window.setTimeout(() => {
+    chatReconnectTimer = null;
+    connectChatSocket(mode, { force: true });
+  }, delay);
+}
+
+async function refreshAfterChatReconnect(mode) {
+  try {
+    if (mode === 'group') {
+      await refreshGroupUnreadBadges();
+      if (currentGroupId && isCurrentNotificationContextVisible('group', currentGroupId)) {
+        await GetGroupMessages(currentGroupId);
+      }
+
+      if (currentGroupId && localGroupStream) {
+        sendChatSocketPayload({
+          Type: 'user-joined-call',
+          GroupId: currentGroupId,
+          Sender: JWTusername,
+        }, { retry: false });
+      }
       return;
     }
 
+    await refreshDmUnreadBadges();
+    if (currentFriend && isCurrentNotificationContextVisible('dm', currentFriend)) {
+      await GetPrivateMessage();
+    }
+  } catch (error) {
+    console.warn('Could not refresh conversation after socket reconnect:', error);
+  }
+}
+
+function handleDirectSocketMessage(event) {
+  const message = JSON.parse(event.data);
+  const sender = getMessageSender(message);
+  notifyIncomingChatMessage(message, {
+    scope: 'dm',
+    conversationId: sender,
+    conversationName: sender,
+  });
+
+  if (currentGroupId || currentFriend !== sender) {
+    refreshDmUnreadBadges();
+    return;
+  }
+
+  const messagesDisplay = document.querySelector('.messagesDisplay');
+  const messageElement = createMessageElement(sender, getMessageText(message), message.date || message.Date);
+  messagesDisplay.appendChild(messageElement);
+  messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+  currentChatHistory.push({
+    privateMessageID: message.PrivateMessageID || message.privateMessageID,
+    messagesUserSender: sender,
+    friendMessagesData: getMessageText(message),
+    date: message.date || message.Date,
+  });
+
+  if (isAppWindowFocused() && isCurrentNotificationContextVisible('dm', sender)) {
+    markDmRead(sender, message.PrivateMessageID || message.privateMessageID);
+  }
+}
+
+async function handleGroupSocketMessage(event) {
+  const message = JSON.parse(event.data);
+
+  if (message.Type && message.Type !== 'chat') {
+    await handleGroupSignaling(message);
+    return;
+  }
+
+  if (message.GroupId === currentGroupId) {
     const messagesDisplay = document.querySelector('.messagesDisplay');
-    const messageElement = createMessageElement(sender, getMessageText(message), message.date || message.Date);
+    notifyIncomingChatMessage(message, {
+      scope: 'group',
+      conversationId: message.GroupId,
+      conversationName: currentGroupName,
+    });
+    const messageElement = createMessageElement(message.Sender, message.Content, message.Date);
     messagesDisplay.appendChild(messageElement);
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
     currentChatHistory.push({
-      privateMessageID: message.PrivateMessageID || message.privateMessageID,
-      messagesUserSender: sender,
-      friendMessagesData: getMessageText(message),
-      date: message.date || message.Date,
+      id: message.Id || message.id,
+      messagesUserSender: message.Sender,
+      friendMessagesData: message.Content,
+      date: message.Date,
     });
+    if (isAppWindowFocused() && isCurrentNotificationContextVisible('group', message.GroupId)) {
+      markGroupRead(message.GroupId, message.Id || message.id);
+    }
+  }
+}
 
-    if (isAppWindowFocused() && isCurrentNotificationContextVisible('dm', sender)) {
-      markDmRead(sender, message.PrivateMessageID || message.privateMessageID);
+function connectChatSocket(mode, { force = false } = {}) {
+  chatSocketMode = mode;
+
+  if (!shouldKeepChatSocket(mode)) {
+    closeChatSocket();
+    return null;
+  }
+
+  if (!force && socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return socket;
+  }
+
+  closeChatSocket();
+  const generation = ++chatSocketGeneration;
+  const nextSocket = new WebSocket(getChatSocketUrl(mode));
+  socket = nextSocket;
+
+  nextSocket.onopen = () => {
+    if (generation !== chatSocketGeneration) {
+      nextSocket.close();
+      return;
+    }
+
+    chatReconnectAttempts = 0;
+    setAppOfflineState(false, appOffline ? 'Back online.' : '');
+    console.log(mode === 'group' ? 'connected to GROUP chat' : 'connected to chat');
+    refreshAfterChatReconnect(mode);
+  };
+
+  nextSocket.onmessage = (event) => {
+    if (generation !== chatSocketGeneration) {
+      return;
+    }
+
+    Promise.resolve(mode === 'group' ? handleGroupSocketMessage(event) : handleDirectSocketMessage(event))
+      .catch((error) => console.error('Could not process chat socket message:', error));
+  };
+
+  nextSocket.onerror = (error) => {
+    if (generation === chatSocketGeneration) {
+      console.warn(`${mode} chat socket error:`, error);
     }
   };
-  socket.onclose = function () {
-    console.log('chat disconnected');
+
+  nextSocket.onclose = (event) => {
+    if (generation !== chatSocketGeneration) {
+      return;
+    }
+
+    socket = null;
+    scheduleChatSocketReconnect(mode, `closed (${event.code || 'unknown'})`);
   };
+
+  return nextSocket;
+}
+
+function sendChatSocketPayload(payload, { retry = true } = {}) {
+  if (isSocketOpen(socket)) {
+    try {
+      socket.send(JSON.stringify(payload));
+      return true;
+    } catch (error) {
+      console.warn('Chat socket send failed:', error);
+    }
+  }
+
+  if (retry && chatSocketMode) {
+    scheduleChatSocketReconnect(chatSocketMode, 'send attempted while disconnected');
+  }
+
+  return false;
+}
+
+function InitWebSocket() {
+  connectChatSocket('dm', { force: true });
 }
 async function PrivateMessage(event) {
   event.preventDefault();
@@ -2121,11 +2352,7 @@ async function PrivateMessage(event) {
         date: messageObject.date,
       },
       send: async () => {
-        const response = await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, messageObject);
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify(messageObject));
-        }
-        return response;
+        return apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, messageObject);
       },
       rollbackInput: () => {
         if (input) input.value = content;
@@ -2285,6 +2512,7 @@ if (JWTusername) {
 
 function openJoinModal() {
   showElement('.outerJoinModal', 'flex');
+  fetchPublicServerListings();
 }
 function closeJoinModal() {
   hideElement('.outerJoinModal');
@@ -2345,6 +2573,137 @@ async function JoinServer(event) {
   } catch (err) {
     console.error('couldnt join server:', err);
     showAppMessage(getApiErrorMessage(err, 'Could not join server.'), 'error');
+  }
+}
+
+function getServerField(server, camelKey, pascalKey = '') {
+  return server?.[camelKey] ?? server?.[pascalKey || (camelKey.charAt(0).toUpperCase() + camelKey.slice(1))];
+}
+
+function getServerListingId(server) {
+  return getServerField(server, 'serverID', 'ServerID') || getServerField(server, 'serverId', 'ServerId');
+}
+
+function formatPublicServerMeta(server) {
+  const category = getServerField(server, 'discoveryCategory') || 'community';
+  const memberCount = Number(getServerField(server, 'memberCount')) || 0;
+  const channelCount = Number(getServerField(server, 'channelCount')) || 0;
+  return `${formatRoleName(category)} | ${memberCount} members | ${channelCount} channels`;
+}
+
+function renderPublicServerListings(servers = []) {
+  const list = document.getElementById('publicServerListings');
+  if (!list) return;
+
+  list.innerHTML = '';
+  if (!servers.length) {
+    const empty = document.createElement('div');
+    empty.className = 'publicServerEmpty';
+    empty.textContent = 'No public servers found.';
+    list.appendChild(empty);
+    return;
+  }
+
+  servers.forEach((server) => {
+    const serverId = getServerListingId(server);
+    const row = document.createElement('div');
+    row.className = 'publicServerListing';
+
+    const icon = document.createElement('div');
+    icon.className = 'publicServerIcon';
+    icon.textContent = String(getServerField(server, 'serverName') || '?').trim().slice(0, 1).toUpperCase();
+
+    const details = document.createElement('div');
+    details.className = 'publicServerDetails';
+    const name = document.createElement('strong');
+    name.textContent = getServerField(server, 'serverName') || 'Unnamed server';
+    const meta = document.createElement('span');
+    meta.textContent = formatPublicServerMeta(server);
+    const description = document.createElement('p');
+    description.textContent = getServerField(server, 'description') || 'No description yet.';
+    details.appendChild(name);
+    details.appendChild(meta);
+    details.appendChild(description);
+
+    const joinButton = document.createElement('button');
+    joinButton.type = 'button';
+    joinButton.className = 'joinButton publicJoinButton';
+    const alreadyMember = Boolean(getServerField(server, 'alreadyMember'));
+    joinButton.textContent = alreadyMember ? 'Open' : 'Join';
+    joinButton.disabled = !serverId;
+    joinButton.addEventListener('click', () => joinPublicServerFromListing(serverId, joinButton));
+
+    row.appendChild(icon);
+    row.appendChild(details);
+    row.appendChild(joinButton);
+    list.appendChild(row);
+  });
+}
+
+async function fetchPublicServerListings() {
+  const list = document.getElementById('publicServerListings');
+  if (!list) return;
+
+  const searchInput = document.getElementById('serverDiscoverySearch');
+  const categorySelect = document.getElementById('serverDiscoveryCategory');
+  const params = new URLSearchParams({ take: '24' });
+  const query = searchInput?.value?.trim();
+  const category = categorySelect?.value?.trim();
+  if (query) params.set('query', query);
+  if (category) params.set('category', category);
+
+  list.innerHTML = '<div class="publicServerEmpty">Loading public servers...</div>';
+  try {
+    const res = await fetch(`${homeApiBase}/api/Server/DiscoverServers?${params.toString()}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error(res.statusText || 'Could not load public servers.');
+    }
+
+    const data = await res.json();
+    renderPublicServerListings(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error('couldnt load public servers:', error);
+    list.innerHTML = '';
+    const failed = document.createElement('div');
+    failed.className = 'publicServerEmpty';
+    failed.textContent = getApiErrorMessage(error, 'Could not load public servers.');
+    list.appendChild(failed);
+  }
+}
+
+async function joinPublicServerFromListing(serverId, button) {
+  if (!serverId) return;
+
+  try {
+    setBusyState(button, true, 'Joining...');
+    const res = await fetch(`${homeApiBase}/api/Server/JoinPublicServer`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ serverId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || err.Message || res.statusText || 'Could not join server.');
+    }
+
+    const joinedServerResponse = await res.json();
+    closeJoinModal();
+    closeModal();
+
+    const existingServerElement = upsertServerListItem(
+      joinedServerResponse,
+      joinedServerResponse.role || 'user'
+    );
+    if (existingServerElement) {
+      existingServerElement.click();
+    }
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not join public server.'), 'error');
+  } finally {
+    setBusyState(button, false);
   }
 }
 
@@ -3316,55 +3675,15 @@ async function leaveCurrentGroup(groupId) {
 }
 
 function InitGroupWebSocket() {
-  if (socket) {
-    socket.close();
-  }
-  socket = new WebSocket(
-      withAccessToken(`${homeWsBase}/api/GroupChat/HandleGroupWebsocket`)
-  );
-  socket.onopen = function () {
-    console.log('connected to GROUP chat');
-  };
-  socket.onmessage = async function (event) {
-    const message = JSON.parse(event.data);
-
-
-
-    if (message.Type && message.Type !== 'chat') {
-      await handleGroupSignaling(message);
-      return;
-    }
-
-    if (message.GroupId === currentGroupId) {
-
-
-      const messagesDisplay = document.querySelector('.messagesDisplay');
-      notifyIncomingChatMessage(message, {
-        scope: 'group',
-        conversationId: message.GroupId,
-        conversationName: currentGroupName,
-      });
-      const messageElement = createMessageElement(message.Sender, message.Content, message.Date);
-      messagesDisplay.appendChild(messageElement);
-      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
-      currentChatHistory.push({
-        id: message.Id || message.id,
-        messagesUserSender: message.Sender,
-        friendMessagesData: message.Content,
-        date: message.Date,
-      });
-      if (isAppWindowFocused() && isCurrentNotificationContextVisible('group', message.GroupId)) {
-        markGroupRead(message.GroupId, message.Id || message.id);
-      }
-    }
-  };
-  socket.onclose = function () {
-    console.log('group chat disconnected');
-  };
+  connectChatSocket('group', { force: true });
 }
 
 async function startGroupCall(groupId) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  if (!isSocketOpen(socket)) {
+    connectChatSocket('group');
+    showAppMessage('Reconnecting group chat. Try the call again in a moment.', 'error');
+    return;
+  }
 
   try {
     localGroupStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -3375,11 +3694,11 @@ async function startGroupCall(groupId) {
     return;
   }
 
-  socket.send(JSON.stringify({
+  sendChatSocketPayload({
     Type: 'call-init',
     GroupId: groupId,
     Sender: JWTusername
-  }));
+  });
 
 
   showGroupCallUI();
@@ -3420,11 +3739,11 @@ async function joinGroupCall(groupId, initiator) {
     addLocalVideoToGrid(localGroupStream);
     showGroupCallUI();
 
-    socket.send(JSON.stringify({
+    sendChatSocketPayload({
       Type: 'user-joined-call',
       GroupId: groupId,
       Sender: JWTusername
-    }));
+    });
 
 
   } catch (e) {
@@ -3520,12 +3839,12 @@ async function initiatePeerConnection(targetUser) {
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  socket.send(JSON.stringify({
+  sendChatSocketPayload({
     Type: 'offer',
     TargetUser: targetUser,
     Sender: JWTusername,
     Data: JSON.stringify(offer)
-  }));
+  });
 }
 
 function createGroupPeerConnection(targetUser) {
@@ -3533,12 +3852,12 @@ function createGroupPeerConnection(targetUser) {
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
-      socket.send(JSON.stringify({
+      sendChatSocketPayload({
         Type: 'candidate',
         TargetUser: targetUser,
         Sender: JWTusername,
         Data: JSON.stringify(event.candidate)
-      }));
+      }, { retry: false });
     }
   };
 
@@ -3565,12 +3884,12 @@ async function handleGroupOffer(msg) {
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
 
-  socket.send(JSON.stringify({
+  sendChatSocketPayload({
     Type: 'answer',
     TargetUser: targetUser,
     Sender: JWTusername,
     Data: JSON.stringify(answer)
-  }));
+  });
 }
 
 async function handleGroupAnswer(msg) {
@@ -3691,6 +4010,7 @@ async function initializeVoiceConnection() {
 
     voiceConnection.onopen = () => {
       console.log('voice chat connected');
+      voiceReconnectAttempts = 0;
 
       watchedVoiceServerId = null;
 
@@ -5620,6 +5940,12 @@ function applyServerRuleState(server = {}) {
   currentServerRequireTwoFactorForModerators = Boolean(server.requireTwoFactorForModerators);
 }
 
+function applyServerListingState(server = {}) {
+  currentServerIsPublic = Boolean(server.isPublic);
+  currentServerDescription = server.description || '';
+  currentServerDiscoveryCategory = server.discoveryCategory || '';
+}
+
 function formatServerRulesSummary() {
   const rules = [`Verification: ${getServerVerificationLabel(currentServerVerificationLevel)}`];
   if (currentServerRequireVerifiedEmail) {
@@ -5635,6 +5961,14 @@ function formatServerRulesSummary() {
     rules.push('Moderator/admin 2FA');
   }
   return rules.join(' | ');
+}
+
+function formatServerListingSummary() {
+  const visibility = currentServerIsPublic ? 'Public listing' : 'Private listing';
+  const category = currentServerDiscoveryCategory
+    ? `Category: ${formatRoleName(currentServerDiscoveryCategory)}`
+    : 'No category';
+  return `${visibility} | ${category}`;
 }
 
 function normalizeRoleName(value) {
@@ -5821,6 +6155,11 @@ function renderServerManagementControls(container) {
   summary.textContent = formatServerRulesSummary();
   container.appendChild(summary);
 
+  const listingSummary = document.createElement('div');
+  listingSummary.className = 'server-verification-summary';
+  listingSummary.textContent = formatServerListingSummary();
+  container.appendChild(listingSummary);
+
   const tools = document.createElement('div');
   tools.className = 'server-management-tools';
 
@@ -5830,6 +6169,7 @@ function renderServerManagementControls(container) {
     ['Roles', openRolesAndPermissionsDialog],
     ['Voice Perms', () => openVoiceChannelPermissionsDialog()],
     ['Invite', createLimitedInviteFromPrompt],
+    ['Listing', updatePublicListingFromPrompt],
     ['Rules', updateServerVerificationFromPrompt],
     ['Reports', openServerReportsDialog],
     ['Audit', openAuditLogsDialog],
@@ -5846,6 +6186,73 @@ function renderServerManagementControls(container) {
   });
 
   container.appendChild(tools);
+}
+
+async function updatePublicListingFromPrompt() {
+  const values = await openSimpleFormDialog({
+    title: 'Public Listing',
+    description: 'Public servers appear in discovery and can be joined without an invite link.',
+    fields: [
+      {
+        name: 'isPublic',
+        label: 'Visibility',
+        value: currentServerIsPublic ? 'true' : 'false',
+        options: [
+          { value: 'false', label: 'Private' },
+          { value: 'true', label: 'Public' },
+        ],
+      },
+      {
+        name: 'discoveryCategory',
+        label: 'Category',
+        value: currentServerDiscoveryCategory || '',
+        options: [
+          { value: '', label: 'No category' },
+          { value: 'community', label: 'Community' },
+          { value: 'gaming', label: 'Gaming' },
+          { value: 'education', label: 'Education' },
+          { value: 'music', label: 'Music' },
+          { value: 'tech', label: 'Tech' },
+        ],
+      },
+      {
+        name: 'description',
+        label: 'Listing description',
+        type: 'textarea',
+        rows: 4,
+        maxLength: 240,
+        required: false,
+        value: currentServerDescription || '',
+      },
+    ],
+    confirmText: 'Save',
+  });
+
+  if (!values) return;
+  const isPublic = values.isPublic === 'true';
+  const description = values.description?.trim() || '';
+  if (isPublic && !description) {
+    showAppMessage('Add a short description before making the server public.', 'error');
+    return;
+  }
+
+  try {
+    const res = await axios.post(`${homeApiBase}/api/Server/UpdatePublicListing`, {
+      serverId: selectedServerID,
+      isPublic,
+      description,
+      discoveryCategory: values.discoveryCategory || '',
+    });
+    applyServerListingState(res.data || {
+      isPublic,
+      description,
+      discoveryCategory: values.discoveryCategory || '',
+    });
+    await fetchServerDetails();
+    showAppMessage(isPublic ? 'Server listed publicly.' : 'Server listing is private.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not update public listing.'), 'error');
+  }
 }
 
 async function updateServerVerificationFromPrompt() {
@@ -7192,6 +7599,7 @@ async function fetchServerDetails() {
     currentServerChannels = Array.isArray(channels) ? channels : [];
     if (server) {
       applyServerRuleState(server);
+      applyServerListingState(server);
       currentServerRole = server.role || currentServerRole || 'user';
     }
     if (server?.serverName) {
@@ -8094,24 +8502,16 @@ async function handleDMFileUpload(input) {
 
         const messageText = `[Image](${fileUrl})`;
 
-        if (!socket || socket.readyState !== WebSocket.OPEN) {
-          console.log('not connected to chat');
-          return;
-        }
-
         const messageObject = {
-          MessagesUserSender: JWTusername,
+          PrivateMessageID: generateUUID(),
           MessageUserReciver: currentFriend,
-          friendMessagesData: messageText,
-          date: new Date().toLocaleString(),
+          FriendMessagesData: messageText,
+          AttachmentUrl: fileUrl,
+          AttachmentContentType: file.type,
         };
 
-        socket.send(JSON.stringify(messageObject));
-
-        const messagesDisplay = document.querySelector('.messagesDisplay');
-        const messageElement = createMessageElement(JWTusername, messageText, messageObject.date);
-        messagesDisplay.appendChild(messageElement);
-        messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+        await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, messageObject);
+        await GetPrivateMessage();
       }
     } catch (err) {
       console.error('File upload failed:', err);
@@ -8215,24 +8615,24 @@ async function submitUploadModal() {
 
       const messageText = `[Image](${fileUrl})`;
 
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        console.log('not connected to chat');
-        return;
+      if (currentGroupId) {
+        await apiClient.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
+          groupId: currentGroupId,
+          content: messageText,
+          attachmentUrl: fileUrl,
+          attachmentContentType: currentUploadFile.type,
+        });
+        await GetGroupMessages(currentGroupId);
+      } else if (currentFriend) {
+        await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, {
+          PrivateMessageID: generateUUID(),
+          MessageUserReciver: currentFriend,
+          FriendMessagesData: messageText,
+          AttachmentUrl: fileUrl,
+          AttachmentContentType: currentUploadFile.type,
+        });
+        await GetPrivateMessage();
       }
-
-      const messageObject = {
-        MessagesUserSender: JWTusername,
-        MessageUserReciver: currentFriend,
-        friendMessagesData: messageText,
-        date: new Date().toLocaleString(),
-      };
-
-      socket.send(JSON.stringify(messageObject));
-
-      const messagesDisplay = document.querySelector('.messagesDisplay');
-      const messageElement = createMessageElement(JWTusername, messageText, messageObject.date);
-      messagesDisplay.appendChild(messageElement);
-      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
 
       closeUploadModal();
     }
