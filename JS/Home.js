@@ -132,6 +132,11 @@ let currentServerRequireTwoFactorForModerators = false;
 let currentServerIsPublic = false;
 let currentServerDescription = '';
 let currentServerDiscoveryCategory = '';
+let currentServerDiscoveryTags = [];
+let currentServerWelcomeEnabled = true;
+let currentServerWelcomeMessage = '';
+let currentServerWelcomeChecklist = [];
+let currentServerOnboardingCompletedAt = null;
 let currentFriend;
 let chatMessages = document.querySelector('.chatMessages');
 let userJoined = document.querySelector('.UserJoined');
@@ -993,6 +998,7 @@ async function openServer(server, fallbackRole = 'user') {
   currentServerRoles = [];
   applyServerRuleState(server);
   applyServerListingState(server);
+  applyServerWelcomeState(server);
 
   hideElement('.secondColumn');
   hideElement('.lastSection');
@@ -2584,6 +2590,41 @@ function getServerListingId(server) {
   return getServerField(server, 'serverID', 'ServerID') || getServerField(server, 'serverId', 'ServerId');
 }
 
+function normalizeDiscoveryTagValue(value) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, '-');
+  if (
+    !normalized ||
+    normalized.length > 32 ||
+    !/^[a-z0-9_.-]+$/.test(normalized)
+  ) {
+    return '';
+  }
+  return normalized;
+}
+
+function normalizeDiscoveryTags(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+
+  return [...new Set(rawValues
+    .flatMap((item) => String(item || '').split(','))
+    .map(normalizeDiscoveryTagValue)
+    .filter(Boolean))]
+    .sort()
+    .slice(0, 8);
+}
+
+function formatDiscoveryTagLabel(tag) {
+  return normalizeDiscoveryTagValue(tag)
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 function formatPublicServerMeta(server) {
   const category = getServerField(server, 'discoveryCategory') || 'community';
   const memberCount = Number(getServerField(server, 'memberCount')) || 0;
@@ -2625,6 +2666,19 @@ function renderPublicServerListings(servers = []) {
     details.appendChild(meta);
     details.appendChild(description);
 
+    const tags = normalizeDiscoveryTags(getServerField(server, 'discoveryTags') || []);
+    if (tags.length) {
+      const tagsRow = document.createElement('div');
+      tagsRow.className = 'publicServerTags';
+      tags.forEach((tag) => {
+        const tagChip = document.createElement('span');
+        tagChip.className = 'publicServerTag';
+        tagChip.textContent = formatDiscoveryTagLabel(tag);
+        tagsRow.appendChild(tagChip);
+      });
+      details.appendChild(tagsRow);
+    }
+
     const joinButton = document.createElement('button');
     joinButton.type = 'button';
     joinButton.className = 'joinButton publicJoinButton';
@@ -2646,11 +2700,14 @@ async function fetchPublicServerListings() {
 
   const searchInput = document.getElementById('serverDiscoverySearch');
   const categorySelect = document.getElementById('serverDiscoveryCategory');
+  const tagInput = document.getElementById('serverDiscoveryTag');
   const params = new URLSearchParams({ take: '24' });
   const query = searchInput?.value?.trim();
   const category = categorySelect?.value?.trim();
+  const tag = normalizeDiscoveryTagValue(tagInput?.value || '');
   if (query) params.set('query', query);
   if (category) params.set('category', category);
+  if (tag) params.set('tag', tag);
 
   list.innerHTML = '<div class="publicServerEmpty">Loading public servers...</div>';
   try {
@@ -5897,6 +5954,12 @@ const SERVER_VERIFICATION_LEVELS = [
   { value: 'highest', label: 'Highest - verified phone' },
 ];
 const MAX_SERVER_RULE_MINUTES = 525600;
+const MAX_SERVER_WELCOME_ITEMS = 6;
+const DEFAULT_SERVER_WELCOME_CHECKLIST = [
+  'Read the welcome message',
+  'Say hello in the general channel',
+  'Join a voice channel when you are ready',
+];
 const ROLE_PERMISSION_DEFINITIONS = [
   { key: 'canManageServer', label: 'Manage server', group: 'Management' },
   { key: 'canManageChannels', label: 'Manage channels', group: 'Management' },
@@ -5944,6 +6007,30 @@ function applyServerListingState(server = {}) {
   currentServerIsPublic = Boolean(server.isPublic);
   currentServerDescription = server.description || '';
   currentServerDiscoveryCategory = server.discoveryCategory || '';
+  currentServerDiscoveryTags = normalizeDiscoveryTags(server.discoveryTags || []);
+}
+
+function normalizeServerWelcomeChecklist(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[\n,]+/);
+
+  const checklist = rawValues
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, MAX_SERVER_WELCOME_ITEMS);
+
+  return checklist.length ? checklist : [...DEFAULT_SERVER_WELCOME_CHECKLIST];
+}
+
+function applyServerWelcomeState(server = {}) {
+  currentServerWelcomeEnabled = server.welcomeEnabled ?? server.WelcomeEnabled ?? true;
+  currentServerWelcomeMessage = server.welcomeMessage ?? server.WelcomeMessage ?? '';
+  currentServerWelcomeChecklist = normalizeServerWelcomeChecklist(
+    server.welcomeChecklist ?? server.WelcomeChecklist ?? []
+  );
+  currentServerOnboardingCompletedAt =
+    server.onboardingCompletedAt ?? server.OnboardingCompletedAt ?? null;
 }
 
 function formatServerRulesSummary() {
@@ -5968,7 +6055,16 @@ function formatServerListingSummary() {
   const category = currentServerDiscoveryCategory
     ? `Category: ${formatRoleName(currentServerDiscoveryCategory)}`
     : 'No category';
-  return `${visibility} | ${category}`;
+  const tags = currentServerDiscoveryTags.length
+    ? `Tags: ${currentServerDiscoveryTags.map(formatDiscoveryTagLabel).join(', ')}`
+    : 'No tags';
+  return `${visibility} | ${category} | ${tags}`;
+}
+
+function formatServerWelcomeSummary() {
+  const status = currentServerWelcomeEnabled ? 'Welcome on' : 'Welcome off';
+  const checklistCount = currentServerWelcomeChecklist.length;
+  return `${status} | ${checklistCount} onboarding ${checklistCount === 1 ? 'step' : 'steps'}`;
 }
 
 function normalizeRoleName(value) {
@@ -6160,6 +6256,11 @@ function renderServerManagementControls(container) {
   listingSummary.textContent = formatServerListingSummary();
   container.appendChild(listingSummary);
 
+  const welcomeSummary = document.createElement('div');
+  welcomeSummary.className = 'server-verification-summary';
+  welcomeSummary.textContent = formatServerWelcomeSummary();
+  container.appendChild(welcomeSummary);
+
   const tools = document.createElement('div');
   tools.className = 'server-management-tools';
 
@@ -6170,6 +6271,7 @@ function renderServerManagementControls(container) {
     ['Voice Perms', () => openVoiceChannelPermissionsDialog()],
     ['Invite', createLimitedInviteFromPrompt],
     ['Listing', updatePublicListingFromPrompt],
+    ['Welcome', updateServerWelcomeFromPrompt],
     ['Rules', updateServerVerificationFromPrompt],
     ['Reports', openServerReportsDialog],
     ['Audit', openAuditLogsDialog],
@@ -6216,6 +6318,13 @@ async function updatePublicListingFromPrompt() {
         ],
       },
       {
+        name: 'discoveryTags',
+        label: 'Tags (comma separated)',
+        maxLength: 180,
+        required: false,
+        value: currentServerDiscoveryTags.join(', '),
+      },
+      {
         name: 'description',
         label: 'Listing description',
         type: 'textarea',
@@ -6237,16 +6346,19 @@ async function updatePublicListingFromPrompt() {
   }
 
   try {
+    const discoveryTags = normalizeDiscoveryTags(values.discoveryTags || '');
     const res = await axios.post(`${homeApiBase}/api/Server/UpdatePublicListing`, {
       serverId: selectedServerID,
       isPublic,
       description,
       discoveryCategory: values.discoveryCategory || '',
+      discoveryTags,
     });
     applyServerListingState(res.data || {
       isPublic,
       description,
       discoveryCategory: values.discoveryCategory || '',
+      discoveryTags,
     });
     await fetchServerDetails();
     showAppMessage(isPublic ? 'Server listed publicly.' : 'Server listing is private.', 'success');
@@ -6254,6 +6366,156 @@ async function updatePublicListingFromPrompt() {
     showAppMessage(getApiErrorMessage(error, 'Could not update public listing.'), 'error');
   }
 }
+
+async function updateServerWelcomeFromPrompt() {
+  const values = await openSimpleFormDialog({
+    title: 'Welcome Screen',
+    description: 'Choose what new members see the first time they open this server.',
+    fields: [
+      {
+        name: 'welcomeEnabled',
+        label: 'Welcome screen',
+        value: currentServerWelcomeEnabled ? 'true' : 'false',
+        options: [
+          { value: 'true', label: 'On' },
+          { value: 'false', label: 'Off' },
+        ],
+      },
+      {
+        name: 'welcomeMessage',
+        label: 'Welcome message',
+        type: 'textarea',
+        rows: 4,
+        maxLength: 600,
+        required: false,
+        value: currentServerWelcomeMessage || '',
+      },
+      {
+        name: 'welcomeChecklist',
+        label: 'Onboarding steps (one per line)',
+        type: 'textarea',
+        rows: 6,
+        maxLength: 760,
+        required: false,
+        value: currentServerWelcomeChecklist.join('\n'),
+      },
+    ],
+    confirmText: 'Save',
+  });
+
+  if (!values) return;
+
+  const welcomeEnabled = values.welcomeEnabled === 'true';
+  const welcomeChecklist = normalizeServerWelcomeChecklist(values.welcomeChecklist || '');
+
+  try {
+    const res = await axios.post(`${homeApiBase}/api/Server/UpdateWelcomeScreen`, {
+      serverId: selectedServerID,
+      welcomeEnabled,
+      welcomeMessage: values.welcomeMessage || '',
+      welcomeChecklist,
+    });
+    applyServerWelcomeState(res.data || {
+      welcomeEnabled,
+      welcomeMessage: values.welcomeMessage || '',
+      welcomeChecklist,
+    });
+    await fetchServerDetails();
+    showAppMessage('Welcome screen updated.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not update the welcome screen.'), 'error');
+  }
+}
+
+function getServerWelcomeStorageKey(serverId = selectedServerID) {
+  return `mydiscord.serverWelcome.${JWTusername || 'guest'}.${serverId || 'unknown'}`;
+}
+
+function hasLocallyCompletedServerWelcome(serverId = selectedServerID) {
+  try {
+    return localStorage.getItem(getServerWelcomeStorageKey(serverId)) === 'done';
+  } catch {
+    return false;
+  }
+}
+
+function markServerWelcomeCompleteLocally(serverId = selectedServerID) {
+  try {
+    localStorage.setItem(getServerWelcomeStorageKey(serverId), 'done');
+  } catch {
+    // Local storage can be unavailable in hardened webviews; server completion still applies.
+  }
+}
+
+function shouldShowServerWelcomeScreen() {
+  return Boolean(
+    selectedServerID &&
+    currentServerWelcomeEnabled &&
+    !currentServerOnboardingCompletedAt &&
+    !hasLocallyCompletedServerWelcome(selectedServerID) &&
+    !document.querySelector('.server-welcome-overlay')
+  );
+}
+
+function maybeOpenServerWelcomeScreen() {
+  if (shouldShowServerWelcomeScreen()) {
+    openServerWelcomeScreen();
+  }
+}
+
+function getServerWelcomeMessage() {
+  return currentServerWelcomeMessage ||
+    `Welcome to ${currentServerName || 'this server'}. Start with the suggested steps below and jump into a channel when you are ready.`;
+}
+
+function getWelcomeRecommendedChannels() {
+  const picks = [];
+  const firstText = currentServerChannels.find((channel) => channel.type === 'text');
+  const firstVoice = currentServerChannels.find((channel) => channel.type === 'voice');
+  const firstStage = currentServerChannels.find((channel) => channel.type === 'stage');
+  [firstText, firstVoice, firstStage].forEach((channel) => {
+    if (channel && !picks.some((item) => item.id === channel.id)) {
+      picks.push(channel);
+    }
+  });
+  return picks;
+}
+
+function closeServerWelcomeScreen() {
+  document.querySelectorAll('.server-welcome-overlay').forEach((overlay) => overlay.remove());
+}
+
+async function completeSelectedServerOnboarding() {
+  if (!selectedServerID) return;
+  const serverId = selectedServerID;
+  currentServerOnboardingCompletedAt = new Date().toISOString();
+  markServerWelcomeCompleteLocally(serverId);
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/CompleteOnboarding`, {
+      serverId,
+    });
+  } catch (error) {
+    console.warn('Could not sync onboarding completion:', error);
+  }
+}
+
+function selectWelcomeChannel(channel, preview = false) {
+  if (!channel?.id) return;
+  if (!preview) {
+    completeSelectedServerOnboarding();
+  }
+  closeServerWelcomeScreen();
+
+  const channelEl = document.querySelector(
+    `[data-channel-id="${escapeCssIdentifier(channel.id)}"]`
+  );
+  if (channelEl) {
+    channelEl.click();
+  }
+}
+
+
 
 async function updateServerVerificationFromPrompt() {
   await loadAccountSettings();
@@ -7600,6 +7862,7 @@ async function fetchServerDetails() {
     if (server) {
       applyServerRuleState(server);
       applyServerListingState(server);
+      applyServerWelcomeState(server);
       currentServerRole = server.role || currentServerRole || 'user';
     }
     if (server?.serverName) {
@@ -7692,6 +7955,7 @@ async function fetchServerDetails() {
     });
     startVoiceRosterRefresh();
     await fetchActiveVoiceUsers(selectedServerID);
+    maybeOpenServerWelcomeScreen();
 
   } catch (err) {
     console.error('Failed to fetch server details:', err);
