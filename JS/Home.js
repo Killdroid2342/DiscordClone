@@ -6515,7 +6515,177 @@ function selectWelcomeChannel(channel, preview = false) {
   }
 }
 
+function renderWelcomeStepPills(container, activeIndex, onSelect = () => {}) {
+  ['Welcome', 'Get Started'].forEach((label, index) => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'server-welcome-step-pill';
+    pill.classList.toggle('active', index === activeIndex);
+    pill.textContent = label;
+    pill.addEventListener('click', () => onSelect(index));
+    container.appendChild(pill);
+  });
+}
 
+function openServerWelcomeScreen({ preview = false } = {}) {
+  closeAccountActionDialog();
+  closeServerWelcomeScreen();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay server-welcome-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'server-welcome-dialog';
+
+  const header = document.createElement('div');
+  header.className = 'server-welcome-header';
+
+  const icon = document.createElement('div');
+  icon.className = 'server-welcome-icon';
+  icon.textContent = String(currentServerName || '?').trim().slice(0, 1).toUpperCase();
+
+  const headingWrap = document.createElement('div');
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 'server-welcome-eyebrow';
+  eyebrow.textContent = preview ? 'Preview' : 'Server welcome';
+  const heading = document.createElement('h3');
+  heading.textContent = currentServerName || 'Welcome';
+  headingWrap.appendChild(eyebrow);
+  headingWrap.appendChild(heading);
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'server-welcome-close';
+  closeButton.textContent = 'x';
+  closeButton.addEventListener('click', async () => {
+    if (!preview) {
+      await completeSelectedServerOnboarding();
+    }
+    closeServerWelcomeScreen();
+  });
+
+  header.appendChild(icon);
+  header.appendChild(headingWrap);
+  header.appendChild(closeButton);
+
+  const tabs = document.createElement('div');
+  tabs.className = 'server-welcome-steps';
+
+  const body = document.createElement('div');
+  body.className = 'server-welcome-body';
+
+  const footer = document.createElement('div');
+  footer.className = 'server-welcome-footer';
+  const backButton = document.createElement('button');
+  backButton.type = 'button';
+  backButton.className = 'account-action-cancel';
+  backButton.textContent = 'Back';
+  const nextButton = document.createElement('button');
+  nextButton.type = 'button';
+  nextButton.className = 'account-action-submit';
+
+  let activeScreen = 0;
+
+  const renderScreen = () => {
+    tabs.innerHTML = '';
+    body.innerHTML = '';
+    renderWelcomeStepPills(tabs, activeScreen, (screenIndex) => {
+      activeScreen = screenIndex;
+      renderScreen();
+    });
+
+    if (activeScreen === 0) {
+      const message = document.createElement('p');
+      message.className = 'server-welcome-message';
+      message.textContent = getServerWelcomeMessage();
+
+      const meta = document.createElement('div');
+      meta.className = 'server-welcome-meta';
+      [
+        `${currentServerChannels.filter((channel) => channel.type === 'text').length} text channels`,
+        `${currentServerChannels.filter((channel) => isVoiceLikeChannelType(channel.type)).length} voice spaces`,
+        `${currentServerWelcomeChecklist.length} onboarding steps`,
+      ].forEach((item) => {
+        const chip = document.createElement('span');
+        chip.textContent = item;
+        meta.appendChild(chip);
+      });
+
+      body.appendChild(message);
+      body.appendChild(meta);
+    } else {
+      const checklist = document.createElement('div');
+      checklist.className = 'server-welcome-checklist';
+      currentServerWelcomeChecklist.forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'server-welcome-check-item';
+        const marker = document.createElement('span');
+        marker.textContent = String(index + 1);
+        const text = document.createElement('p');
+        text.textContent = item;
+        row.appendChild(marker);
+        row.appendChild(text);
+        checklist.appendChild(row);
+      });
+      body.appendChild(checklist);
+
+      const channelList = document.createElement('div');
+      channelList.className = 'server-welcome-channels';
+      getWelcomeRecommendedChannels().forEach((channel) => {
+        const channelButton = document.createElement('button');
+        channelButton.type = 'button';
+        channelButton.className = 'server-welcome-channel';
+        channelButton.textContent = `${getChannelTypeIcon(channel.type)} ${channel.name}`;
+        channelButton.addEventListener('click', () => selectWelcomeChannel(channel, preview));
+        channelList.appendChild(channelButton);
+      });
+      if (channelList.children.length) {
+        body.appendChild(channelList);
+      }
+    }
+
+    backButton.disabled = activeScreen === 0;
+    nextButton.textContent = activeScreen === 0 ? 'Next' : preview ? 'Close' : 'Finish';
+  };
+
+  backButton.addEventListener('click', () => {
+    activeScreen = Math.max(0, activeScreen - 1);
+    renderScreen();
+  });
+
+  nextButton.addEventListener('click', async () => {
+    if (activeScreen === 0) {
+      activeScreen = 1;
+      renderScreen();
+      return;
+    }
+
+    if (!preview) {
+      await completeSelectedServerOnboarding();
+    }
+    closeServerWelcomeScreen();
+  });
+
+  footer.appendChild(backButton);
+  footer.appendChild(nextButton);
+  dialog.appendChild(header);
+  dialog.appendChild(tabs);
+  dialog.appendChild(body);
+  dialog.appendChild(footer);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', async (event) => {
+    if (event.target === overlay) {
+      if (!preview) {
+        await completeSelectedServerOnboarding();
+      }
+      closeServerWelcomeScreen();
+    }
+  });
+
+  renderScreen();
+}
 
 async function updateServerVerificationFromPrompt() {
   await loadAccountSettings();
