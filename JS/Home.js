@@ -161,6 +161,9 @@ let signalRConnection = null;
 let currentChatHistory = [];
 let currentGroupId = null;
 let currentGroupName = '';
+let currentServerThreadId = null;
+let currentServerThread = null;
+let pinnedMessagesRefreshInFlight = false;
 
 function GetCookieToken(name) {
   let value = '; ' + document.cookie;
@@ -445,6 +448,8 @@ function getMessageId(message = {}) {
   return (
     message.messageID ||
     message.MessageID ||
+    message.threadMessageId ||
+    message.ThreadMessageId ||
     message.privateMessageID ||
     message.PrivateMessageID ||
     message.id ||
@@ -1352,21 +1357,520 @@ function hydrateLinkPreviews(messageEl, text = '') {
   });
 }
 
+function getMessageThread(message = {}) {
+  return message.thread || message.Thread || null;
+}
+
+function getThreadId(thread = {}) {
+  thread = thread || {};
+  return thread.threadId || thread.ThreadId || thread.id || thread.Id || '';
+}
+
+function getThreadName(thread = {}) {
+  thread = thread || {};
+  return thread.name || thread.Name || 'Thread';
+}
+
+function getThreadMessageCount(thread = {}, fallback = 0) {
+  thread = thread || {};
+  return Number(thread.messageCount ?? thread.MessageCount ?? fallback ?? 0);
+}
+
+function getMessageThreadCount(message = {}) {
+  const thread = getMessageThread(message);
+  return Number(
+    message.threadMessageCount ??
+    message.ThreadMessageCount ??
+    (thread ? getThreadMessageCount(thread) : 0)
+  );
+}
+
+function getMessageIsPinned(message = {}) {
+  return Boolean(message.isPinned ?? message.IsPinned);
+}
+
+function getParentPreview(thread = {}) {
+  thread = thread || {};
+  return thread.parentPreview || thread.ParentPreview || null;
+}
+
+function getThreadPreviewText(thread = {}) {
+  const parent = getParentPreview(thread);
+  const text = parent?.userText || parent?.UserText || parent?.content || parent?.Content || '';
+  const sender = parent?.messagesUserSender || parent?.MessagesUserSender || '';
+  if (!text && !sender) return '';
+  return sender ? `${sender}: ${text}` : text;
+}
+
+function isSelectedTextChannel() {
+  return currentServerChannels.some((channel) => (
+    channel.id === selectedChannelID && channel.type === 'text'
+  ));
+}
+
+function setServerChatHeaderTitle(title) {
+  const header = document.querySelector('.chatHeader');
+  if (!header) return;
+
+  header.innerHTML = '';
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'chat-header-title';
+  titleEl.textContent = title;
+  header.appendChild(titleEl);
+
+  if (!isSelectedTextChannel()) {
+    return;
+  }
+
+  const actions = document.createElement('span');
+  actions.className = 'chat-header-actions';
+
+  const threadsButton = document.createElement('button');
+  threadsButton.type = 'button';
+  threadsButton.className = 'server-header-tool';
+  threadsButton.textContent = 'Threads';
+  threadsButton.title = 'View channel threads';
+  threadsButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openChannelThreadsPanel();
+  });
+
+  const pinsButton = document.createElement('button');
+  pinsButton.type = 'button';
+  pinsButton.className = 'server-header-tool';
+  pinsButton.textContent = 'Pins';
+  pinsButton.title = 'View pinned messages';
+  pinsButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openPinnedMessagesPanel();
+  });
+
+  actions.appendChild(threadsButton);
+  actions.appendChild(pinsButton);
+  header.appendChild(actions);
+}
+
+function ensureServerThreadPanel() {
+  let panel = document.getElementById('serverThreadPanel');
+  if (panel) {
+    return panel;
+  }
+
+  panel = document.createElement('aside');
+  panel.id = 'serverThreadPanel';
+  panel.className = 'server-side-panel server-thread-panel is-hidden';
+
+  const header = document.createElement('div');
+  header.className = 'server-side-panel-header';
+
+  const titleBlock = document.createElement('div');
+  titleBlock.className = 'server-side-panel-title';
+  const title = document.createElement('h3');
+  title.id = 'serverThreadTitle';
+  title.textContent = 'Thread';
+  const meta = document.createElement('p');
+  meta.id = 'serverThreadMeta';
+  meta.textContent = '';
+  titleBlock.appendChild(title);
+  titleBlock.appendChild(meta);
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'server-side-panel-close';
+  closeButton.textContent = 'x';
+  closeButton.title = 'Close';
+  closeButton.addEventListener('click', closeServerThreadPanel);
+
+  header.appendChild(titleBlock);
+  header.appendChild(closeButton);
+
+  const parent = document.createElement('div');
+  parent.id = 'serverThreadParent';
+  parent.className = 'server-thread-parent is-hidden';
+
+  const messages = document.createElement('div');
+  messages.id = 'serverThreadMessages';
+  messages.className = 'server-thread-messages';
+
+  const form = document.createElement('form');
+  form.id = 'serverThreadForm';
+  form.className = 'server-thread-form';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.name = 'threadMessage';
+  input.className = 'server-thread-input';
+  input.placeholder = 'Reply in thread';
+  input.autocomplete = 'off';
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'server-thread-send';
+  submit.textContent = 'Send';
+  form.appendChild(input);
+  form.appendChild(submit);
+  form.addEventListener('submit', sendServerThreadMessage);
+
+  panel.appendChild(header);
+  panel.appendChild(parent);
+  panel.appendChild(messages);
+  panel.appendChild(form);
+
+  document.querySelector('.chatSection')?.appendChild(panel);
+  return panel;
+}
+
+function closeServerThreadPanel() {
+  currentServerThreadId = null;
+  currentServerThread = null;
+  hideElement('#serverThreadPanel');
+}
+
+function setThreadPanelMode({ title, meta = '', parentText = '', showForm = false } = {}) {
+  const panel = ensureServerThreadPanel();
+  document.getElementById('serverThreadTitle').textContent = title || 'Thread';
+  document.getElementById('serverThreadMeta').textContent = meta;
+
+  const parent = document.getElementById('serverThreadParent');
+  parent.textContent = parentText;
+  setElementVisible(parent, Boolean(parentText), 'block');
+  setElementVisible(document.getElementById('serverThreadForm'), showForm, 'flex');
+
+  showElement(panel, 'flex');
+  return panel;
+}
+
+async function openChannelThreadsPanel() {
+  if (!selectedChannelID || !isSelectedTextChannel()) {
+    return;
+  }
+
+  currentServerThreadId = null;
+  currentServerThread = null;
+  setThreadPanelMode({
+    title: 'Threads',
+    meta: getSelectedChannelNotificationName(),
+    showForm: false,
+  });
+
+  const list = document.getElementById('serverThreadMessages');
+  list.innerHTML = '<div class="server-side-empty">Loading threads...</div>';
+
+  try {
+    const response = await axios.get(
+      `${homeApiBase}/api/ServerMessages/GetThreadsForChannel?channelId=${encodeURIComponent(selectedChannelID)}`
+    );
+    const threads = Array.isArray(response.data) ? response.data : [];
+    list.innerHTML = '';
+    if (threads.length === 0) {
+      list.innerHTML = '<div class="server-side-empty">No threads yet.</div>';
+      return;
+    }
+
+    threads.forEach((thread) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'server-thread-list-item';
+      const title = document.createElement('strong');
+      title.textContent = getThreadName(thread);
+      const count = document.createElement('span');
+      count.textContent = `${getThreadMessageCount(thread)} messages`;
+      const previewText = getThreadPreviewText(thread);
+      if (previewText) {
+        const preview = document.createElement('span');
+        preview.className = 'server-thread-preview';
+        preview.textContent = previewText;
+        item.appendChild(preview);
+      }
+      item.prepend(title, count);
+      item.addEventListener('click', () => openServerThread(thread));
+      list.appendChild(item);
+    });
+  } catch (error) {
+    list.innerHTML = '<div class="server-side-empty">Could not load threads.</div>';
+    showAppMessage(getApiErrorMessage(error, 'Could not load threads.'), 'error');
+  }
+}
+
+async function openServerThread(threadOrId) {
+  let thread = typeof threadOrId === 'string' ? null : threadOrId;
+  let threadId = typeof threadOrId === 'string' ? threadOrId : getThreadId(threadOrId);
+  if (!threadId) return;
+
+  setThreadPanelMode({
+    title: thread ? getThreadName(thread) : 'Thread',
+    meta: 'Loading...',
+    showForm: true,
+  });
+
+  try {
+    if (!thread) {
+      const response = await axios.get(
+        `${homeApiBase}/api/ServerMessages/GetThread?threadId=${encodeURIComponent(threadId)}`
+      );
+      thread = response.data;
+      threadId = getThreadId(thread);
+    }
+
+    currentServerThread = thread;
+    currentServerThreadId = threadId;
+    setThreadPanelMode({
+      title: getThreadName(thread),
+      meta: `${getThreadMessageCount(thread)} messages`,
+      parentText: getThreadPreviewText(thread),
+      showForm: true,
+    });
+    await fetchServerThreadMessages();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not open thread.'), 'error');
+  }
+}
+
+async function openThreadFromMessage(message) {
+  const existingThread = getMessageThread(message);
+  const existingThreadId = getThreadId(existingThread);
+  if (existingThreadId) {
+    await openServerThread(existingThread);
+    return;
+  }
+
+  const messageId = getMessageId(message);
+  if (!messageId) return;
+
+  const defaultName = (getMessageText(message) || `Thread from ${getMessageSender(message)}`)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+  const name = await askText('Create Thread', 'Thread name', defaultName || 'New thread');
+  if (!name) return;
+
+  try {
+    const response = await axios.post(`${homeApiBase}/api/ServerMessages/CreateThread`, {
+      parentMessageId: messageId,
+      name,
+    });
+    showAppMessage('Thread created.', 'success');
+    await fetchServerMessages();
+    await openServerThread(response.data);
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not create thread.'), 'error');
+  }
+}
+
+async function fetchServerThreadMessages() {
+  if (!currentServerThreadId) return;
+
+  const list = document.getElementById('serverThreadMessages');
+  list.innerHTML = '<div class="server-side-empty">Loading messages...</div>';
+
+  try {
+    const response = await axios.get(
+      `${homeApiBase}/api/ServerMessages/GetThreadMessages?threadId=${encodeURIComponent(currentServerThreadId)}`
+    );
+    const messages = Array.isArray(response.data) ? response.data : [];
+    list.innerHTML = '';
+    if (messages.length === 0) {
+      list.innerHTML = '<div class="server-side-empty">No replies yet.</div>';
+      return;
+    }
+
+    messages.forEach((message) => {
+      list.appendChild(renderCompactMessage(message, 'thread'));
+    });
+    list.scrollTop = list.scrollHeight;
+  } catch (error) {
+    list.innerHTML = '<div class="server-side-empty">Could not load replies.</div>';
+    showAppMessage(getApiErrorMessage(error, 'Could not load thread replies.'), 'error');
+  }
+}
+
+async function sendServerThreadMessage(event) {
+  event.preventDefault();
+  if (!currentServerThreadId) return;
+
+  const form = event.target;
+  const input = form.querySelector('.server-thread-input');
+  const text = String(input?.value || '').trim();
+  if (!text) return;
+
+  if (input) input.value = '';
+  const list = document.getElementById('serverThreadMessages');
+  const draftId = generateUUID();
+  const pending = renderCompactMessage({
+    threadMessageId: draftId,
+    messagesUserSender: JWTusername,
+    userText: text,
+    date: new Date().toISOString(),
+  }, 'thread');
+  pending.classList.add('message-pending');
+  list.querySelector('.server-side-empty')?.remove();
+  list.appendChild(pending);
+  list.scrollTop = list.scrollHeight;
+
+  try {
+    await axios.post(`${homeApiBase}/api/ServerMessages/SendThreadMessage`, {
+      threadMessageId: draftId,
+      threadId: currentServerThreadId,
+      userText: text,
+    });
+    await fetchServerThreadMessages();
+    await fetchServerMessages();
+  } catch (error) {
+    pending.classList.remove('message-pending');
+    pending.classList.add('message-failed');
+    if (input) input.value = text;
+    showAppMessage(getApiErrorMessage(error, 'Thread reply failed to send.'), 'error');
+  }
+}
+
+function ensurePinnedMessagesPanel() {
+  let panel = document.getElementById('serverPinnedMessagesPanel');
+  if (panel) {
+    return panel;
+  }
+
+  panel = document.createElement('aside');
+  panel.id = 'serverPinnedMessagesPanel';
+  panel.className = 'server-side-panel server-pinned-panel is-hidden';
+
+  const header = document.createElement('div');
+  header.className = 'server-side-panel-header';
+  const titleBlock = document.createElement('div');
+  titleBlock.className = 'server-side-panel-title';
+  const title = document.createElement('h3');
+  title.textContent = 'Pinned Messages';
+  const meta = document.createElement('p');
+  meta.id = 'serverPinnedMeta';
+  meta.textContent = '';
+  titleBlock.appendChild(title);
+  titleBlock.appendChild(meta);
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'server-side-panel-close';
+  closeButton.textContent = 'x';
+  closeButton.title = 'Close';
+  closeButton.addEventListener('click', () => hideElement(panel));
+  header.appendChild(titleBlock);
+  header.appendChild(closeButton);
+
+  const list = document.createElement('div');
+  list.id = 'serverPinnedMessagesList';
+  list.className = 'server-pinned-list';
+  panel.appendChild(header);
+  panel.appendChild(list);
+
+  document.querySelector('.chatSection')?.appendChild(panel);
+  return panel;
+}
+
+async function openPinnedMessagesPanel() {
+  if (!selectedChannelID || !isSelectedTextChannel()) {
+    return;
+  }
+
+  const panel = ensurePinnedMessagesPanel();
+  showElement(panel, 'flex');
+  await fetchPinnedMessages();
+}
+
+async function fetchPinnedMessages() {
+  if (!selectedChannelID || pinnedMessagesRefreshInFlight) return;
+
+  const list = document.getElementById('serverPinnedMessagesList');
+  const meta = document.getElementById('serverPinnedMeta');
+  if (!list) return;
+
+  pinnedMessagesRefreshInFlight = true;
+  list.innerHTML = '<div class="server-side-empty">Loading pinned messages...</div>';
+  if (meta) meta.textContent = getSelectedChannelNotificationName();
+
+  try {
+    const response = await axios.get(
+      `${homeApiBase}/api/ServerMessages/GetPinnedMessages?channelId=${encodeURIComponent(selectedChannelID)}`
+    );
+    const messages = Array.isArray(response.data) ? response.data : [];
+    list.innerHTML = '';
+    if (meta) meta.textContent = `${messages.length} pinned`;
+    if (messages.length === 0) {
+      list.innerHTML = '<div class="server-side-empty">No pinned messages.</div>';
+      return;
+    }
+
+    messages.forEach((message) => {
+      list.appendChild(renderCompactMessage(message, 'server'));
+    });
+  } catch (error) {
+    list.innerHTML = '<div class="server-side-empty">Could not load pinned messages.</div>';
+    showAppMessage(getApiErrorMessage(error, 'Could not load pinned messages.'), 'error');
+  } finally {
+    pinnedMessagesRefreshInFlight = false;
+  }
+}
+
+async function toggleServerMessagePin(messageId, isPinned) {
+  if (!messageId) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/ServerMessages/SetPinnedMessage`, {
+      messageId,
+      isPinned,
+    });
+    showAppMessage(isPinned ? 'Message pinned.' : 'Message unpinned.', 'success');
+    await fetchServerMessages();
+    if (isElementVisible('#serverPinnedMessagesPanel')) {
+      await fetchPinnedMessages();
+    }
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not update pinned message.'), 'error');
+  }
+}
+
 function renderCompactMessage(message, scope = 'server') {
   const messageEl = document.createElement('div');
   messageEl.className = 'compact-message';
   messageEl.dataset.messageId = getMessageId(message);
+  messageEl.classList.toggle('is-pinned', getMessageIsPinned(message));
 
   const header = document.createElement('div');
   header.className = 'compact-message-header';
   const sender = getMessageSender(message);
   const headerText = document.createElement('span');
-  headerText.textContent = `${sender} · ${formatMessageDate(message.date)}`;
+  headerText.textContent = `${sender} · ${formatMessageDate(message.date || message.Date)}`;
   header.appendChild(headerText);
-  if (sender && sender !== JWTusername && messageEl.dataset.messageId) {
+  const headerActions = document.createElement('span');
+  headerActions.className = 'compact-message-actions';
+
+  if (scope === 'server' && messageEl.dataset.messageId) {
+    const thread = getMessageThread(message);
+    const threadButton = document.createElement('button');
+    threadButton.type = 'button';
+    threadButton.className = 'compact-message-action-btn';
+    const threadCount = getMessageThreadCount(message);
+    threadButton.textContent = threadCount > 0 ? `Thread ${threadCount}` : 'Thread';
+    threadButton.title = getThreadId(thread) ? 'Open thread' : 'Create thread';
+    threadButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openThreadFromMessage(message);
+    });
+    headerActions.appendChild(threadButton);
+
+    const isPinned = getMessageIsPinned(message);
+    const pinButton = document.createElement('button');
+    pinButton.type = 'button';
+    pinButton.className = 'compact-message-action-btn pin-action';
+    pinButton.classList.toggle('active', isPinned);
+    pinButton.textContent = isPinned ? 'Unpin' : 'Pin';
+    pinButton.title = isPinned ? 'Unpin message' : 'Pin message';
+    pinButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleServerMessagePin(messageEl.dataset.messageId, !isPinned);
+    });
+    headerActions.appendChild(pinButton);
+  }
+
+  if (sender && sender !== JWTusername && messageEl.dataset.messageId && ['server', 'dm', 'group'].includes(scope)) {
     const reportButton = document.createElement('button');
     reportButton.type = 'button';
-    reportButton.className = 'compact-message-report-btn';
+    reportButton.className = 'compact-message-report-btn compact-message-action-btn';
     reportButton.textContent = 'Report';
     reportButton.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -1377,9 +1881,19 @@ function renderCompactMessage(message, scope = 'server') {
         targetUsername: sender,
       });
     });
-    header.appendChild(reportButton);
+    headerActions.appendChild(reportButton);
+  }
+  if (headerActions.childElementCount > 0) {
+    header.appendChild(headerActions);
   }
   messageEl.appendChild(header);
+
+  if (getMessageIsPinned(message)) {
+    const pinned = document.createElement('div');
+    pinned.className = 'compact-message-pinned';
+    pinned.textContent = 'Pinned message';
+    messageEl.appendChild(pinned);
+  }
 
   if (message.replyToMessageId) {
     const reply = document.createElement('div');
@@ -8054,7 +8568,9 @@ async function fetchServerDetails() {
       if (channel.type === 'text') {
         channelEl.onclick = () => {
           selectedChannelID = channel.id;
-          document.querySelector('.chatHeader').textContent = '# ' + channel.name;
+          closeServerThreadPanel();
+          hideElement('#serverPinnedMessagesPanel');
+          setServerChatHeaderTitle('# ' + channel.name);
           setUnreadBadgeEntry('server', channel.id, 0, 0);
           channelEl.classList.remove('has-unread', 'has-mention');
           channelEl.dataset.unread = '';
@@ -8078,8 +8594,9 @@ async function fetchServerDetails() {
 
         channelEl.onclick = () => {
           selectedChannelID = channel.id;
-          document.querySelector('.chatHeader').textContent =
-            channel.type === 'stage' ? '[S] ' + channel.name : '[V] ' + channel.name;
+          closeServerThreadPanel();
+          hideElement('#serverPinnedMessagesPanel');
+          setServerChatHeaderTitle(channel.type === 'stage' ? '[S] ' + channel.name : '[V] ' + channel.name);
           Array.from(channelsList.querySelectorAll('.channel-list-item')).forEach(d => d.classList.remove('active'));
           channelEl.classList.add('active');
           JoinVoiceCalls(channel.id);
@@ -8110,7 +8627,9 @@ async function fetchServerDetails() {
     const firstTextChannel = currentServerChannels.find(c => c.type === 'text');
     if (firstTextChannel) {
       selectedChannelID = firstTextChannel.id;
-      document.querySelector('.chatHeader').textContent = '# ' + firstTextChannel.name;
+      closeServerThreadPanel();
+      hideElement('#serverPinnedMessagesPanel');
+      setServerChatHeaderTitle('# ' + firstTextChannel.name);
       fetchServerMessages();
       const firstChannelEl = channelsList.querySelector(`[data-channel-id="${escapeCssIdentifier(firstTextChannel.id)}"]`);
       firstChannelEl?.classList.add('active');
