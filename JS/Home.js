@@ -201,6 +201,12 @@ const renderedMessageCache = {
   dm: new Map(),
   group: new Map(),
 };
+const stickerMessageContentType = 'application/x-mydiscord-sticker';
+const expressionPackCache = new Map();
+let activeEmojiPickerInput = null;
+let lastEmojiPickerToggle = null;
+let expressionDialogMode = 'emoji';
+let renderEmojiPickerContent = null;
 
 function GetCookieToken(name) {
   let value = '; ' + document.cookie;
@@ -1701,16 +1707,82 @@ async function GetServer() {
   }
 }
 GetServer();
+
+function resolveMediaUrl(url = '') {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  if (value.startsWith('/uploads/')) {
+    return `${homeApiBase}${value}`;
+  }
+  return value;
+}
+
+function isAllowedExpressionImageUrl(url = '') {
+  const value = String(url || '').trim();
+  if (value.startsWith('/uploads/')) return true;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isStickerContentType(contentType = '') {
+  return String(contentType || '').toLowerCase().includes('sticker');
+}
+
+function normalizeExpressionName(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
+}
+
+function createCustomEmojiNode(name, imageUrl) {
+  const image = document.createElement('img');
+  image.className = 'message-custom-emoji';
+  image.src = resolveMediaUrl(imageUrl);
+  image.alt = `:${name}:`;
+  image.title = `:${name}:`;
+  image.loading = 'lazy';
+  return image;
+}
+
+function createStickerImageNode({ name = 'Sticker', url = '' } = {}, extraClass = '') {
+  const wrapper = document.createElement('div');
+  wrapper.className = `message-sticker ${extraClass}`.trim();
+  const image = document.createElement('img');
+  image.src = resolveMediaUrl(url);
+  image.alt = name;
+  image.title = name;
+  image.loading = 'lazy';
+  wrapper.appendChild(image);
+  return wrapper;
+}
+
+function getBuiltInSticker(stickerId = '') {
+  const stickers = typeof stickerList !== 'undefined' && Array.isArray(stickerList) ? stickerList : [];
+  return stickers.find((item) => item.id === stickerId) || null;
+}
+
 function buildMessageAttachmentNode(attachmentUrl, contentType = '') {
   if (!attachmentUrl) return null;
 
   const wrapper = document.createElement('div');
   wrapper.className = 'message-attachment';
-  const resolvedUrl = attachmentUrl.startsWith('/uploads/')
-    ? `${homeApiBase}${attachmentUrl}`
-    : attachmentUrl;
+  const resolvedUrl = resolveMediaUrl(attachmentUrl);
 
   const normalizedType = String(contentType || '').toLowerCase();
+  if (isStickerContentType(normalizedType)) {
+    wrapper.classList.add('message-sticker-attachment');
+    wrapper.appendChild(createStickerImageNode({ name: 'Sticker', url: attachmentUrl }, 'large'));
+    return wrapper;
+  }
+
   const isImage =
     normalizedType.startsWith('image/') ||
     /\.(png|jpe?g|gif|webp)$/i.test(attachmentUrl);
@@ -1768,8 +1840,11 @@ function normalizeUrlForPreview(url) {
 }
 
 function extractMessageUrls(text = '') {
+  const scrubbedText = String(text || '')
+    .replace(/<:([a-z0-9_]{2,32}):([^>\s]+)>/gi, '')
+    .replace(/\[\[sticker:([a-z0-9_-]{1,48})\]\]/gi, '');
   return Array.from(new Set(
-    (String(text).match(linkUrlRegex) || [])
+    (scrubbedText.match(linkUrlRegex) || [])
       .map(normalizeUrlForPreview)
       .filter(Boolean)
   )).slice(0, 3);
@@ -1812,25 +1887,47 @@ function appendPlainMessageTextWithMentions(container, text = '') {
   }
 }
 
+const richMessageTokenRegex = /<:([a-z0-9_]{2,32}):([^>\s]+)>|\[\[sticker:([a-z0-9_-]{1,48})\]\]|(https?:\/\/[^\s<>"']+)/gi;
+
 function appendMessageTextWithLinks(container, text = '') {
   const value = String(text || '');
   let cursor = 0;
 
-  value.replace(linkUrlRegex, (match, offset) => {
-    const url = normalizeUrlForPreview(match);
+  richMessageTokenRegex.lastIndex = 0;
+  value.replace(richMessageTokenRegex, (...args) => {
+    const [match, emojiName, emojiUrl, stickerId, matchedUrl] = args;
+    const offset = args[args.length - 2];
     const end = offset + match.length;
     if (offset > cursor) {
       appendPlainMessageTextWithMentions(container, value.slice(cursor, offset));
     }
 
-    const link = document.createElement('a');
-    link.className = 'message-link';
-    link.href = url;
-    link.target = '_blank';
-    link.rel = 'noreferrer';
-    link.textContent = url;
-    container.appendChild(link);
-    cursor = end;
+    if (emojiName && emojiUrl && isAllowedExpressionImageUrl(emojiUrl)) {
+      container.appendChild(createCustomEmojiNode(emojiName, emojiUrl));
+      cursor = end;
+      return match;
+    }
+
+    if (stickerId) {
+      const sticker = getBuiltInSticker(stickerId);
+      if (sticker) {
+        container.appendChild(createStickerImageNode(sticker, 'inline'));
+        cursor = end;
+      }
+      return match;
+    }
+
+    if (matchedUrl) {
+      const url = normalizeUrlForPreview(matchedUrl);
+      const link = document.createElement('a');
+      link.className = 'message-link';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noreferrer';
+      link.textContent = url;
+      container.appendChild(link);
+      cursor = end;
+    }
     return match;
   });
 
@@ -8591,6 +8688,7 @@ function renderServerManagementControls(container) {
     ['+ Channel', createChannelFromPrompt],
     ['+ Category', createCategoryFromPrompt],
     ['Roles', openRolesAndPermissionsDialog],
+    ['Expressions', () => openExpressionManagerDialog('emoji')],
     ['Voice Perms', () => openVoiceChannelPermissionsDialog()],
     ['Invite', createLimitedInviteFromPrompt],
     ['Listing', updatePublicListingFromPrompt],
@@ -10361,6 +10459,8 @@ async function fetchServerDetails() {
     if (server?.serverName) {
       currentServerName = server.serverName;
     }
+    await loadServerExpressions(selectedServerID, { force: true });
+    refreshEmojiPicker();
     const channelsList = document.getElementById('channelsList');
     channelsList.innerHTML = '';
     renderServerManagementControls(channelsList);
@@ -11474,19 +11574,541 @@ async function submitUploadModal() {
 }
 
 
+function getExpressionValue(item = {}, camelKey, pascalKey, fallback = '') {
+  return item[camelKey] ?? item[pascalKey] ?? fallback;
+}
+
+function normalizeExpressionItem(item = {}) {
+  return {
+    id: String(getExpressionValue(item, 'id', 'Id', '') || ''),
+    serverId: String(getExpressionValue(item, 'serverId', 'ServerId', '') || ''),
+    name: normalizeExpressionName(getExpressionValue(item, 'name', 'Name', '')),
+    imageUrl: String(getExpressionValue(item, 'imageUrl', 'ImageUrl', '') || ''),
+    createdBy: String(getExpressionValue(item, 'createdBy', 'CreatedBy', '') || ''),
+  };
+}
+
+function normalizeExpressionPack(data = {}) {
+  const rawEmojis = data.emojis || data.Emojis || [];
+  const rawStickers = data.stickers || data.Stickers || [];
+  return {
+    emojis: (Array.isArray(rawEmojis) ? rawEmojis : [])
+      .map(normalizeExpressionItem)
+      .filter((item) => item.name && item.imageUrl),
+    stickers: (Array.isArray(rawStickers) ? rawStickers : [])
+      .map(normalizeExpressionItem)
+      .filter((item) => item.name && item.imageUrl),
+    canManage: Boolean(data.canManage ?? data.CanManage),
+  };
+}
+
+function getEmptyExpressionPack() {
+  return { emojis: [], stickers: [], canManage: false };
+}
+
+async function loadServerExpressions(serverId = selectedServerID, { force = false, silent = true } = {}) {
+  const normalizedServerId = String(serverId || '').trim();
+  if (!normalizedServerId) {
+    return getEmptyExpressionPack();
+  }
+
+  if (!force && expressionPackCache.has(normalizedServerId)) {
+    return expressionPackCache.get(normalizedServerId);
+  }
+
+  try {
+    const response = await axios.get(
+      `${homeApiBase}/api/ServerExpressions/GetExpressionPack?serverId=${encodeURIComponent(normalizedServerId)}`
+    );
+    const pack = normalizeExpressionPack(response.data || {});
+    expressionPackCache.set(normalizedServerId, pack);
+    return pack;
+  } catch (error) {
+    if (!silent) {
+      showAppMessage(getApiErrorMessage(error, 'Could not load custom emojis and stickers.'), 'error');
+    } else {
+      console.warn('Could not load server expressions:', error);
+    }
+    const emptyPack = getEmptyExpressionPack();
+    expressionPackCache.set(normalizedServerId, emptyPack);
+    return emptyPack;
+  }
+}
+
+function getCurrentExpressionPack() {
+  if (!selectedServerID) {
+    return getEmptyExpressionPack();
+  }
+  return expressionPackCache.get(String(selectedServerID)) || getEmptyExpressionPack();
+}
+
+function refreshEmojiPicker() {
+  const searchInput = document.getElementById('emojiSearchInput');
+  if (typeof renderEmojiPickerContent === 'function') {
+    renderEmojiPickerContent(searchInput?.value || '');
+  }
+}
+
+function insertTextAtCursor(input, text) {
+  if (!input) return;
+  const value = input.value || '';
+  const start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+  const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+  input.value = `${value.slice(0, start)}${text}${value.slice(end)}`;
+  const nextCursor = start + text.length;
+  input.setSelectionRange?.(nextCursor, nextCursor);
+  input.focus();
+}
+
+function getComposerInputFromTarget(target) {
+  const form = target?.closest?.('form');
+  const formInput = form?.querySelector?.('.chatInput');
+  if (formInput) return formInput;
+
+  const scope = getActiveMessageScope();
+  return getMessageInputForScope(scope) || document.querySelector('.chatInput');
+}
+
+function setActiveEmojiPickerInputFromTarget(target) {
+  activeEmojiPickerInput = getComposerInputFromTarget(target);
+  lastEmojiPickerToggle = target?.closest?.('[data-emoji-picker-toggle]') || target || null;
+}
+
+function positionEmojiPicker() {
+  const picker = document.getElementById('emojiPicker');
+  if (!picker) return;
+
+  const anchor = lastEmojiPickerToggle || activeEmojiPickerInput;
+  if (!anchor?.getBoundingClientRect) {
+    picker.style.left = '';
+    picker.style.right = '24px';
+    picker.style.bottom = '76px';
+    return;
+  }
+
+  const rect = anchor.getBoundingClientRect();
+  const width = Math.min(420, window.innerWidth - 24);
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width));
+  const bottom = Math.max(12, window.innerHeight - rect.top + 10);
+  picker.style.width = `${width}px`;
+  picker.style.left = `${left}px`;
+  picker.style.right = 'auto';
+  picker.style.bottom = `${bottom}px`;
+}
+
+function buildCustomEmojiToken(item) {
+  return `<:${item.name}:${item.imageUrl}>`;
+}
+
+async function uploadExpressionImage(file) {
+  if (!file || !file.type?.startsWith('image/')) {
+    throw new Error('Choose an image file.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await axios.post(`${homeApiBase}/api/Upload/UploadImage`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data?.url || '';
+}
+
+async function saveCustomExpression(kind, { name, imageUrl }) {
+  if (!selectedServerID) {
+    showAppMessage('Open a server before adding custom expressions.', 'error');
+    return;
+  }
+
+  const endpoint = kind === 'sticker' ? 'SaveSticker' : 'SaveEmoji';
+  await axios.post(`${homeApiBase}/api/ServerExpressions/${endpoint}`, {
+    serverId: selectedServerID,
+    name,
+    imageUrl,
+  });
+  expressionPackCache.delete(String(selectedServerID));
+  await loadServerExpressions(selectedServerID, { force: true, silent: false });
+  refreshEmojiPicker();
+}
+
+async function deleteCustomExpression(kind, id) {
+  if (!selectedServerID || !id) return;
+  const endpoint = kind === 'sticker' ? 'DeleteSticker' : 'DeleteEmoji';
+  await axios.post(`${homeApiBase}/api/ServerExpressions/${endpoint}`, {
+    serverId: selectedServerID,
+    id,
+  });
+  expressionPackCache.delete(String(selectedServerID));
+  await loadServerExpressions(selectedServerID, { force: true, silent: false });
+  refreshEmojiPicker();
+}
+
+function ensureExpressionManagerDialog() {
+  let overlay = document.getElementById('expressionManagerDialog');
+  if (overlay) return overlay;
+
+  overlay = document.createElement('div');
+  overlay.id = 'expressionManagerDialog';
+  overlay.className = 'expression-manager-overlay is-hidden';
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      hideElement(overlay);
+    }
+  });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+async function renderExpressionManagerDialog() {
+  const overlay = ensureExpressionManagerDialog();
+  const pack = await loadServerExpressions(selectedServerID, { silent: false });
+  const isStickerMode = expressionDialogMode === 'sticker';
+  const items = isStickerMode ? pack.stickers : pack.emojis;
+  const kind = isStickerMode ? 'sticker' : 'emoji';
+
+  overlay.innerHTML = '';
+  const dialog = document.createElement('div');
+  dialog.className = 'expression-manager-dialog';
+
+  const header = document.createElement('div');
+  header.className = 'expression-manager-header';
+  const title = document.createElement('h3');
+  title.textContent = 'Server Expressions';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'expression-manager-close';
+  close.textContent = 'x';
+  close.title = 'Close';
+  close.addEventListener('click', () => hideElement(overlay));
+  header.appendChild(title);
+  header.appendChild(close);
+
+  const tabs = document.createElement('div');
+  tabs.className = 'expression-manager-tabs';
+  [
+    ['emoji', 'Custom Emoji'],
+    ['sticker', 'Stickers'],
+  ].forEach(([mode, label]) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'expression-manager-tab';
+    tab.classList.toggle('active', expressionDialogMode === mode);
+    tab.textContent = label;
+    tab.addEventListener('click', () => {
+      expressionDialogMode = mode;
+      renderExpressionManagerDialog();
+    });
+    tabs.appendChild(tab);
+  });
+
+  const form = document.createElement('form');
+  form.className = 'expression-manager-form';
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.name = 'name';
+  name.maxLength = 32;
+  name.placeholder = isStickerMode ? 'sticker_name' : 'emoji_name';
+  name.autocomplete = 'off';
+  const imageUrl = document.createElement('input');
+  imageUrl.type = 'text';
+  imageUrl.name = 'imageUrl';
+  imageUrl.placeholder = 'Image URL';
+  imageUrl.autocomplete = 'off';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/png,image/jpeg,image/gif,image/webp';
+  fileInput.className = 'is-hidden';
+  const upload = document.createElement('button');
+  upload.type = 'button';
+  upload.className = 'expression-manager-secondary';
+  upload.textContent = 'Upload';
+  upload.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    upload.disabled = true;
+    upload.textContent = 'Uploading...';
+    try {
+      imageUrl.value = await uploadExpressionImage(file);
+    } catch (error) {
+      showAppMessage(error.message || 'Could not upload image.', 'error');
+    } finally {
+      upload.disabled = false;
+      upload.textContent = 'Upload';
+      fileInput.value = '';
+    }
+  });
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'expression-manager-primary';
+  submit.textContent = isStickerMode ? 'Add Sticker' : 'Add Emoji';
+
+  [name, imageUrl, upload, submit].forEach((element) => {
+    element.disabled = !pack.canManage;
+  });
+
+  form.appendChild(name);
+  form.appendChild(imageUrl);
+  form.appendChild(fileInput);
+  form.appendChild(upload);
+  form.appendChild(submit);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const normalizedName = normalizeExpressionName(name.value);
+    if (!normalizedName || normalizedName.length < 2 || !imageUrl.value.trim()) {
+      showAppMessage('Add a name and image URL.', 'error');
+      return;
+    }
+
+    submit.disabled = true;
+    try {
+      await saveCustomExpression(kind, {
+        name: normalizedName,
+        imageUrl: imageUrl.value.trim(),
+      });
+      showAppMessage(isStickerMode ? 'Sticker added.' : 'Emoji added.', 'success');
+      await renderExpressionManagerDialog();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not save expression.'), 'error');
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  const status = document.createElement('div');
+  status.className = 'expression-manager-status';
+  status.textContent = pack.canManage
+    ? `${items.length} ${isStickerMode ? 'stickers' : 'custom emojis'}`
+    : 'View-only';
+
+  const list = document.createElement('div');
+  list.className = 'expression-manager-list';
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'emoji-empty-state';
+    empty.textContent = isStickerMode ? 'No stickers yet.' : 'No custom emojis yet.';
+    list.appendChild(empty);
+  } else {
+    items.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'expression-manager-item';
+      const preview = document.createElement('img');
+      preview.src = resolveMediaUrl(item.imageUrl);
+      preview.alt = item.name;
+      preview.loading = 'lazy';
+      const label = document.createElement('span');
+      label.textContent = `:${item.name}:`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Delete';
+      remove.disabled = !pack.canManage;
+      remove.addEventListener('click', async () => {
+        remove.disabled = true;
+        try {
+          await deleteCustomExpression(kind, item.id);
+          await renderExpressionManagerDialog();
+        } catch (error) {
+          showAppMessage(getApiErrorMessage(error, 'Could not delete expression.'), 'error');
+          remove.disabled = false;
+        }
+      });
+      row.appendChild(preview);
+      row.appendChild(label);
+      row.appendChild(remove);
+      list.appendChild(row);
+    });
+  }
+
+  dialog.appendChild(header);
+  dialog.appendChild(tabs);
+  dialog.appendChild(form);
+  dialog.appendChild(status);
+  dialog.appendChild(list);
+  overlay.appendChild(dialog);
+}
+
+async function openExpressionManagerDialog(mode = 'emoji') {
+  if (!selectedServerID) {
+    showAppMessage('Open a server before managing custom expressions.', 'error');
+    return;
+  }
+
+  expressionDialogMode = mode === 'sticker' ? 'sticker' : 'emoji';
+  const overlay = ensureExpressionManagerDialog();
+  showElement(overlay, 'flex');
+  await renderExpressionManagerDialog();
+}
+
+async function sendStickerMessage(sticker) {
+  const scope = getActiveMessageScope();
+  if (!scope || !sticker) {
+    showAppMessage('Open a conversation before sending a sticker.', 'info');
+    return;
+  }
+
+  const isBuiltInSticker = Boolean(sticker.id && sticker.url?.startsWith('data:image/'));
+  const content = isBuiltInSticker ? `[[sticker:${sticker.id}]]` : '';
+  const attachmentUrl = isBuiltInSticker ? '' : sticker.imageUrl || sticker.url || '';
+  const attachmentContentType = attachmentUrl ? stickerMessageContentType : '';
+  const replyDraft = getActiveReplyDraft(scope);
+  const now = new Date().toISOString();
+
+  if (scope === 'server') {
+    const messageId = generateUUID();
+    const payload = {
+      MessageID: messageId,
+      ChannelId: selectedChannelID,
+      userText: content,
+      AttachmentUrl: attachmentUrl || null,
+      AttachmentContentType: attachmentContentType || null,
+      ReplyToMessageId: replyDraft?.messageId || null,
+    };
+    const pendingMessage = renderCompactMessage({
+      ...payload,
+      messagesUserSender: JWTusername,
+      date: now,
+      replyPreview: replyDraft?.preview || null,
+    }, 'server');
+    pendingMessage.classList.add('message-pending');
+    chatMessages.appendChild(pendingMessage);
+
+    try {
+      await apiClient.post(`${homeApiBase}/api/ServerMessages/ServerMessages`, payload);
+      if (replyDraft && pendingReplyDraft === replyDraft) {
+        clearReplyDraft();
+      }
+      await fetchServerMessages();
+    } catch (error) {
+      pendingMessage.classList.remove('message-pending');
+      pendingMessage.classList.add('message-failed');
+      showAppMessage(getApiErrorMessage(error, 'Sticker failed to send.'), 'error');
+    }
+    return;
+  }
+
+  const messagesDisplay = document.querySelector('.messagesDisplay');
+  if (scope === 'group') {
+    const result = await runOptimisticMessageSend({
+      container: messagesDisplay,
+      draft: {
+        sender: JWTusername,
+        content,
+        attachmentUrl,
+        attachmentContentType,
+        date: now,
+        replyToMessageId: replyDraft?.messageId || null,
+        replyPreview: replyDraft?.preview || null,
+      },
+      send: () => apiClient.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
+        groupId: currentGroupId,
+        content,
+        attachmentUrl: attachmentUrl || null,
+        attachmentContentType: attachmentContentType || null,
+        replyToMessageId: replyDraft?.messageId || null,
+      }),
+      refresh: () => GetGroupMessages(currentGroupId),
+      failureMessage: 'Sticker failed to send.',
+    }).catch(() => {});
+    if (result && replyDraft && pendingReplyDraft === replyDraft) {
+      clearReplyDraft();
+    }
+    return;
+  }
+
+  if (scope === 'dm') {
+    const messageId = generateUUID();
+    const result = await runOptimisticMessageSend({
+      container: messagesDisplay,
+      draft: {
+        privateMessageID: messageId,
+        messagesUserSender: JWTusername,
+        friendMessagesData: content,
+        attachmentUrl,
+        attachmentContentType,
+        date: now,
+        replyToMessageId: replyDraft?.messageId || null,
+        replyPreview: replyDraft?.preview || null,
+      },
+      send: () => apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, {
+        PrivateMessageID: messageId,
+        MessageUserReciver: currentFriend,
+        FriendMessagesData: content,
+        AttachmentUrl: attachmentUrl || null,
+        AttachmentContentType: attachmentContentType || null,
+        ReplyToMessageId: replyDraft?.messageId || null,
+      }),
+      refresh: () => GetPrivateMessage(),
+      failureMessage: 'Sticker failed to send.',
+    }).catch(() => {});
+    if (result && replyDraft && pendingReplyDraft === replyDraft) {
+      clearReplyDraft();
+    }
+  }
+}
+
 
 
 function setupEmojiPicker() {
   const container = document.getElementById('emojiGridContainer');
   const searchInput = document.getElementById('emojiSearchInput');
   const picker = document.getElementById('emojiPicker');
-  const tabs = document.querySelectorAll('.emoji-tab');
 
   if (!container || !picker) return;
 
-  let currentTab = 'emoji';
+  if (picker.parentElement !== document.body) {
+    document.body.appendChild(picker);
+  }
 
-  const renderContent = (filterText = '') => {
+  const tabBar = picker.querySelector('.emoji-tabs');
+  [
+    ['emoji', 'Emoji'],
+    ['custom', 'Custom'],
+    ['stickers', 'Stickers'],
+    ['gif', 'GIFs'],
+  ].forEach(([tabId, label]) => {
+    if (!tabBar?.querySelector(`[data-tab="${tabId}"]`)) {
+      const tab = document.createElement('div');
+      tab.className = 'emoji-tab';
+      tab.dataset.tab = tabId;
+      tab.textContent = label;
+      tabBar?.appendChild(tab);
+    }
+  });
+
+  const tabs = picker.querySelectorAll('.emoji-tab');
+  let currentTab = picker.querySelector('.emoji-tab.active')?.dataset.tab || 'emoji';
+
+  const setPreview = (preview, name) => {
+    const pEmoji = document.getElementById('previewEmoji');
+    const pName = document.getElementById('previewName');
+    if (pEmoji) {
+      pEmoji.textContent = '';
+      if (preview instanceof Node) {
+        pEmoji.appendChild(preview);
+      } else {
+        pEmoji.textContent = String(preview || '');
+      }
+    }
+    if (pName) pName.textContent = name;
+  };
+
+  const renderEmptyState = (message) => {
+    const msg = document.createElement('div');
+    msg.className = 'emoji-empty-state';
+    msg.textContent = message;
+    container.appendChild(msg);
+  };
+
+  const renderManageExpressionButton = (kind, pack) => {
+    if (!selectedServerID) return;
+    const manage = document.createElement('button');
+    manage.type = 'button';
+    manage.className = 'emoji-manage-btn';
+    manage.textContent = pack.canManage ? 'Manage' : 'View';
+    manage.addEventListener('click', () => openExpressionManagerDialog(kind));
+    container.appendChild(manage);
+  };
+
+  const renderContent = async (filterText = '') => {
     container.innerHTML = '';
     const safeFilter = filterText.toLowerCase();
 
@@ -11507,27 +12129,100 @@ function setupEmojiPicker() {
         span.className = 'emoji-item';
 
         span.onmouseenter = () => {
-          const pEmoji = document.getElementById('previewEmoji');
-          const pName = document.getElementById('previewName');
-          if (pEmoji) pEmoji.textContent = item.char;
-          if (pName) pName.textContent = ':' + item.names[0] + ':';
+          setPreview(item.char, ':' + item.names[0] + ':');
         };
 
         span.onclick = () => {
-          const input = document.querySelector('.chatInput');
-          if (input) {
-            input.value += item.char;
-            input.focus();
-          }
+          insertTextAtCursor(activeEmojiPickerInput || getComposerInputFromTarget(lastEmojiPickerToggle), item.char);
         };
         container.appendChild(span);
       });
 
       if (filtered.length === 0) {
-        const msg = document.createElement('div');
-        msg.className = 'emoji-empty-state';
-        msg.textContent = 'No emojis found';
-        container.appendChild(msg);
+        renderEmptyState('No emojis found');
+      }
+    } else if (currentTab === 'custom') {
+      const pack = await loadServerExpressions(selectedServerID);
+      const title = document.createElement('div');
+      title.className = 'emoji-category-title';
+      title.textContent = 'Server Emojis';
+      container.appendChild(title);
+
+      const filtered = pack.emojis.filter((item) => {
+        if (!safeFilter) return true;
+        return item.name.includes(safeFilter);
+      });
+
+      filtered.forEach((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'custom-emoji-item';
+        const image = createCustomEmojiNode(item.name, item.imageUrl);
+        button.appendChild(image);
+        button.title = `:${item.name}:`;
+        button.onmouseenter = () => {
+          setPreview(createCustomEmojiNode(item.name, item.imageUrl), `:${item.name}:`);
+        };
+        button.onclick = () => {
+          insertTextAtCursor(
+            activeEmojiPickerInput || getComposerInputFromTarget(lastEmojiPickerToggle),
+            buildCustomEmojiToken(item)
+          );
+        };
+        container.appendChild(button);
+      });
+
+      renderManageExpressionButton('emoji', pack);
+      if (!filtered.length) {
+        renderEmptyState(selectedServerID ? 'No custom emojis found' : 'Open a server to use custom emojis');
+      }
+    } else if (currentTab === 'stickers') {
+      const pack = await loadServerExpressions(selectedServerID);
+      const builtInStickers = typeof stickerList !== 'undefined' && Array.isArray(stickerList) ? stickerList : [];
+      const stickerSections = [
+        ['Stickers', builtInStickers.map((item) => ({ ...item, source: 'built-in' }))],
+        ['Server Stickers', pack.stickers.map((item) => ({
+          ...item,
+          source: 'custom',
+          url: item.imageUrl,
+        }))],
+      ];
+      let renderedCount = 0;
+
+      stickerSections.forEach(([titleText, stickers]) => {
+        const filtered = stickers.filter((item) => {
+          if (!safeFilter) return true;
+          const keywords = Array.isArray(item.keywords) ? item.keywords : [];
+          return item.name?.toLowerCase().includes(safeFilter) || keywords.some((keyword) => keyword.includes(safeFilter));
+        });
+        if (!filtered.length && titleText !== 'Server Stickers') return;
+
+        const title = document.createElement('div');
+        title.className = 'emoji-category-title';
+        title.textContent = titleText;
+        container.appendChild(title);
+
+        filtered.forEach((item) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'sticker-picker-item';
+          button.appendChild(createStickerImageNode(item));
+          button.title = item.name;
+          button.onmouseenter = () => {
+            setPreview('Sticker', item.name);
+          };
+          button.onclick = async () => {
+            await sendStickerMessage(item);
+            hideElement(picker);
+          };
+          container.appendChild(button);
+          renderedCount += 1;
+        });
+      });
+
+      renderManageExpressionButton('sticker', pack);
+      if (!renderedCount) {
+        renderEmptyState('No stickers found');
       }
     } else if (currentTab === 'gif') {
       const title = document.createElement('div');
@@ -11550,32 +12245,26 @@ function setupEmojiPicker() {
         div.appendChild(img);
 
         div.onclick = () => {
-          const input = document.querySelector('.chatInput');
-          if (input) {
-            input.value += `[Image](${item.url})`;
-            input.focus();
-          }
+          insertTextAtCursor(
+            activeEmojiPickerInput || getComposerInputFromTarget(lastEmojiPickerToggle),
+            `[Image](${item.url})`
+          );
         };
 
         div.onmouseenter = () => {
-          const pEmoji = document.getElementById('previewEmoji');
-          const pName = document.getElementById('previewName');
-          if (pEmoji) pEmoji.textContent = 'GIF';
-          if (pName) pName.textContent = 'GIF Image';
+          setPreview('GIF', 'GIF Image');
         };
 
         container.appendChild(div);
       });
 
       if (filteredGifs.length === 0) {
-        const msg = document.createElement('div');
-        msg.className = 'emoji-empty-state';
-        msg.textContent = 'No GIFs found';
-        container.appendChild(msg);
+        renderEmptyState('No GIFs found');
       }
     }
   };
 
+  renderEmojiPickerContent = renderContent;
   renderContent();
 
   if (searchInput) {
@@ -11589,7 +12278,6 @@ function setupEmojiPicker() {
       tabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       currentTab = tab.dataset.tab;
-      console.log('Switched to tab:', currentTab);
 
       const sidebar = document.querySelector('.emoji-sidebar');
       if (sidebar) {
@@ -11598,17 +12286,30 @@ function setupEmojiPicker() {
 
       if (searchInput) {
         searchInput.value = '';
-        searchInput.placeholder = currentTab === 'emoji' ? 'Find the perfect emoji' : 'Search Tenor';
+        searchInput.placeholder =
+          currentTab === 'gif'
+            ? 'Search GIFs'
+            : currentTab === 'stickers'
+              ? 'Search stickers'
+              : currentTab === 'custom'
+                ? 'Search custom emojis'
+                : 'Find the perfect emoji';
       }
       renderContent();
     };
   });
 
   document.addEventListener('click', (e) => {
-    const btn = document.querySelector('.chat-icon-btn');
-    if (!picker.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+    const toggle = e.target.closest?.('[data-emoji-picker-toggle]');
+    if (!picker.contains(e.target) && !toggle) {
       hideElement(picker);
       if (searchInput) searchInput.value = '';
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (isElementVisible(picker)) {
+      positionEmojiPicker();
     }
   });
 }
@@ -11717,11 +12418,14 @@ function closeSearchResults() {
   if (sidebar) hideElement(sidebar);
 }
 
-function toggleEmojiPicker() {
+function toggleEmojiPicker(event = null) {
   const picker = document.getElementById('emojiPicker');
+  setActiveEmojiPickerInputFromTarget(event?.currentTarget || event?.target || document.activeElement);
   if (!isElementVisible(picker)) {
+    positionEmojiPicker();
     showElement(picker, 'flex');
     const searchInput = document.getElementById('emojiSearchInput');
+    refreshEmojiPicker();
     if (searchInput) searchInput.focus();
   } else {
     hideElement(picker);
