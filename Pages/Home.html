@@ -6,11 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../CSS/Home.css?v=16" />
+  <link rel="stylesheet" href="../CSS/Home.css?v=21" />
   <script src="../JS/AppConfig.js?v=1"></script>
   <script src="../JS/AppPaths.js?v=1"></script>
   <script src="../JS/emojis.js?v=2"></script>
-  <script src="../JS/Home.js?v=127" defer></script>
+  <script src="../JS/Home.js?v=132" defer></script>
 </head>
 
 <body>
@@ -30,8 +30,12 @@
     </div>
     <div class="profile-popout-body">
       <div class="profile-popout-username" id="popoutUsername">Username</div>
+      <div class="user-badges profile-popout-badges extracted-inline-2" id="popoutBadges"></div>
+      <div class="profile-popout-status" id="popoutStatus">Online</div>
+      <div class="profile-popout-activity" id="popoutActivity"></div>
+      <div class="profile-popout-custom-status" id="popoutCustomStatus"></div>
       <div class="profile-popout-divider"></div>
-      <div class="profile-popout-section-title">ABOUT ME</div>
+      <div class="profile-popout-section-title">BIO</div>
       <div class="profile-popout-description" id="popoutDescription">No description provided.</div>
     </div>
   </div>
@@ -235,6 +239,7 @@
               </div>
             </div>
             <div class="chat-input-icons">
+              <button type="button" class="chat-icon-btn" onclick="openPollComposer()" title="Create a poll">Poll</button>
               <button type="button" class="chat-icon-btn" onclick="toggleEmojiPicker()">😊</button>
             </div>
 
@@ -306,6 +311,7 @@
         <div class="chatMessages"></div>
         <form action="" class="chatForm" onsubmit="ServerChat(event)">
           <input type="text" name="userText" class="chatInput" placeholder="Message" />
+          <button type="button" class="formButton poll-form-button" onclick="openPollComposer()">Poll</button>
           <button class="formButton">Send</button>
         </form>
       </div>
@@ -544,6 +550,7 @@
               <div class="user-name-tag">
                 <span class="display-name" id="settingsDisplayName">User</span>
                 <span class="username-tag">#0000</span>
+                <div class="user-badges account-badges extracted-inline-2" id="settingsAccountBadges"></div>
               </div>
               <button class="edit-profile-btn">Edit User Profile</button>
             </div>
@@ -593,6 +600,23 @@
           </div>
           <div class="settings-separator"></div>
 
+          <h3 class="settings-section-header">Account Standing</h3>
+          <div class="account-standing-card">
+            <div class="account-standing-header">
+              <div>
+                <div class="account-standing-eyebrow">Standing</div>
+                <div class="account-standing-label" id="accountStandingLabel" data-standing="good">Good</div>
+              </div>
+              <div class="account-trust-score" id="accountTrustScore">60/100</div>
+            </div>
+            <div class="account-trust-meter">
+              <div class="account-trust-meter-fill" id="accountTrustMeter" data-standing="good"></div>
+            </div>
+            <div class="account-standing-summary" id="accountStandingSummary">No restrictions are applied to this account.</div>
+            <ul class="account-standing-signals" id="accountStandingSignals"></ul>
+          </div>
+          <div class="settings-separator"></div>
+
           <h3 class="settings-section-header">Status</h3>
           <div class="form-group">
             <label class="form-label" for="presenceStatusSelect">Presence</label>
@@ -602,6 +626,15 @@
               <option value="do-not-disturb">Do Not Disturb</option>
               <option value="invisible">Invisible</option>
             </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="customStatusInput">Custom Status</label>
+            <div class="custom-status-controls">
+              <input type="text" id="customStatusInput" class="textInput custom-status-input"
+                maxlength="128" placeholder="What are you up to?" />
+              <button type="button" id="saveCustomStatusBtn" class="settings-btn-primary">Save</button>
+              <button type="button" id="clearCustomStatusBtn" class="settings-btn-danger">Clear</button>
+            </div>
           </div>
           <div class="settings-separator"></div>
 
@@ -656,6 +689,7 @@
                 <div class="preview-user-info">
                   <div class="preview-name">User</div>
                   <div class="preview-tag">#0000</div>
+                  <div class="user-badges preview-badges extracted-inline-2" id="profilePreviewBadges"></div>
                   <div class="preview-custom-status">
                     Click to add custom status
                   </div>
@@ -685,9 +719,28 @@
           </div>
 
           <div class="form-group extracted-inline-47">
-            <label class="form-label">About Me</label>
+            <label class="form-label" for="profileCustomStatusInput">Custom Status</label>
+            <p class="form-desc">Shown under your name in profiles, friends, and member lists.</p>
+            <div class="custom-status-controls">
+              <input type="text" id="profileCustomStatusInput" class="textInput custom-status-input"
+                maxlength="128" placeholder="What are you up to?" />
+              <button type="button" id="saveProfileCustomStatusBtn" class="settings-btn-primary">Save Status</button>
+            </div>
+          </div>
+
+          <div class="form-group extracted-inline-47">
+            <label class="form-label">Bio</label>
             <p class="form-desc">Write a little about yourself.</p>
-            <textarea id="profileDescriptionInput" class="settings-textarea" placeholder="Hello, World!"></textarea>
+            <textarea id="profileDescriptionInput" class="settings-textarea" maxlength="280" placeholder="Hello, World!"></textarea>
+          </div>
+
+          <div class="form-group extracted-inline-47">
+            <div class="badge-picker-header">
+              <label class="form-label">Profile Badges</label>
+              <span id="profileBadgeCount" class="badge-picker-count">0/6</span>
+            </div>
+            <p class="form-desc">Choose badges to show on your profile card.</p>
+            <div id="profileBadgePicker" class="profile-badge-picker"></div>
           </div>
 
           <button id="saveProfileSettingsBtn" class="settings-btn-primary extracted-inline-48"
@@ -1030,7 +1083,7 @@
 
           <div class="settings-separator"></div>
 
-          <div class="toggle-item" data-setting-key="privacyShowActivity">
+          <div class="toggle-item" data-setting-key="reducedMotion">
             <div class="toggle-info">
               <div class="toggle-label">Reduced Motion</div>
               <div class="toggle-desc">Reduce the amount of motion and animations in the application.</div>
@@ -1447,7 +1500,20 @@
           <h2 class="settings-page-title">Activity Privacy</h2>
           <p class="form-desc">How we use your activity data.</p>
 
-          <div class="toggle-item">
+          <div class="form-group">
+            <label class="form-label" for="activityStatusInput">Current Activity</label>
+            <p class="form-desc">Shown to friends when activity sharing is enabled.</p>
+            <div class="custom-status-controls">
+              <input type="text" id="activityStatusInput" class="textInput custom-status-input"
+                maxlength="120" placeholder="Playing Minecraft" />
+              <button type="button" id="saveActivityStatusBtn" class="settings-btn-primary">Save</button>
+              <button type="button" id="clearActivityStatusBtn" class="settings-btn-danger">Clear</button>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="toggle-item" data-setting-key="privacyShowActivity">
             <div class="toggle-info">
               <div class="toggle-label">Display current activity as a status message</div>
               <div class="toggle-desc">Automatically update your status message to show the game you are playing, or
