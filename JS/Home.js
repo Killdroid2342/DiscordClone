@@ -14,7 +14,35 @@ const homeWsBase = homeApiBase.replace(/^http/i, 'ws');
 const displayStateClasses = ['is-hidden', 'is-block', 'is-flex', 'is-grid', 'is-inline-flex'];
 const voiceLevelClasses = Array.from({ length: 11 }, (_, index) => `voice-level-${index}`);
 const messageFontSizeClasses = Array.from({ length: 13 }, (_, index) => `message-font-size-${index + 12}`);
+const customStatusMaxLength = 128;
+const activityStatusMaxLength = 120;
+const defaultCustomStatusText = 'Click to add custom status';
+const profileBadgeMaxCount = 6;
+const presenceStatusLabels = {
+  online: 'Online',
+  idle: 'Idle',
+  'do-not-disturb': 'Do Not Disturb',
+  invisible: 'Invisible',
+  offline: 'Offline',
+};
+const accountStandingLabels = {
+  good: 'Good',
+  limited: 'Limited',
+  'at-risk': 'At Risk',
+  suspended: 'Suspended',
+};
+const profileBadgeCatalog = [
+  { id: 'early-member', label: 'Early Member', text: 'EARLY' },
+  { id: 'community-helper', label: 'Community Helper', text: 'HELP' },
+  { id: 'server-builder', label: 'Server Builder', text: 'BUILD' },
+  { id: 'bug-hunter', label: 'Bug Hunter', text: 'BUG' },
+  { id: 'developer', label: 'Developer', text: 'DEV' },
+  { id: 'artist', label: 'Artist', text: 'ART' },
+  { id: 'gamer', label: 'Gamer', text: 'GAME' },
+  { id: 'music-fan', label: 'Music Fan', text: 'MUSIC' },
+];
 const homeRuntimeCssRules = new Map();
+const profileSummaryCache = new Map();
 let homeRuntimeCssElement = null;
 
 function getElement(target) {
@@ -164,6 +192,15 @@ let currentGroupName = '';
 let currentServerThreadId = null;
 let currentServerThread = null;
 let pinnedMessagesRefreshInFlight = false;
+let pendingReplyDraft = null;
+let forwardSourceMessage = null;
+let forwardSourceScope = null;
+let pendingPollComposerContext = null;
+const renderedMessageCache = {
+  server: new Map(),
+  dm: new Map(),
+  group: new Map(),
+};
 
 function GetCookieToken(name) {
   let value = '; ' + document.cookie;
@@ -372,6 +409,358 @@ function showAppMessage(message, variant = 'info', duration = 2600) {
   }, duration);
 }
 
+function normalizePresenceStatus(status = 'online') {
+  const normalized = String(status || 'online').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(presenceStatusLabels, normalized)
+    ? normalized
+    : 'online';
+}
+
+function getPresenceStatusLabel(status = 'online') {
+  return presenceStatusLabels[normalizePresenceStatus(status)] || 'Online';
+}
+
+function normalizeCustomStatus(value = '') {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, customStatusMaxLength);
+}
+
+function normalizeActivityStatus(value = '') {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, activityStatusMaxLength);
+}
+
+function getProfileUsername(profile = {}) {
+  return profile.username || profile.Username || '';
+}
+
+function getProfilePictureUrl(profile = {}) {
+  return profile.profilePictureUrl || profile.ProfilePictureUrl || '';
+}
+
+function getProfilePresenceStatus(profile = {}) {
+  return normalizePresenceStatus(profile.presenceStatus || profile.PresenceStatus);
+}
+
+function getProfileCustomStatus(profile = {}) {
+  return normalizeCustomStatus(profile.customStatus || profile.CustomStatus || '');
+}
+
+function getProfileActivityStatus(profile = {}) {
+  return normalizeActivityStatus(profile.activityStatus || profile.ActivityStatus || '');
+}
+
+function getProfileLastActiveAt(profile = {}) {
+  return profile.lastActiveAt || profile.LastActiveAt || null;
+}
+
+function getProfileShowActivity(profile = {}) {
+  return profile.showActivity ?? profile.ShowActivity ?? true;
+}
+
+function getProfileBio(profile = {}) {
+  return String(profile.bio ?? profile.Bio ?? profile.description ?? profile.Description ?? '').trim();
+}
+
+function normalizeProfileBadges(values = []) {
+  const rawBadges = Array.isArray(values) ? values : [];
+  const allowedBadgeIds = new Set(profileBadgeCatalog.map((badge) => badge.id));
+  const normalizedBadges = [];
+
+  rawBadges.forEach((value) => {
+    const badgeId = String(value || '').trim().toLowerCase();
+    if (
+      allowedBadgeIds.has(badgeId) &&
+      !normalizedBadges.includes(badgeId) &&
+      normalizedBadges.length < profileBadgeMaxCount
+    ) {
+      normalizedBadges.push(badgeId);
+    }
+  });
+
+  return normalizedBadges;
+}
+
+function getProfileBadges(profile = {}) {
+  return normalizeProfileBadges(
+    profile.badges ||
+    profile.Badges ||
+    profile.profileBadges ||
+    profile.ProfileBadges ||
+    profile.userBadges ||
+    profile.UserBadges ||
+    []
+  );
+}
+
+function getProfileBadgeDefinition(badgeId) {
+  return profileBadgeCatalog.find((badge) => badge.id === badgeId) || {
+    id: badgeId,
+    label: badgeId,
+    text: String(badgeId || '').slice(0, 5).toUpperCase(),
+  };
+}
+
+function createUserBadgeElement(badgeId, compact = false) {
+  const badgeDefinition = getProfileBadgeDefinition(badgeId);
+  const badge = document.createElement('span');
+  badge.className = compact ? 'user-badge compact' : 'user-badge';
+  badge.dataset.badge = badgeDefinition.id;
+  badge.textContent = badgeDefinition.text;
+  badge.title = badgeDefinition.label;
+  return badge;
+}
+
+function renderUserBadges(target, badges = [], { compact = false } = {}) {
+  const container = getElement(target);
+  if (!container) return;
+
+  const normalizedBadges = normalizeProfileBadges(badges);
+  container.textContent = '';
+  container.classList.toggle('is-empty', normalizedBadges.length === 0);
+
+  if (!normalizedBadges.length) {
+    hideElement(container);
+    return;
+  }
+
+  normalizedBadges.forEach((badgeId) => {
+    container.appendChild(createUserBadgeElement(badgeId, compact));
+  });
+  showElement(container, 'flex');
+}
+
+function cacheProfileSummary(profile = {}) {
+  const profileUsername = getProfileUsername(profile);
+  if (!profileUsername) return;
+  profileSummaryCache.set(profileUsername.toLowerCase(), {
+    username: profileUsername,
+    profilePictureUrl: getProfilePictureUrl(profile),
+    presenceStatus: getProfilePresenceStatus(profile),
+    customStatus: getProfileCustomStatus(profile),
+    activityStatus: getProfileActivityStatus(profile),
+    lastActiveAt: getProfileLastActiveAt(profile),
+    showActivity: getProfileShowActivity(profile),
+    bio: getProfileBio(profile),
+    badges: getProfileBadges(profile),
+  });
+}
+
+function getCachedProfileSummary(profileUsername) {
+  return profileSummaryCache.get(String(profileUsername || '').toLowerCase()) || null;
+}
+
+function setPresenceClass(element, status = 'online') {
+  if (!element) return;
+  element.dataset.status = normalizePresenceStatus(status);
+}
+
+function formatLastActiveSummary(value) {
+  if (!value) return '';
+  const lastActive = new Date(value);
+  if (Number.isNaN(lastActive.getTime())) return '';
+
+  const diffMs = Date.now() - lastActive.getTime();
+  if (diffMs < 0 || diffMs < 60 * 1000) return 'Active now';
+
+  const minutes = Math.floor(diffMs / (60 * 1000));
+  if (minutes < 60) return `Last active ${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Last active ${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `Last active ${days}d ago`;
+
+  return `Last active ${lastActive.toLocaleDateString()}`;
+}
+
+function getStatusSummary(profile = {}) {
+  const presenceStatus = getProfilePresenceStatus(profile);
+  if (getProfileShowActivity(profile)) {
+    const activityStatus = getProfileActivityStatus(profile);
+    if (activityStatus) return activityStatus;
+  }
+
+  const customStatus = getProfileCustomStatus(profile);
+  if (customStatus) return customStatus;
+
+  if (presenceStatus === 'offline') {
+    return formatLastActiveSummary(getProfileLastActiveAt(profile)) || 'Offline';
+  }
+
+  return getPresenceStatusLabel(presenceStatus);
+}
+
+async function fetchFriendProfileSummaries() {
+  try {
+    const response = await axios.get(`${homeApiBase}/api/Account/GetFriendProfiles`);
+    const profiles = Array.isArray(response.data) ? response.data : [];
+    profiles.forEach(cacheProfileSummary);
+    return new Map(
+      profiles.map((profile) => [
+        getProfileUsername(profile).toLowerCase(),
+        {
+          username: getProfileUsername(profile),
+          profilePictureUrl: getProfilePictureUrl(profile),
+          presenceStatus: getProfilePresenceStatus(profile),
+          customStatus: getProfileCustomStatus(profile),
+          activityStatus: getProfileActivityStatus(profile),
+          lastActiveAt: getProfileLastActiveAt(profile),
+          showActivity: getProfileShowActivity(profile),
+          bio: getProfileBio(profile),
+          badges: getProfileBadges(profile),
+        },
+      ])
+    );
+  } catch (error) {
+    console.warn('Could not load friend statuses:', error);
+    return new Map();
+  }
+}
+
+function setCustomStatusInputs(customStatus = '') {
+  const normalized = normalizeCustomStatus(customStatus);
+  document
+    .querySelectorAll('#customStatusInput, #profileCustomStatusInput')
+    .forEach((input) => {
+      input.value = normalized;
+    });
+}
+
+function setActivityStatusInputs(activityStatus = '') {
+  const normalized = normalizeActivityStatus(activityStatus);
+  document
+    .querySelectorAll('#activityStatusInput')
+    .forEach((input) => {
+      input.value = normalized;
+    });
+}
+
+function normalizeAccountStanding(standing = 'good') {
+  const normalized = String(standing || 'good').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(accountStandingLabels, normalized)
+    ? normalized
+    : 'good';
+}
+
+function getAccountStandingLabel(standing = 'good') {
+  return accountStandingLabels[normalizeAccountStanding(standing)] || 'Good';
+}
+
+function getAccountStanding(state = readSettingsState()) {
+  const standing = state.accountStanding || {};
+  const normalizedStanding = normalizeAccountStanding(standing.standing || standing.Standing);
+  return {
+    standing: normalizedStanding,
+    label: standing.label || standing.Label || getAccountStandingLabel(normalizedStanding),
+    trustScore: Math.max(0, Math.min(100, Number(standing.trustScore ?? standing.TrustScore ?? 60))),
+    summary: standing.summary || standing.Summary || 'No restrictions are applied to this account.',
+    reason: standing.reason || standing.Reason || '',
+    signals: Array.isArray(standing.signals)
+      ? standing.signals
+      : Array.isArray(standing.Signals)
+        ? standing.Signals
+        : [],
+  };
+}
+
+function getSelectedProfileBadges() {
+  return normalizeProfileBadges(
+    Array.from(document.querySelectorAll('#profileBadgePicker input[type="checkbox"]:checked'))
+      .map((input) => input.value)
+  );
+}
+
+function updateProfileBadgePickerLimit() {
+  const selectedBadges = getSelectedProfileBadges();
+  const selectedCount = selectedBadges.length;
+  document
+    .querySelectorAll('#profileBadgePicker input[type="checkbox"]')
+    .forEach((input) => {
+      input.disabled = !input.checked && selectedCount >= profileBadgeMaxCount;
+      input.closest('.profile-badge-choice')?.classList.toggle('is-disabled', input.disabled);
+    });
+
+  const count = document.getElementById('profileBadgeCount');
+  if (count) {
+    count.textContent = `${selectedCount}/${profileBadgeMaxCount}`;
+  }
+
+  renderUserBadges('#profilePreviewBadges', selectedBadges);
+}
+
+function setProfileBadgePickerSelection(badges = []) {
+  const selectedBadges = normalizeProfileBadges(badges);
+  const picker = document.getElementById('profileBadgePicker');
+  if (!picker) return;
+
+  if (!picker.children.length) {
+    renderProfileBadgePicker(selectedBadges);
+    return;
+  }
+
+  picker.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+    input.checked = selectedBadges.includes(input.value);
+  });
+  updateProfileBadgePickerLimit();
+}
+
+function renderProfileBadgePicker(selectedBadges = []) {
+  const picker = document.getElementById('profileBadgePicker');
+  if (!picker) return;
+
+  const selectedBadgeIds = normalizeProfileBadges(selectedBadges);
+  picker.textContent = '';
+  profileBadgeCatalog.forEach((badgeDefinition) => {
+    const choice = document.createElement('label');
+    choice.className = 'profile-badge-choice';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = badgeDefinition.id;
+    input.checked = selectedBadgeIds.includes(badgeDefinition.id);
+    input.addEventListener('change', () => {
+      if (getSelectedProfileBadges().length > profileBadgeMaxCount) {
+        input.checked = false;
+        showAppMessage(`Choose up to ${profileBadgeMaxCount} profile badges.`, 'error');
+      }
+
+      const nextBadges = getSelectedProfileBadges();
+      writeSettingsState((state) => ({
+        ...state,
+        profileBadges: nextBadges,
+      }));
+      updateProfileBadgePickerLimit();
+    });
+
+    const badge = createUserBadgeElement(badgeDefinition.id);
+    const label = document.createElement('span');
+    label.className = 'profile-badge-choice-label';
+    label.textContent = badgeDefinition.label;
+
+    choice.appendChild(input);
+    choice.appendChild(badge);
+    choice.appendChild(label);
+    picker.appendChild(choice);
+  });
+
+  updateProfileBadgePickerLimit();
+}
+
+function applyCurrentProfileStatus(customStatus = '', presenceStatus = readSettingsState().presenceStatus) {
+  const normalizedStatus = normalizePresenceStatus(presenceStatus);
+  const normalizedCustomStatus = normalizeCustomStatus(customStatus);
+  const previewCustomStatus = document.querySelector('.preview-custom-status');
+  if (previewCustomStatus) {
+    previewCustomStatus.textContent = normalizedCustomStatus || defaultCustomStatusText;
+  }
+
+  document
+    .querySelectorAll('.avatar-status-indicator, .preview-status')
+    .forEach((indicator) => setPresenceClass(indicator, normalizedStatus));
+
+  setCustomStatusInputs(normalizedCustomStatus);
+}
+
 let desktopUnreadCount = 0;
 const messageNotificationSeenIds = new Map();
 const messageNotificationPrimedKeys = new Set();
@@ -466,6 +855,152 @@ function getMessageText(message = {}) {
     message.Content ||
     ''
   );
+}
+
+function getMessageReplyId(message = {}) {
+  const replyId = message.replyToMessageId ?? message.ReplyToMessageId ?? '';
+  return replyId ? String(replyId) : '';
+}
+
+function getMessageReplyPreview(message = {}) {
+  return message.replyPreview || message.ReplyPreview || null;
+}
+
+function getMessageEditedAt(message = {}) {
+  return message.editedAt || message.EditedAt || '';
+}
+
+function getMessageAttachmentUrl(message = {}) {
+  return message.attachmentUrl || message.AttachmentUrl || '';
+}
+
+function getMessageAttachmentContentType(message = {}) {
+  return message.attachmentContentType || message.AttachmentContentType || '';
+}
+
+function getMessageReactions(message = {}) {
+  const reactions = message.reactions || message.Reactions || [];
+  return Array.isArray(reactions) ? reactions : [];
+}
+
+function getMessagePoll(message = {}) {
+  return message.poll || message.Poll || null;
+}
+
+function getPollId(poll = {}) {
+  return poll.id || poll.Id || '';
+}
+
+function getPollQuestion(poll = {}) {
+  return poll.question || poll.Question || '';
+}
+
+function getPollOptions(poll = {}) {
+  const options = poll.options || poll.Options || [];
+  return Array.isArray(options) ? options : [];
+}
+
+function getPollOptionId(option = {}) {
+  return option.id || option.Id || '';
+}
+
+function getPollOptionText(option = {}) {
+  return option.text || option.Text || '';
+}
+
+function getPollOptionVoteCount(option = {}) {
+  return Number(option.voteCount ?? option.VoteCount ?? 0);
+}
+
+function getPollTotalVotes(poll = {}) {
+  return Number(poll.totalVotes ?? poll.TotalVotes ?? 0);
+}
+
+function getPollSelectedOptionIds(poll = {}) {
+  const ids = poll.selectedOptionIds || poll.SelectedOptionIds || [];
+  return Array.isArray(ids) ? ids.map(String) : [];
+}
+
+function isPollMultipleChoice(poll = {}) {
+  return Boolean(poll.allowMultiple ?? poll.AllowMultiple);
+}
+
+function isPollClosed(poll = {}) {
+  return Boolean(poll.isClosed ?? poll.IsClosed);
+}
+
+function getReplyPreviewSender(preview = {}) {
+  return (
+    preview.sender ||
+    preview.Sender ||
+    preview.messagesUserSender ||
+    preview.MessagesUserSender ||
+    'Unknown'
+  );
+}
+
+function getReplyPreviewText(preview = {}) {
+  return (
+    preview.text ||
+    preview.Text ||
+    preview.userText ||
+    preview.friendMessagesData ||
+    preview.FriendMessagesData ||
+    preview.content ||
+    preview.Content ||
+    ''
+  );
+}
+
+function getReplyPreviewAttachmentUrl(preview = {}) {
+  return preview.attachmentUrl || preview.AttachmentUrl || '';
+}
+
+function getMessageSnippet(message = {}, fallback = 'Sent an attachment.') {
+  return cleanNotificationBody(getMessageText(message) || fallback, fallback);
+}
+
+function getPreviewSnippet(preview = {}, fallback = 'Sent an attachment.') {
+  return cleanNotificationBody(
+    getReplyPreviewText(preview) || (getReplyPreviewAttachmentUrl(preview) ? fallback : 'Original message unavailable.'),
+    fallback
+  );
+}
+
+function cacheMessagesForScope(scope, messages = []) {
+  if (!renderedMessageCache[scope]) {
+    return;
+  }
+
+  renderedMessageCache[scope].clear();
+  messages.forEach((message) => {
+    const id = getMessageId(message);
+    if (id) {
+      renderedMessageCache[scope].set(String(id), message);
+    }
+  });
+}
+
+function cacheMessageForScope(scope, message = {}) {
+  const id = getMessageId(message);
+  if (renderedMessageCache[scope] && id) {
+    renderedMessageCache[scope].set(String(id), message);
+  }
+}
+
+function getCachedMessage(scope, messageId) {
+  return renderedMessageCache[scope]?.get(String(messageId || '')) || null;
+}
+
+function buildReplyPreviewFromMessage(message = {}) {
+  return {
+    messageId: getMessageId(message),
+    sender: getMessageSender(message),
+    text: getMessageText(message),
+    attachmentUrl: getMessageAttachmentUrl(message),
+    attachmentContentType: getMessageAttachmentContentType(message),
+    date: message.date || message.Date || '',
+  };
 }
 
 const REPORT_REASON_OPTIONS = [
@@ -995,6 +1530,7 @@ function buildServerRoleBadge(role = 'user') {
 }
 
 async function openServer(server, fallbackRole = 'user') {
+  clearReplyDraft();
   const role = server.role || fallbackRole || 'user';
 
   selectedServerID = server.serverID;
@@ -1170,30 +1706,56 @@ function buildMessageAttachmentNode(attachmentUrl, contentType = '') {
 
   const wrapper = document.createElement('div');
   wrapper.className = 'message-attachment';
+  const resolvedUrl = attachmentUrl.startsWith('/uploads/')
+    ? `${homeApiBase}${attachmentUrl}`
+    : attachmentUrl;
 
   const normalizedType = String(contentType || '').toLowerCase();
   const isImage =
     normalizedType.startsWith('image/') ||
     /\.(png|jpe?g|gif|webp)$/i.test(attachmentUrl);
+  const isVideo =
+    normalizedType.startsWith('video/') ||
+    /\.(mp4|webm|mov)$/i.test(attachmentUrl);
+  const isAudio =
+    normalizedType.startsWith('audio/') ||
+    /\.(mp3|wav|ogg|m4a)$/i.test(attachmentUrl);
 
   if (isImage) {
     const image = document.createElement('img');
-    image.src = attachmentUrl.startsWith('/uploads/')
-      ? `${homeApiBase}${attachmentUrl}`
-      : attachmentUrl;
+    image.src = resolvedUrl;
     image.alt = 'Attachment preview';
     image.loading = 'lazy';
     wrapper.appendChild(image);
     return wrapper;
   }
 
+  if (isVideo) {
+    const video = document.createElement('video');
+    video.src = resolvedUrl;
+    video.controls = true;
+    video.preload = 'metadata';
+    wrapper.appendChild(video);
+    return wrapper;
+  }
+
+  if (isAudio) {
+    const audio = document.createElement('audio');
+    audio.src = resolvedUrl;
+    audio.controls = true;
+    audio.preload = 'metadata';
+    wrapper.appendChild(audio);
+    return wrapper;
+  }
+
   const link = document.createElement('a');
-  link.href = attachmentUrl.startsWith('/uploads/')
-    ? `${homeApiBase}${attachmentUrl}`
-    : attachmentUrl;
+  link.href = resolvedUrl;
   link.target = '_blank';
   link.rel = 'noreferrer';
-  link.textContent = 'Open attachment';
+  const fileName = decodeURIComponent(String(attachmentUrl).split('/').pop()?.split(/[?#]/)[0] || 'attachment');
+  link.innerHTML = `<span class="message-attachment-name"></span><span class="message-attachment-meta"></span>`;
+  link.querySelector('.message-attachment-name').textContent = fileName;
+  link.querySelector('.message-attachment-meta').textContent = normalizedType || 'file';
   wrapper.appendChild(link);
   return wrapper;
 }
@@ -1300,22 +1862,44 @@ function buildLinkPreviewNode(preview) {
   }
 
   const card = document.createElement('a');
-  card.className = 'link-preview-card';
+  const previewType = preview.type || preview.Type || 'article';
+  const mediaUrl = preview.mediaUrl || preview.MediaUrl || '';
+  const mediaContentType = preview.mediaContentType || preview.MediaContentType || '';
+  const accentColor = preview.accentColor || preview.AccentColor || '';
+  const iconUrl = preview.icon || preview.Icon || '';
+  card.className = `link-preview-card link-preview-${previewType}`;
   card.href = preview.url;
   card.target = '_blank';
   card.rel = 'noreferrer';
+  if (/^#[0-9a-f]{6}$/i.test(accentColor)) {
+    card.style.setProperty('--embed-accent', accentColor);
+  }
 
   const content = document.createElement('div');
   content.className = 'link-preview-content';
 
   const site = document.createElement('div');
   site.className = 'link-preview-site';
-  try {
-    site.textContent = preview.siteName || new URL(preview.url).hostname;
-  } catch {
-    site.textContent = preview.siteName || preview.url;
+  if (iconUrl) {
+    const icon = document.createElement('img');
+    icon.src = iconUrl;
+    icon.alt = '';
+    icon.loading = 'lazy';
+    site.appendChild(icon);
   }
+  const siteText = document.createElement('span');
+  try {
+    siteText.textContent = preview.siteName || new URL(preview.url).hostname;
+  } catch {
+    siteText.textContent = preview.siteName || preview.url;
+  }
+  site.appendChild(siteText);
   content.appendChild(site);
+
+  const typeBadge = document.createElement('span');
+  typeBadge.className = 'link-preview-type';
+  typeBadge.textContent = previewType;
+  site.appendChild(typeBadge);
 
   const title = document.createElement('div');
   title.className = 'link-preview-title';
@@ -1331,10 +1915,40 @@ function buildLinkPreviewNode(preview) {
 
   card.appendChild(content);
 
-  if (preview.image) {
+  if (previewType === 'video' && mediaUrl) {
+    const video = document.createElement('video');
+    video.className = 'link-preview-media';
+    video.src = mediaUrl;
+    video.controls = true;
+    video.preload = 'metadata';
+    if (preview.image) video.poster = preview.image;
+    video.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    card.appendChild(video);
+  } else if (previewType === 'audio' && mediaUrl) {
+    const audio = document.createElement('audio');
+    audio.className = 'link-preview-audio';
+    audio.src = mediaUrl;
+    audio.controls = true;
+    audio.preload = 'metadata';
+    audio.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    content.appendChild(audio);
+  } else if (preview.image) {
     const image = document.createElement('img');
     image.className = 'link-preview-image';
     image.src = preview.image;
+    image.alt = '';
+    image.loading = 'lazy';
+    card.appendChild(image);
+  } else if (mediaUrl && mediaContentType.startsWith('image/')) {
+    const image = document.createElement('img');
+    image.className = 'link-preview-image';
+    image.src = mediaUrl;
     image.alt = '';
     image.loading = 'lazy';
     card.appendChild(image);
@@ -1355,6 +1969,104 @@ function hydrateLinkPreviews(messageEl, text = '') {
       messageEl.appendChild(previewNode);
     }
   });
+}
+
+function buildMessagePollNode(poll, messageId, scope) {
+  if (!poll || !getPollId(poll)) {
+    return null;
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-poll';
+  wrapper.dataset.pollId = getPollId(poll);
+
+  const header = document.createElement('div');
+  header.className = 'message-poll-header';
+
+  const question = document.createElement('div');
+  question.className = 'message-poll-question';
+  question.textContent = getPollQuestion(poll);
+
+  const meta = document.createElement('div');
+  meta.className = 'message-poll-meta';
+  const totalVotes = getPollTotalVotes(poll);
+  const isClosed = isPollClosed(poll);
+  meta.textContent = `${isPollMultipleChoice(poll) ? 'Multiple choice' : 'Choose one'} · ${totalVotes} ${totalVotes === 1 ? 'vote' : 'votes'}${isClosed ? ' · Closed' : ''}`;
+
+  header.appendChild(question);
+  header.appendChild(meta);
+  wrapper.appendChild(header);
+
+  const selectedIds = getPollSelectedOptionIds(poll);
+  getPollOptions(poll).forEach((option) => {
+    const optionId = String(getPollOptionId(option));
+    const voteCount = getPollOptionVoteCount(option);
+    const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'message-poll-option';
+    button.classList.toggle('selected', selectedIds.includes(optionId));
+    button.disabled = isClosed;
+    button.addEventListener('click', () => voteOnPoll(poll, optionId, scope));
+
+    const bar = document.createElement('span');
+    bar.className = 'message-poll-option-bar';
+    bar.style.width = `${percent}%`;
+
+    const label = document.createElement('span');
+    label.className = 'message-poll-option-label';
+    label.textContent = getPollOptionText(option);
+
+    const count = document.createElement('span');
+    count.className = 'message-poll-option-count';
+    count.textContent = `${percent}%`;
+
+    button.appendChild(bar);
+    button.appendChild(label);
+    button.appendChild(count);
+    wrapper.appendChild(button);
+  });
+
+  return wrapper;
+}
+
+async function voteOnPoll(poll, optionId, scope) {
+  const pollId = getPollId(poll);
+  if (!pollId || !optionId || isPollClosed(poll)) {
+    return;
+  }
+
+  const selectedIds = getPollSelectedOptionIds(poll);
+  let nextOptionIds = [optionId];
+  if (isPollMultipleChoice(poll)) {
+    nextOptionIds = selectedIds.includes(String(optionId))
+      ? selectedIds.filter((id) => id !== String(optionId))
+      : [...selectedIds, String(optionId)];
+    if (nextOptionIds.length === 0) {
+      nextOptionIds = [optionId];
+    }
+  }
+
+  try {
+    await apiClient.post(`${homeApiBase}/api/Polls/Vote`, {
+      PollId: pollId,
+      OptionIds: nextOptionIds,
+    });
+    await refreshActiveMessagesForScope(scope);
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not vote in poll.'), 'error');
+  }
+}
+
+async function refreshActiveMessagesForScope(scope) {
+  if (scope === 'server') {
+    await fetchServerMessages();
+  } else if (scope === 'group' && currentGroupId) {
+    await GetGroupMessages(currentGroupId);
+  } else if (scope === 'dm' && currentFriend) {
+    await GetPrivateMessage();
+  }
 }
 
 function getMessageThread(message = {}) {
@@ -1827,8 +2539,11 @@ async function toggleServerMessagePin(messageId, isPinned) {
 function renderCompactMessage(message, scope = 'server') {
   const messageEl = document.createElement('div');
   messageEl.className = 'compact-message';
-  messageEl.dataset.messageId = getMessageId(message);
+  const messageId = getMessageId(message);
+  messageEl.dataset.messageId = messageId;
+  messageEl.dataset.messageScope = scope;
   messageEl.classList.toggle('is-pinned', getMessageIsPinned(message));
+  cacheMessageForScope(scope, message);
 
   const header = document.createElement('div');
   header.className = 'compact-message-header';
@@ -1839,7 +2554,31 @@ function renderCompactMessage(message, scope = 'server') {
   const headerActions = document.createElement('span');
   headerActions.className = 'compact-message-actions';
 
-  if (scope === 'server' && messageEl.dataset.messageId) {
+  if (messageId && ['server', 'dm', 'group'].includes(scope)) {
+    const replyButton = document.createElement('button');
+    replyButton.type = 'button';
+    replyButton.className = 'compact-message-action-btn';
+    replyButton.textContent = 'Reply';
+    replyButton.title = 'Reply to message';
+    replyButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      startReplyToMessage(message, scope);
+    });
+    headerActions.appendChild(replyButton);
+
+    const forwardButton = document.createElement('button');
+    forwardButton.type = 'button';
+    forwardButton.className = 'compact-message-action-btn';
+    forwardButton.textContent = 'Forward';
+    forwardButton.title = 'Forward message';
+    forwardButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openForwardDialog(message, scope);
+    });
+    headerActions.appendChild(forwardButton);
+  }
+
+  if (scope === 'server' && messageId) {
     const thread = getMessageThread(message);
     const threadButton = document.createElement('button');
     threadButton.type = 'button';
@@ -1862,12 +2601,12 @@ function renderCompactMessage(message, scope = 'server') {
     pinButton.title = isPinned ? 'Unpin message' : 'Pin message';
     pinButton.addEventListener('click', (event) => {
       event.stopPropagation();
-      toggleServerMessagePin(messageEl.dataset.messageId, !isPinned);
+      toggleServerMessagePin(messageId, !isPinned);
     });
     headerActions.appendChild(pinButton);
   }
 
-  if (sender && sender !== JWTusername && messageEl.dataset.messageId && ['server', 'dm', 'group'].includes(scope)) {
+  if (sender && sender !== JWTusername && messageId && ['server', 'dm', 'group'].includes(scope)) {
     const reportButton = document.createElement('button');
     reportButton.type = 'button';
     reportButton.className = 'compact-message-report-btn compact-message-action-btn';
@@ -1895,10 +2634,19 @@ function renderCompactMessage(message, scope = 'server') {
     messageEl.appendChild(pinned);
   }
 
-  if (message.replyToMessageId) {
-    const reply = document.createElement('div');
+  const replyId = getMessageReplyId(message);
+  if (replyId) {
+    const replyPreview = getMessageReplyPreview(message) || buildReplyPreviewFromMessage(getCachedMessage(scope, replyId) || {});
+    const reply = document.createElement('button');
+    reply.type = 'button';
     reply.className = 'compact-message-reply';
-    reply.textContent = `Replying to ${message.replyToMessageId}`;
+    reply.dataset.replyTargetId = replyId;
+    reply.textContent = `${getReplyPreviewSender(replyPreview)}: ${getPreviewSnippet(replyPreview)}`;
+    reply.title = 'Jump to replied message';
+    reply.addEventListener('click', (event) => {
+      event.stopPropagation();
+      jumpToMessage(replyId, scope);
+    });
     messageEl.appendChild(reply);
   }
 
@@ -1906,7 +2654,7 @@ function renderCompactMessage(message, scope = 'server') {
   body.className = 'compact-message-body';
   const messageText = getMessageText(message);
   appendMessageTextWithLinks(body, messageText);
-  if (message.editedAt) {
+  if (getMessageEditedAt(message)) {
     const edited = document.createElement('span');
     edited.className = 'compact-message-edited';
     edited.textContent = ' edited';
@@ -1915,17 +2663,23 @@ function renderCompactMessage(message, scope = 'server') {
   messageEl.appendChild(body);
 
   const attachment = buildMessageAttachmentNode(
-    message.attachmentUrl,
-    message.attachmentContentType
+    getMessageAttachmentUrl(message),
+    getMessageAttachmentContentType(message)
   );
   if (attachment) {
     messageEl.appendChild(attachment);
   }
 
-  if (Array.isArray(message.reactions) && message.reactions.length > 0) {
+  const poll = buildMessagePollNode(getMessagePoll(message), messageId, scope);
+  if (poll) {
+    messageEl.appendChild(poll);
+  }
+
+  const reactionsList = getMessageReactions(message);
+  if (reactionsList.length > 0) {
     const reactions = document.createElement('div');
     reactions.className = 'message-reactions';
-    message.reactions.forEach((reaction) => {
+    reactionsList.forEach((reaction) => {
       const reactionEl = document.createElement('span');
       reactionEl.className = 'message-reaction';
       reactionEl.textContent = `${reaction.emoji} ${reaction.count}`;
@@ -1942,6 +2696,1000 @@ function formatMessageDate(rawDate) {
   const parsed = new Date(rawDate);
   if (Number.isNaN(parsed.getTime())) return rawDate || '';
   return parsed.toLocaleString();
+}
+
+function getActiveMessageScope() {
+  if (currentGroupId && isElementVisible('.privateMessage')) {
+    return 'group';
+  }
+
+  if (currentFriend && !currentGroupId && isElementVisible('.privateMessage')) {
+    return 'dm';
+  }
+
+  if (selectedChannelID && isElementVisible('#serverDetails')) {
+    return 'server';
+  }
+
+  return null;
+}
+
+function getConversationIdForScope(scope) {
+  if (scope === 'group') return currentGroupId || '';
+  if (scope === 'dm') return currentFriend || '';
+  if (scope === 'server') return selectedChannelID || '';
+  return '';
+}
+
+function getMessageFormForScope(scope) {
+  if (scope === 'server') return document.querySelector('.chatForm');
+  if (scope === 'dm' || scope === 'group') return document.querySelector('.privateMessageForm');
+  return null;
+}
+
+function getMessageInputForScope(scope) {
+  const form = getMessageFormForScope(scope);
+  if (!form) return null;
+  return form.querySelector('.chatInput');
+}
+
+function removeReplyComposerPreviews() {
+  document.querySelectorAll('.reply-composer-preview').forEach((preview) => preview.remove());
+  document.querySelectorAll('.has-reply-preview').forEach((form) => form.classList.remove('has-reply-preview'));
+}
+
+function renderReplyComposer() {
+  removeReplyComposerPreviews();
+
+  const scope = getActiveMessageScope();
+  if (!pendingReplyDraft || pendingReplyDraft.scope !== scope) {
+    return;
+  }
+
+  if (pendingReplyDraft.conversationId !== getConversationIdForScope(scope)) {
+    return;
+  }
+
+  const form = getMessageFormForScope(scope);
+  if (!form) {
+    return;
+  }
+
+  const preview = document.createElement('div');
+  preview.className = 'reply-composer-preview';
+
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'reply-composer-copy';
+  copy.title = 'Jump to replied message';
+  copy.addEventListener('click', () => jumpToMessage(pendingReplyDraft.messageId, pendingReplyDraft.scope));
+
+  const label = document.createElement('span');
+  label.className = 'reply-composer-label';
+  label.textContent = `Replying to ${getReplyPreviewSender(pendingReplyDraft.preview)}`;
+
+  const text = document.createElement('span');
+  text.className = 'reply-composer-text';
+  text.textContent = getPreviewSnippet(pendingReplyDraft.preview);
+
+  copy.appendChild(label);
+  copy.appendChild(text);
+
+  const clearButton = document.createElement('button');
+  clearButton.type = 'button';
+  clearButton.className = 'reply-composer-clear';
+  clearButton.textContent = 'x';
+  clearButton.title = 'Cancel reply';
+  clearButton.addEventListener('click', clearReplyDraft);
+
+  preview.appendChild(copy);
+  preview.appendChild(clearButton);
+  form.classList.add('has-reply-preview');
+  form.insertBefore(preview, form.firstChild);
+}
+
+function startReplyToMessage(message, scope) {
+  const messageId = getMessageId(message);
+  if (!messageId) {
+    return;
+  }
+
+  pendingReplyDraft = {
+    scope,
+    conversationId: getConversationIdForScope(scope),
+    messageId: String(messageId),
+    preview: buildReplyPreviewFromMessage(message),
+  };
+  renderReplyComposer();
+  getMessageInputForScope(scope)?.focus();
+}
+
+function getActiveReplyDraft(scope = getActiveMessageScope()) {
+  if (!pendingReplyDraft || pendingReplyDraft.scope !== scope) {
+    return null;
+  }
+
+  return pendingReplyDraft.conversationId === getConversationIdForScope(scope)
+    ? pendingReplyDraft
+    : null;
+}
+
+function clearReplyDraft() {
+  pendingReplyDraft = null;
+  renderReplyComposer();
+}
+
+function jumpToMessage(messageId, scope = getActiveMessageScope()) {
+  if (!messageId) return;
+
+  const selector = `.compact-message[data-message-scope="${scope}"][data-message-id="${escapeCssIdentifier(messageId)}"]`;
+  const target = document.querySelector(selector);
+  if (!target) {
+    showAppMessage('That message is not loaded in this view.', 'info');
+    return;
+  }
+
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  target.classList.add('message-jump-highlight');
+  window.setTimeout(() => target.classList.remove('message-jump-highlight'), 1400);
+}
+
+function getForwardSourceLabel(scope = forwardSourceScope) {
+  if (scope === 'group') return currentGroupName ? ` in ${currentGroupName}` : '';
+  if (scope === 'dm') return currentFriend ? ` in DM with ${currentFriend}` : '';
+  if (scope === 'server') return getSelectedChannelNotificationName() ? ` in ${getSelectedChannelNotificationName()}` : '';
+  return '';
+}
+
+function quoteForwardedText(text = '') {
+  const normalized = String(text || '').trim();
+  if (!normalized) return '> Sent an attachment.';
+
+  const clipped = normalized.length > 3400
+    ? `${normalized.slice(0, 3400).trim()}...`
+    : normalized;
+  return clipped
+    .split(/\r?\n/)
+    .map((line) => `> ${line || ' '}`)
+    .join('\n');
+}
+
+function buildForwardedMessageText(message, scope) {
+  const sender = getMessageSender(message);
+  const header = `Forwarded from ${sender}${getForwardSourceLabel(scope)}`;
+  const body = quoteForwardedText(getMessageText(message));
+  const forwarded = `${header}\n${body}`;
+  return forwarded.length > 3900 ? `${forwarded.slice(0, 3897).trim()}...` : forwarded;
+}
+
+function getForwardAttachment(message = {}) {
+  return {
+    attachmentUrl: getMessageAttachmentUrl(message) || null,
+    attachmentContentType: getMessageAttachmentContentType(message) || null,
+  };
+}
+
+function ensureForwardDialog() {
+  let overlay = document.getElementById('messageForwardDialog');
+  if (overlay) {
+    return overlay;
+  }
+
+  overlay = document.createElement('div');
+  overlay.id = 'messageForwardDialog';
+  overlay.className = 'message-forward-overlay is-hidden';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'message-forward-dialog';
+
+  const header = document.createElement('div');
+  header.className = 'message-forward-header';
+  const title = document.createElement('h3');
+  title.textContent = 'Forward Message';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'message-forward-close';
+  close.textContent = 'x';
+  close.title = 'Close';
+  close.addEventListener('click', closeForwardDialog);
+  header.appendChild(title);
+  header.appendChild(close);
+
+  const preview = document.createElement('div');
+  preview.className = 'message-forward-source';
+  preview.id = 'messageForwardSource';
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.id = 'messageForwardSearch';
+  search.className = 'message-forward-search';
+  search.placeholder = 'Search conversations';
+  search.addEventListener('input', () => renderForwardTargets());
+
+  const list = document.createElement('div');
+  list.id = 'messageForwardTargets';
+  list.className = 'message-forward-targets';
+
+  dialog.appendChild(header);
+  dialog.appendChild(preview);
+  dialog.appendChild(search);
+  dialog.appendChild(list);
+  overlay.appendChild(dialog);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      closeForwardDialog();
+    }
+  });
+
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function closeForwardDialog() {
+  forwardSourceMessage = null;
+  forwardSourceScope = null;
+  hideElement('#messageForwardDialog');
+}
+
+async function loadForwardTargets() {
+  const targets = [];
+  const seen = new Set();
+  const addTarget = (target) => {
+    if (!target?.id || !target?.type) return;
+    const key = `${target.type}:${target.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push(target);
+  };
+
+  const [friendsResult, groupsResult, serversResult] = await Promise.allSettled([
+    axios.get(`${homeApiBase}/api/Account/GetFriends`),
+    axios.get(`${homeApiBase}/api/GroupChat/GetGroups`),
+    axios.get(`${homeApiBase}/api/Server/GetServer`),
+  ]);
+
+  if (friendsResult.status === 'fulfilled' && Array.isArray(friendsResult.value.data)) {
+    friendsResult.value.data.forEach((friend) => {
+      addTarget({
+        type: 'dm',
+        id: String(friend),
+        label: friend,
+        meta: 'Direct Message',
+      });
+    });
+  }
+
+  if (groupsResult.status === 'fulfilled' && Array.isArray(groupsResult.value.data)) {
+    groupsResult.value.data.forEach((group) => {
+      addTarget({
+        type: 'group',
+        id: String(group.id || group.Id),
+        label: group.name || group.Name || 'Group',
+        meta: 'Group DM',
+      });
+    });
+  }
+
+  const servers = serversResult.status === 'fulfilled' && Array.isArray(serversResult.value.data)
+    ? serversResult.value.data
+    : [];
+  const detailResults = await Promise.allSettled(
+    servers.map(async (server) => {
+      const serverId = server.serverID || server.ServerID;
+      if (!serverId) return null;
+      if (serverId === selectedServerID && currentServerChannels.length > 0) {
+        return { server, channels: currentServerChannels };
+      }
+
+      const response = await axios.get(
+        `${homeApiBase}/api/Server/GetServerDetails?serverId=${encodeURIComponent(serverId)}`
+      );
+      return { server: response.data.server || server, channels: response.data.channels || [] };
+    })
+  );
+
+  detailResults.forEach((result) => {
+    if (result.status !== 'fulfilled' || !result.value) return;
+    const serverName =
+      result.value.server?.serverName ||
+      result.value.server?.ServerName ||
+      result.value.server?.name ||
+      'Server';
+    result.value.channels
+      .filter((channel) => channel.type === 'text' || channel.Type === 'text')
+      .forEach((channel) => {
+        addTarget({
+          type: 'server',
+          id: String(channel.id || channel.Id),
+          label: `# ${channel.name || channel.Name || 'text'}`,
+          meta: serverName,
+        });
+      });
+  });
+
+  return targets.sort((left, right) =>
+    `${left.meta} ${left.label}`.localeCompare(`${right.meta} ${right.label}`)
+  );
+}
+
+let forwardTargetsCache = [];
+
+function renderForwardTargets() {
+  const list = document.getElementById('messageForwardTargets');
+  if (!list) return;
+
+  const query = (document.getElementById('messageForwardSearch')?.value || '').trim().toLowerCase();
+  const targets = forwardTargetsCache.filter((target) =>
+    `${target.label} ${target.meta}`.toLowerCase().includes(query)
+  );
+
+  list.innerHTML = '';
+  if (targets.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'message-forward-empty';
+    empty.textContent = 'No destinations found.';
+    list.appendChild(empty);
+    return;
+  }
+
+  targets.forEach((target) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'message-forward-target';
+    button.dataset.targetType = target.type;
+    button.dataset.targetId = target.id;
+
+    const label = document.createElement('span');
+    label.className = 'message-forward-target-label';
+    label.textContent = target.label;
+
+    const meta = document.createElement('span');
+    meta.className = 'message-forward-target-meta';
+    meta.textContent = target.meta;
+
+    button.appendChild(label);
+    button.appendChild(meta);
+    button.addEventListener('click', () => sendForwardedMessage(target));
+    list.appendChild(button);
+  });
+}
+
+async function openForwardDialog(message, scope) {
+  if (!getMessageId(message)) return;
+
+  forwardSourceMessage = message;
+  forwardSourceScope = scope;
+  const overlay = ensureForwardDialog();
+  const source = document.getElementById('messageForwardSource');
+  if (source) {
+    source.textContent = `${getMessageSender(message)}: ${getMessageSnippet(message)}`;
+  }
+  const search = document.getElementById('messageForwardSearch');
+  if (search) search.value = '';
+  const list = document.getElementById('messageForwardTargets');
+  if (list) {
+    list.innerHTML = '<div class="message-forward-empty">Loading destinations...</div>';
+  }
+  showElement(overlay, 'flex');
+
+  try {
+    forwardTargetsCache = await loadForwardTargets();
+    renderForwardTargets();
+    search?.focus();
+  } catch (error) {
+    if (list) {
+      list.innerHTML = '<div class="message-forward-empty">Could not load destinations.</div>';
+    }
+    showAppMessage(getApiErrorMessage(error, 'Could not load forwarding destinations.'), 'error');
+  }
+}
+
+async function refreshForwardTargetIfVisible(target) {
+  if (target.type === 'dm' && currentFriend === target.id && !currentGroupId && isElementVisible('.privateMessage')) {
+    await GetPrivateMessage();
+    return;
+  }
+
+  if (target.type === 'group' && currentGroupId === target.id && isElementVisible('.privateMessage')) {
+    await GetGroupMessages(target.id);
+    return;
+  }
+
+  if (target.type === 'server' && selectedChannelID === target.id && isElementVisible('#serverDetails')) {
+    await fetchServerMessages();
+  }
+}
+
+async function sendForwardedMessage(target) {
+  if (!forwardSourceMessage || !target) return;
+
+  const message = forwardSourceMessage;
+  const scope = forwardSourceScope;
+  const content = buildForwardedMessageText(message, scope);
+  const attachment = getForwardAttachment(message);
+
+  try {
+    if (target.type === 'dm') {
+      await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, {
+        PrivateMessageID: generateUUID(),
+        MessageUserReciver: target.id,
+        FriendMessagesData: content,
+        AttachmentUrl: attachment.attachmentUrl,
+        AttachmentContentType: attachment.attachmentContentType,
+      });
+    } else if (target.type === 'group') {
+      await apiClient.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
+        groupId: target.id,
+        content,
+        attachmentUrl: attachment.attachmentUrl,
+        attachmentContentType: attachment.attachmentContentType,
+      });
+    } else if (target.type === 'server') {
+      await apiClient.post(`${homeApiBase}/api/ServerMessages/ServerMessages`, {
+        MessageID: generateUUID(),
+        ChannelId: target.id,
+        userText: content,
+        AttachmentUrl: attachment.attachmentUrl,
+        AttachmentContentType: attachment.attachmentContentType,
+      });
+    }
+
+    closeForwardDialog();
+    showAppMessage('Message forwarded.', 'success');
+    await refreshForwardTargetIfVisible(target);
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not forward message.'), 'error');
+  }
+}
+
+function ensurePollComposerDialog() {
+  let overlay = document.getElementById('pollComposerDialog');
+  if (overlay) {
+    return overlay;
+  }
+
+  overlay = document.createElement('div');
+  overlay.id = 'pollComposerDialog';
+  overlay.className = 'poll-composer-overlay is-hidden';
+
+  const dialog = document.createElement('form');
+  dialog.className = 'poll-composer-dialog';
+  dialog.addEventListener('submit', submitPollComposer);
+
+  const header = document.createElement('div');
+  header.className = 'poll-composer-header';
+  const title = document.createElement('h3');
+  title.textContent = 'Create Poll';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'poll-composer-close';
+  close.textContent = 'x';
+  close.title = 'Close';
+  close.addEventListener('click', closePollComposer);
+  header.appendChild(title);
+  header.appendChild(close);
+
+  const question = document.createElement('input');
+  question.id = 'pollComposerQuestion';
+  question.className = 'poll-composer-input';
+  question.type = 'text';
+  question.maxLength = 280;
+  question.placeholder = 'Question';
+  question.required = true;
+
+  const options = document.createElement('div');
+  options.id = 'pollComposerOptions';
+  options.className = 'poll-composer-options';
+
+  const addOption = document.createElement('button');
+  addOption.type = 'button';
+  addOption.className = 'poll-composer-add';
+  addOption.textContent = 'Add Option';
+  addOption.addEventListener('click', () => addPollOptionInput());
+
+  const multipleLabel = document.createElement('label');
+  multipleLabel.className = 'poll-composer-toggle';
+  const multiple = document.createElement('input');
+  multiple.id = 'pollComposerMultiple';
+  multiple.type = 'checkbox';
+  multipleLabel.appendChild(multiple);
+  multipleLabel.appendChild(document.createTextNode('Allow multiple answers'));
+
+  const actions = document.createElement('div');
+  actions.className = 'poll-composer-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'poll-composer-secondary';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', closePollComposer);
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'poll-composer-primary';
+  submit.textContent = 'Post Poll';
+  actions.appendChild(cancel);
+  actions.appendChild(submit);
+
+  dialog.appendChild(header);
+  dialog.appendChild(question);
+  dialog.appendChild(options);
+  dialog.appendChild(addOption);
+  dialog.appendChild(multipleLabel);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      closePollComposer();
+    }
+  });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function addPollOptionInput(value = '') {
+  const options = document.getElementById('pollComposerOptions');
+  if (!options || options.children.length >= 10) {
+    return;
+  }
+
+  const row = document.createElement('div');
+  row.className = 'poll-composer-option-row';
+  const input = document.createElement('input');
+  input.className = 'poll-composer-input poll-composer-option';
+  input.type = 'text';
+  input.maxLength = 100;
+  input.placeholder = `Option ${options.children.length + 1}`;
+  input.value = value;
+  input.required = options.children.length < 2;
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'poll-composer-remove';
+  remove.textContent = 'x';
+  remove.title = 'Remove option';
+  remove.addEventListener('click', () => {
+    row.remove();
+    refreshPollOptionPlaceholders();
+  });
+
+  row.appendChild(input);
+  row.appendChild(remove);
+  options.appendChild(row);
+}
+
+function refreshPollOptionPlaceholders() {
+  document.querySelectorAll('.poll-composer-option').forEach((input, index) => {
+    input.placeholder = `Option ${index + 1}`;
+    input.required = index < 2;
+  });
+}
+
+function resetPollComposer() {
+  const question = document.getElementById('pollComposerQuestion');
+  if (question) question.value = '';
+  const multiple = document.getElementById('pollComposerMultiple');
+  if (multiple) multiple.checked = false;
+  const options = document.getElementById('pollComposerOptions');
+  if (options) options.innerHTML = '';
+  addPollOptionInput();
+  addPollOptionInput();
+}
+
+function openPollComposer() {
+  const scope = getActiveMessageScope();
+  if (!scope) {
+    showAppMessage('Open a conversation before creating a poll.', 'info');
+    return;
+  }
+
+  pendingPollComposerContext = {
+    scope,
+    conversationId: getConversationIdForScope(scope),
+  };
+  const overlay = ensurePollComposerDialog();
+  resetPollComposer();
+  showElement(overlay, 'flex');
+  document.getElementById('pollComposerQuestion')?.focus();
+}
+
+function closePollComposer() {
+  pendingPollComposerContext = null;
+  hideElement('#pollComposerDialog');
+}
+
+async function submitPollComposer(event) {
+  event.preventDefault();
+  const context = pendingPollComposerContext;
+  if (!context || context.conversationId !== getConversationIdForScope(context.scope)) {
+    closePollComposer();
+    showAppMessage('That conversation changed. Open the poll composer again.', 'info');
+    return;
+  }
+
+  const question = document.getElementById('pollComposerQuestion')?.value?.trim() || '';
+  const options = Array.from(document.querySelectorAll('.poll-composer-option'))
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+  const uniqueOptions = new Set(options.map((option) => option.toLowerCase()));
+  if (!question || options.length < 2 || uniqueOptions.size !== options.length) {
+    showAppMessage('Polls need a question and at least two unique options.', 'error');
+    return;
+  }
+
+  const poll = {
+    Question: question,
+    Options: options,
+    AllowMultiple: Boolean(document.getElementById('pollComposerMultiple')?.checked),
+  };
+
+  try {
+    await sendPollMessage(context.scope, poll);
+    closePollComposer();
+    showAppMessage('Poll posted.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not post poll.'), 'error');
+  }
+}
+
+async function sendPollMessage(scope, poll) {
+  const input = getMessageInputForScope(scope);
+  const content = input?.value?.trim() || '';
+  const replyDraft = getActiveReplyDraft(scope);
+
+  if (scope === 'server') {
+    await apiClient.post(`${homeApiBase}/api/ServerMessages/ServerMessages`, {
+      MessageID: generateUUID(),
+      ChannelId: selectedChannelID,
+      userText: content,
+      ReplyToMessageId: replyDraft?.messageId || null,
+      Poll: poll,
+    });
+    if (input) input.value = '';
+    if (replyDraft && pendingReplyDraft === replyDraft) clearReplyDraft();
+    await fetchServerMessages();
+    return;
+  }
+
+  if (scope === 'group') {
+    await apiClient.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
+      groupId: currentGroupId,
+      content,
+      replyToMessageId: replyDraft?.messageId || null,
+      poll,
+    });
+    if (input) input.value = '';
+    if (replyDraft && pendingReplyDraft === replyDraft) clearReplyDraft();
+    await GetGroupMessages(currentGroupId);
+    return;
+  }
+
+  if (scope === 'dm') {
+    await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, {
+      PrivateMessageID: generateUUID(),
+      MessageUserReciver: currentFriend,
+      FriendMessagesData: content,
+      ReplyToMessageId: replyDraft?.messageId || null,
+      Poll: poll,
+    });
+    if (input) input.value = '';
+    if (replyDraft && pendingReplyDraft === replyDraft) clearReplyDraft();
+    await GetPrivateMessage();
+  }
+}
+
+const slashCommands = [
+  {
+    name: 'help',
+    usage: '/help',
+    description: 'Show available slash commands.',
+    handler: () => {
+      showAppMessage(
+        slashCommands
+          .map((command) => `${command.usage} - ${command.description}`)
+          .join('\n'),
+        'info',
+        7000
+      );
+      return { handled: true };
+    },
+  },
+  {
+    name: 'poll',
+    usage: '/poll',
+    description: 'Open the poll composer.',
+    handler: () => {
+      openPollComposer();
+      return { handled: true, clearInput: true };
+    },
+  },
+  {
+    name: 'status',
+    usage: '/status <message>',
+    description: 'Set or clear your custom status.',
+    handler: async ({ args }) => {
+      const nextStatus = args.trim();
+      await syncCustomStatus(nextStatus.toLowerCase() === 'clear' ? '' : nextStatus);
+      return { handled: true, clearInput: true };
+    },
+  },
+  {
+    name: 'online',
+    usage: '/online',
+    description: 'Set presence to online.',
+    handler: () => setPresenceFromSlashCommand('online'),
+  },
+  {
+    name: 'idle',
+    usage: '/idle',
+    description: 'Set presence to idle.',
+    handler: () => setPresenceFromSlashCommand('idle'),
+  },
+  {
+    name: 'dnd',
+    usage: '/dnd',
+    description: 'Set presence to do not disturb.',
+    handler: () => setPresenceFromSlashCommand('do-not-disturb'),
+  },
+  {
+    name: 'invisible',
+    usage: '/invisible',
+    description: 'Set presence to invisible.',
+    handler: () => setPresenceFromSlashCommand('invisible'),
+  },
+  {
+    name: 'me',
+    usage: '/me <action>',
+    description: 'Send an action-style message.',
+    transform: ({ args }) => args ? `*${JWTusername} ${args}*` : '',
+  },
+  {
+    name: 'shrug',
+    usage: '/shrug [text]',
+    description: 'Append a shrug.',
+    transform: ({ args }) => `${args ? `${args} ` : ''}\u00af\\_(\u30c4)_/\u00af`,
+  },
+  {
+    name: 'tableflip',
+    usage: '/tableflip [text]',
+    description: 'Append a table flip.',
+    transform: ({ args }) => `${args ? `${args} ` : ''}(\u256f\u00b0\u25a1\u00b0)\u256f\ufe35 \u253b\u2501\u253b`,
+  },
+  {
+    name: 'unflip',
+    usage: '/unflip [text]',
+    description: 'Append a table reset.',
+    transform: ({ args }) => `${args ? `${args} ` : ''}\u252c\u2500\u252c \u30ce( \u309c-\u309c\u30ce)`,
+  },
+  {
+    name: 'spoiler',
+    usage: '/spoiler <text>',
+    description: 'Wrap text in spoiler markers.',
+    transform: ({ args }) => args ? `||${args}||` : '',
+  },
+  {
+    name: 'code',
+    usage: '/code <text>',
+    description: 'Send text as a code block.',
+    transform: ({ args }) => args ? `\`\`\`\n${args}\n\`\`\`` : '',
+  },
+  {
+    name: 'clear',
+    usage: '/clear',
+    description: 'Clear the message box.',
+    handler: () => ({ handled: true, clearInput: true }),
+  },
+];
+
+let slashCommandActiveIndex = 0;
+let slashCommandActiveInput = null;
+
+function setPresenceFromSlashCommand(presenceStatus) {
+  const normalizedPresence = normalizePresenceStatus(presenceStatus);
+  const presenceSelect = document.getElementById('presenceStatusSelect');
+  if (presenceSelect) {
+    presenceSelect.value = normalizedPresence;
+  }
+  syncPresenceStatus(normalizedPresence);
+  showAppMessage(`Presence set to ${getPresenceStatusLabel(normalizedPresence)}.`, 'success');
+  return { handled: true, clearInput: true };
+}
+
+function parseSlashCommand(text = '') {
+  const trimmed = String(text || '').trim();
+  if (!trimmed.startsWith('/')) {
+    return null;
+  }
+
+  const withoutSlash = trimmed.slice(1);
+  const [rawName = '', ...parts] = withoutSlash.split(/\s+/);
+  const name = rawName.toLowerCase();
+  if (!name) {
+    return null;
+  }
+
+  const command = slashCommands.find((item) => item.name === name);
+  if (!command) {
+    return {
+      unknown: true,
+      name,
+    };
+  }
+
+  const args = withoutSlash.slice(rawName.length).trimStart();
+  return {
+    command,
+    args,
+  };
+}
+
+async function handleSlashCommandBeforeSend(scope, input, rawText) {
+  const parsed = parseSlashCommand(rawText);
+  if (!parsed) {
+    return { handled: false, content: rawText };
+  }
+
+  if (parsed.unknown) {
+    showAppMessage(`Unknown command /${parsed.name}. Type /help for available commands.`, 'error');
+    return { handled: true };
+  }
+
+  const { command, args } = parsed;
+  if (command.handler) {
+    let result = null;
+    try {
+      result = await command.handler({ args, scope, input, rawText });
+    } catch {
+      closeSlashCommandPalette();
+      return { handled: true };
+    }
+    if (result?.clearInput && input) {
+      input.value = '';
+    }
+    closeSlashCommandPalette();
+    return { handled: true };
+  }
+
+  if (command.transform) {
+    const content = command.transform({ args, scope, input, rawText });
+    if (!content) {
+      showAppMessage(`${command.usage} needs text.`, 'info');
+      return { handled: true };
+    }
+
+    closeSlashCommandPalette();
+    return { handled: false, content };
+  }
+
+  return { handled: false, content: rawText };
+}
+
+function getSlashCommandMatches(input) {
+  if (!input) return [];
+  const cursor = input.selectionStart ?? input.value.length;
+  const leadingText = input.value.slice(0, cursor);
+  const match = leadingText.match(/^\/([A-Za-z-]*)$/);
+  if (!match) return [];
+
+  const query = match[1].toLowerCase();
+  return slashCommands.filter((command) => command.name.startsWith(query));
+}
+
+function ensureSlashCommandPalette() {
+  let palette = document.getElementById('slashCommandPalette');
+  if (palette) {
+    return palette;
+  }
+
+  palette = document.createElement('div');
+  palette.id = 'slashCommandPalette';
+  palette.className = 'slash-command-palette is-hidden';
+  document.body.appendChild(palette);
+  return palette;
+}
+
+function positionSlashCommandPalette(input, palette) {
+  const rect = input.getBoundingClientRect();
+  const paletteHeight = Math.min(270, palette.scrollHeight || 180);
+  const top = Math.max(8, rect.top - paletteHeight - 8);
+  const left = Math.min(rect.left, window.innerWidth - Math.min(420, window.innerWidth - 24) - 12);
+  palette.style.left = `${Math.max(12, left)}px`;
+  palette.style.top = `${top}px`;
+}
+
+function renderSlashCommandPalette(input) {
+  const matches = getSlashCommandMatches(input);
+  const palette = ensureSlashCommandPalette();
+  slashCommandActiveInput = input;
+
+  if (!matches.length) {
+    closeSlashCommandPalette();
+    return;
+  }
+
+  slashCommandActiveIndex = Math.min(slashCommandActiveIndex, matches.length - 1);
+  palette.innerHTML = '';
+  matches.forEach((command, index) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'slash-command-item';
+    item.classList.toggle('active', index === slashCommandActiveIndex);
+    item.dataset.command = command.name;
+    const name = document.createElement('span');
+    name.className = 'slash-command-name';
+    name.textContent = command.usage;
+    const description = document.createElement('span');
+    description.className = 'slash-command-description';
+    description.textContent = command.description;
+    item.appendChild(name);
+    item.appendChild(description);
+    item.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      completeSlashCommand(input, command);
+    });
+    palette.appendChild(item);
+  });
+
+  showElement(palette, 'grid');
+  positionSlashCommandPalette(input, palette);
+}
+
+function closeSlashCommandPalette() {
+  const palette = document.getElementById('slashCommandPalette');
+  if (palette) {
+    hideElement(palette);
+  }
+  slashCommandActiveInput = null;
+  slashCommandActiveIndex = 0;
+}
+
+function completeSlashCommand(input, command) {
+  if (!input || !command) return;
+  input.value = `/${command.name} `;
+  input.focus();
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  closeSlashCommandPalette();
+}
+
+function handleSlashCommandKeydown(event) {
+  const input = event.currentTarget;
+  const matches = getSlashCommandMatches(input);
+  const paletteVisible = isElementVisible('#slashCommandPalette') && slashCommandActiveInput === input;
+  if (!matches.length || !paletteVisible) {
+    return;
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    slashCommandActiveIndex = (slashCommandActiveIndex + 1) % matches.length;
+    renderSlashCommandPalette(input);
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    slashCommandActiveIndex = (slashCommandActiveIndex - 1 + matches.length) % matches.length;
+    renderSlashCommandPalette(input);
+  } else if (event.key === 'Tab' || event.key === 'Enter') {
+    event.preventDefault();
+    completeSlashCommand(input, matches[slashCommandActiveIndex] || matches[0]);
+  } else if (event.key === 'Escape') {
+    closeSlashCommandPalette();
+  }
+}
+
+function setupSlashCommandInputs() {
+  document.querySelectorAll('.chatForm .chatInput, .privateMessageForm .chatInput').forEach((input) => {
+    if (input.dataset.slashCommandsReady === 'true') {
+      return;
+    }
+
+    input.dataset.slashCommandsReady = 'true';
+    input.addEventListener('input', () => {
+      slashCommandActiveIndex = 0;
+      renderSlashCommandPalette(input);
+    });
+    input.addEventListener('keydown', handleSlashCommandKeydown);
+    input.addEventListener('blur', () => {
+      window.setTimeout(closeSlashCommandPalette, 120);
+    });
+  });
 }
 
 async function markSelectedChannelRead(messages = []) {
@@ -2170,6 +3918,7 @@ async function fetchServerMessages() {
       conversationId: selectedChannelID,
       conversationName: getSelectedChannelNotificationName(),
     });
+    cacheMessagesForScope('server', messages);
     chatMessages.innerHTML = '';
     messages.forEach((message) => {
       chatMessages.appendChild(renderCompactMessage(message, 'server'));
@@ -2203,11 +3952,18 @@ async function ServerChat(event) {
   event.preventDefault();
   const form = event.target;
   const formData = new FormData(event.target);
-  const messageText = formData.get('userText');
+  const input = form.querySelector('.chatInput');
+  let messageText = String(formData.get('userText') || '');
+  const commandResult = await handleSlashCommandBeforeSend('server', input, messageText);
+  if (commandResult.handled) {
+    return;
+  }
+  messageText = commandResult.content;
 
   if (!messageText.trim()) return;
 
   const messageId = generateUUID();
+  const replyDraft = getActiveReplyDraft('server');
   const formDataObject = {
     MessageID: messageId,
     ChannelId: selectedChannelID,
@@ -2215,6 +3971,7 @@ async function ServerChat(event) {
     MessagesUserSender: JWTusername,
     Date: new Date().toLocaleString().toString(),
     userText: messageText,
+    ReplyToMessageId: replyDraft?.messageId || null,
   };
 
   const pendingMessage = renderCompactMessage({
@@ -2222,10 +3979,12 @@ async function ServerChat(event) {
     messagesUserSender: JWTusername,
     userText: messageText,
     date: formDataObject.Date,
-  });
-  pendingMessage.classList.add('message-pending');
-  chatMessages.appendChild(pendingMessage);
-  form.querySelector('.chatInput').value = '';
+    replyToMessageId: replyDraft?.messageId || null,
+    replyPreview: replyDraft?.preview || null,
+    });
+    pendingMessage.classList.add('message-pending');
+    chatMessages.appendChild(pendingMessage);
+    if (input) input.value = '';
 
   try {
     await axios.post(
@@ -2235,6 +3994,9 @@ async function ServerChat(event) {
 
     pendingMessage.classList.remove('message-pending');
     pendingMessage.classList.add('message-delivered');
+    if (replyDraft && pendingReplyDraft === replyDraft) {
+      clearReplyDraft();
+    }
     await fetchServerMessages();
   } catch (e) {
     console.error('msg send failed:', e);
@@ -2301,6 +4063,7 @@ function showAddFriends() {
 }
 
 function clearContent() {
+  clearReplyDraft();
   const sections = [
     '.addFriendsDiv',
     '.removeFriendsDiv',
@@ -2496,23 +4259,42 @@ async function GetFriends() {
       mainFriendsDiv.appendChild(noFriendsTag);
     } else {
       let friends = res.data;
+      const friendProfiles = await fetchFriendProfileSummaries();
       console.log('GetFriends response:', friends);
       if (Array.isArray(friends)) {
         friends.forEach((friend) => {
+          const profile = friendProfiles.get(String(friend).toLowerCase()) || getCachedProfileSummary(friend) || {
+            username: friend,
+            presenceStatus: 'online',
+            customStatus: '',
+            activityStatus: '',
+            lastActiveAt: null,
+          };
           const friendsTag = document.createElement('button');
           friendsTag.type = 'button';
           friendsTag.className = 'testaddeduser conversation-list-item';
           friendsTag.dataset.dmUsername = friend;
 
+          const copy = document.createElement('span');
+          copy.className = 'conversation-copy';
           const label = document.createElement('span');
           label.className = 'conversation-label';
           label.textContent = friend;
+          const status = document.createElement('span');
+          status.className = 'conversation-status';
+          status.textContent = getStatusSummary(profile);
+          const profileBadges = document.createElement('span');
+          profileBadges.className = 'user-badges conversation-profile-badges';
+          renderUserBadges(profileBadges, getProfileBadges(profile), { compact: true });
+          copy.appendChild(label);
+          copy.appendChild(profileBadges);
+          copy.appendChild(status);
 
           const badge = document.createElement('span');
           badge.className = 'conversation-badge is-hidden';
           badge.setAttribute('aria-hidden', 'true');
 
-          friendsTag.appendChild(label);
+          friendsTag.appendChild(copy);
           friendsTag.appendChild(badge);
           friendsTag.addEventListener('click', async () => {
             console.log("Friend clicked:", friend);
@@ -2699,7 +4481,7 @@ function handleDirectSocketMessage(event) {
   }
 
   const messagesDisplay = document.querySelector('.messagesDisplay');
-  const messageElement = createMessageElement(sender, getMessageText(message), message.date || message.Date);
+  const messageElement = renderCompactMessage(message, 'dm');
   messagesDisplay.appendChild(messageElement);
   messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
   currentChatHistory.push({
@@ -2722,24 +4504,25 @@ async function handleGroupSocketMessage(event) {
     return;
   }
 
-  if (message.GroupId === currentGroupId) {
+  const groupId = message.GroupId || message.groupId;
+  if (groupId === currentGroupId) {
     const messagesDisplay = document.querySelector('.messagesDisplay');
     notifyIncomingChatMessage(message, {
       scope: 'group',
-      conversationId: message.GroupId,
+      conversationId: groupId,
       conversationName: currentGroupName,
     });
-    const messageElement = createMessageElement(message.Sender, message.Content, message.Date);
+    const messageElement = renderCompactMessage(message, 'group');
     messagesDisplay.appendChild(messageElement);
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
     currentChatHistory.push({
       id: message.Id || message.id,
-      messagesUserSender: message.Sender,
-      friendMessagesData: message.Content,
-      date: message.Date,
+      messagesUserSender: getMessageSender(message),
+      friendMessagesData: getMessageText(message),
+      date: message.Date || message.date,
     });
-    if (isAppWindowFocused() && isCurrentNotificationContextVisible('group', message.GroupId)) {
-      markGroupRead(message.GroupId, message.Id || message.id);
+    if (isAppWindowFocused() && isCurrentNotificationContextVisible('group', groupId)) {
+      markGroupRead(groupId, message.Id || message.id);
     }
   }
 }
@@ -2824,24 +4607,34 @@ async function PrivateMessage(event) {
   event.preventDefault();
   const formData = new FormData(event.target);
   const input = event.target.querySelector('.chatInput');
-  const content = String(formData.get('friendMessagesData') || '').trim();
+  let content = String(formData.get('friendMessagesData') || '').trim();
+  const scope = currentGroupId ? 'group' : 'dm';
+  const commandResult = await handleSlashCommandBeforeSend(scope, input, content);
+  if (commandResult.handled) {
+    return;
+  }
+  content = String(commandResult.content || '').trim();
   if (!content) {
     return;
   }
   const messagesDisplay = document.querySelector('.messagesDisplay');
 
   if (currentGroupId) {
+    const replyDraft = getActiveReplyDraft('group');
     if (input) input.value = '';
-    await runOptimisticMessageSend({
+    const result = await runOptimisticMessageSend({
       container: messagesDisplay,
       draft: {
         sender: JWTusername,
         content,
         date: new Date().toISOString(),
+        replyToMessageId: replyDraft?.messageId || null,
+        replyPreview: replyDraft?.preview || null,
       },
       send: () => apiClient.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
         groupId: currentGroupId,
         content,
+        replyToMessageId: replyDraft?.messageId || null,
       }),
       rollbackInput: () => {
         if (input) input.value = content;
@@ -2849,10 +4642,14 @@ async function PrivateMessage(event) {
       refresh: () => GetGroupMessages(currentGroupId),
       failureMessage: 'Group message failed to send.',
     }).catch(() => {});
+    if (result && replyDraft && pendingReplyDraft === replyDraft) {
+      clearReplyDraft();
+    }
   } else {
     if (!currentFriend) {
       return;
     }
+    const replyDraft = getActiveReplyDraft('dm');
     if (input) input.value = '';
     const messageId = generateUUID();
     const messageObject = {
@@ -2861,15 +4658,18 @@ async function PrivateMessage(event) {
       MessageUserReciver: currentFriend,
       friendMessagesData: content,
       date: new Date().toISOString(),
+      ReplyToMessageId: replyDraft?.messageId || null,
     };
 
-    await runOptimisticMessageSend({
+    const result = await runOptimisticMessageSend({
       container: messagesDisplay,
       draft: {
         privateMessageID: messageId,
         messagesUserSender: JWTusername,
         friendMessagesData: content,
         date: messageObject.date,
+        replyToMessageId: replyDraft?.messageId || null,
+        replyPreview: replyDraft?.preview || null,
       },
       send: async () => {
         return apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, messageObject);
@@ -2887,6 +4687,9 @@ async function PrivateMessage(event) {
       },
       failureMessage: 'Direct message failed to send.',
     }).catch(() => {});
+    if (result && replyDraft && pendingReplyDraft === replyDraft) {
+      clearReplyDraft();
+    }
   }
 }
 
@@ -2917,6 +4720,7 @@ async function GetPrivateMessage() {
     const messagesDisplay = document.querySelector('.messagesDisplay');
     messagesDisplay.innerHTML = '';
     currentChatHistory = res.data;
+    cacheMessagesForScope('dm', res.data);
     res.data.forEach((message) => {
       messagesDisplay.appendChild(renderCompactMessage(message, 'dm'));
     });
@@ -4503,7 +6307,12 @@ async function GetGroupMessages(groupId) {
     const res = await axios.get(`${homeApiBase}/api/GroupChat/GetGroupMessages?groupId=${encodeURIComponent(groupId)}`);
     const messagesDisplay = document.querySelector('.messagesDisplay');
     messagesDisplay.innerHTML = '';
-    currentChatHistory = res.data.map(m => ({ messagesUserSender: m.sender, friendMessagesData: m.content, date: m.date }));
+    currentChatHistory = res.data.map(m => ({
+      messagesUserSender: getMessageSender(m),
+      friendMessagesData: getMessageText(m),
+      date: m.date || m.Date,
+    }));
+    cacheMessagesForScope('group', res.data);
 
     res.data.forEach((message) => {
       messagesDisplay.appendChild(renderCompactMessage(message, 'group'));
@@ -8567,6 +10376,7 @@ async function fetchServerDetails() {
       channelEl.appendChild(label);
       if (channel.type === 'text') {
         channelEl.onclick = () => {
+          clearReplyDraft();
           selectedChannelID = channel.id;
           closeServerThreadPanel();
           hideElement('#serverPinnedMessagesPanel');
@@ -8626,6 +10436,7 @@ async function fetchServerDetails() {
 
     const firstTextChannel = currentServerChannels.find(c => c.type === 'text');
     if (firstTextChannel) {
+      clearReplyDraft();
       selectedChannelID = firstTextChannel.id;
       closeServerThreadPanel();
       hideElement('#serverPinnedMessagesPanel');
@@ -8674,20 +10485,50 @@ async function fetchServerMembers() {
       memberEl.dataset.username = member.username;
       memberEl.dataset.role = memberRole;
       memberEl.classList.add('server-member-row');
-      memberEl.classList.toggle('is-owner', memberRole === 'owner');
+        memberEl.classList.toggle('is-owner', memberRole === 'owner');
 
-      const avatar = document.createElement('div');
-      avatar.className = 'server-member-avatar default-avatar-bg';
-      avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
+        const avatar = document.createElement('div');
+        avatar.className = 'server-member-avatar default-avatar-bg';
+        const memberPictureUrl = getProfilePictureUrl(member);
+        const memberPresenceStatus = getProfilePresenceStatus(member);
+        const memberCustomStatus = getProfileCustomStatus(member);
+        const memberBadges = getProfileBadges(member);
+        cacheProfileSummary({
+          username: member.username,
+          profilePictureUrl: memberPictureUrl,
+          presenceStatus: memberPresenceStatus,
+          customStatus: memberCustomStatus,
+          badges: memberBadges,
+        });
+        if (memberPictureUrl) {
+          avatar.style.backgroundImage = `url("${cssString(memberPictureUrl)}")`;
+        }
+        avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
 
-      const name = document.createElement('span');
-      name.className = 'server-member-name';
-      name.textContent = member.username;
-      name.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
+        const statusDot = document.createElement('span');
+        statusDot.className = 'member-status-dot';
+        setPresenceClass(statusDot, memberPresenceStatus);
 
-      memberEl.appendChild(avatar);
-      memberEl.appendChild(name);
-      memberEl.appendChild(createRoleChip(memberRole));
+        const copy = document.createElement('div');
+        copy.className = 'server-member-copy';
+        const name = document.createElement('span');
+        name.className = 'server-member-name';
+        name.textContent = member.username;
+        name.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
+        const status = document.createElement('span');
+        status.className = 'server-member-status';
+        status.textContent = getStatusSummary(member);
+        copy.appendChild(name);
+        const profileBadges = document.createElement('span');
+        profileBadges.className = 'user-badges server-member-profile-badges';
+        renderUserBadges(profileBadges, memberBadges, { compact: true });
+        copy.appendChild(profileBadges);
+        copy.appendChild(status);
+
+        memberEl.appendChild(avatar);
+        memberEl.appendChild(statusDot);
+        memberEl.appendChild(copy);
+        memberEl.appendChild(createRoleChip(memberRole));
       memberEl.appendChild(renderMemberModerationBadges(member));
       memberEl.appendChild(renderMemberModerationActions(member));
 
@@ -9250,10 +11091,18 @@ async function FetchAndRenderFriendsMain() {
     }
 
     friends = [...new Set(friends)];
+    const friendProfiles = await fetchFriendProfileSummaries();
 
     if (listEl) listEl.innerHTML = '';
 
     friends.forEach(friendName => {
+      const profile = friendProfiles.get(String(friendName).toLowerCase()) || getCachedProfileSummary(friendName) || {
+        username: friendName,
+        presenceStatus: 'online',
+        customStatus: '',
+        activityStatus: '',
+        lastActiveAt: null,
+      };
       const item = document.createElement('div');
       item.className = 'friend-item';
       item.onclick = (e) => {
@@ -9266,7 +11115,14 @@ async function FetchAndRenderFriendsMain() {
       const avatar = document.createElement('div');
       avatar.className = 'friend-item-avatar';
       setAvatarFallback(avatar);
+      if (profile.profilePictureUrl) {
+        avatar.style.backgroundImage = `url("${cssString(profile.profilePictureUrl)}")`;
+      }
       avatar.onclick = (e) => openProfilePopout(friendName, e.pageX, e.pageY);
+      const statusDot = document.createElement('span');
+      statusDot.className = 'presence-status-dot';
+      setPresenceClass(statusDot, profile.presenceStatus);
+      avatar.appendChild(statusDot);
 
       const info = document.createElement('div');
       info.className = 'friend-item-info';
@@ -9278,9 +11134,13 @@ async function FetchAndRenderFriendsMain() {
 
       const status = document.createElement('span');
       status.className = 'friend-item-status';
-      status.textContent = 'Online';
+      status.textContent = getStatusSummary(profile);
+      const profileBadges = document.createElement('span');
+      profileBadges.className = 'user-badges friend-profile-badges';
+      renderUserBadges(profileBadges, getProfileBadges(profile), { compact: true });
 
       info.appendChild(name);
+      info.appendChild(profileBadges);
       info.appendChild(status);
       left.appendChild(avatar);
       left.appendChild(info);
@@ -9454,6 +11314,7 @@ async function handleDMFileUpload(input) {
         console.log('File uploaded:', fileUrl);
 
         const messageText = `[Image](${fileUrl})`;
+        const replyDraft = getActiveReplyDraft('dm');
 
         const messageObject = {
           PrivateMessageID: generateUUID(),
@@ -9461,9 +11322,13 @@ async function handleDMFileUpload(input) {
           FriendMessagesData: messageText,
           AttachmentUrl: fileUrl,
           AttachmentContentType: file.type,
+          ReplyToMessageId: replyDraft?.messageId || null,
         };
 
         await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, messageObject);
+        if (replyDraft && pendingReplyDraft === replyDraft) {
+          clearReplyDraft();
+        }
         await GetPrivateMessage();
       }
     } catch (err) {
@@ -9569,21 +11434,31 @@ async function submitUploadModal() {
       const messageText = `[Image](${fileUrl})`;
 
       if (currentGroupId) {
+        const replyDraft = getActiveReplyDraft('group');
         await apiClient.post(`${homeApiBase}/api/GroupChat/SendGroupMessage`, {
           groupId: currentGroupId,
           content: messageText,
           attachmentUrl: fileUrl,
           attachmentContentType: currentUploadFile.type,
+          replyToMessageId: replyDraft?.messageId || null,
         });
+        if (replyDraft && pendingReplyDraft === replyDraft) {
+          clearReplyDraft();
+        }
         await GetGroupMessages(currentGroupId);
       } else if (currentFriend) {
+        const replyDraft = getActiveReplyDraft('dm');
         await apiClient.post(`${homeApiBase}/api/PrivateMessageFriend/SendPrivateMessage`, {
           PrivateMessageID: generateUUID(),
           MessageUserReciver: currentFriend,
           FriendMessagesData: messageText,
           AttachmentUrl: fileUrl,
           AttachmentContentType: currentUploadFile.type,
+          ReplyToMessageId: replyDraft?.messageId || null,
         });
+        if (replyDraft && pendingReplyDraft === replyDraft) {
+          clearReplyDraft();
+        }
         await GetPrivateMessage();
       }
 
@@ -9875,6 +11750,23 @@ window.openProfilePopout = async function (username, x, y) {
   document.getElementById('popoutUsername').innerText = username;
   document.getElementById('popoutDescription').innerText = "Loading...";
   document.getElementById('popoutAvatar').src = homeDefaultAvatarUrl;
+  const popoutStatus = document.getElementById('popoutStatus');
+  const popoutActivity = document.getElementById('popoutActivity');
+  const popoutCustomStatus = document.getElementById('popoutCustomStatus');
+  const popoutBadges = document.getElementById('popoutBadges');
+  if (popoutStatus) {
+    popoutStatus.textContent = 'Loading';
+    setPresenceClass(popoutStatus, 'invisible');
+  }
+  if (popoutCustomStatus) {
+    popoutCustomStatus.textContent = '';
+    hideElement(popoutCustomStatus);
+  }
+  if (popoutActivity) {
+    popoutActivity.textContent = '';
+    hideElement(popoutActivity);
+  }
+  renderUserBadges(popoutBadges, []);
   let reportButton = document.getElementById('profileReportBtn');
   if (!reportButton) {
     reportButton = document.createElement('button');
@@ -9899,10 +11791,29 @@ window.openProfilePopout = async function (username, x, y) {
     const profile = res.data;
 
     if (profile) {
-      if (profile.description) {
-        document.getElementById('popoutDescription').innerText = profile.description;
+      cacheProfileSummary({ ...profile, username });
+      const presenceStatus = getProfilePresenceStatus(profile);
+      const customStatus = getProfileCustomStatus(profile);
+      const activityStatus = getProfileActivityStatus(profile);
+      const profileBadges = getProfileBadges(profile);
+      if (popoutStatus) {
+        popoutStatus.textContent = getPresenceStatusLabel(presenceStatus);
+        setPresenceClass(popoutStatus, presenceStatus);
+      }
+      if (popoutActivity) {
+        popoutActivity.textContent = activityStatus;
+        setElementVisible(popoutActivity, Boolean(activityStatus), 'block');
+      }
+      if (popoutCustomStatus) {
+        popoutCustomStatus.textContent = customStatus;
+        setElementVisible(popoutCustomStatus, Boolean(customStatus), 'block');
+      }
+      renderUserBadges(popoutBadges, profileBadges);
+      const profileBio = getProfileBio(profile);
+      if (profileBio) {
+        document.getElementById('popoutDescription').innerText = profileBio;
       } else {
-        document.getElementById('popoutDescription').innerText = "No description provided.";
+        document.getElementById('popoutDescription').innerText = "No bio provided.";
       }
 
       if (profile.profilePictureUrl) {
@@ -9912,6 +11823,10 @@ window.openProfilePopout = async function (username, x, y) {
   } catch (err) {
     console.error("Failed to load profile for popout", err);
     document.getElementById('popoutDescription').innerText = "Failed to load profile.";
+    if (popoutStatus) {
+      popoutStatus.textContent = 'Unavailable';
+      setPresenceClass(popoutStatus, 'invisible');
+    }
   }
 
   const startX = Math.max(0, Number(x) || 0);
@@ -9974,6 +11889,17 @@ function createDefaultSettingsState() {
     profileBannerColor: '#0c0c0c',
     profileBannerUrl: '',
     presenceStatus: 'online',
+    customStatus: '',
+    activityStatus: '',
+    accountStanding: {
+      standing: 'good',
+      label: 'Good',
+      trustScore: 60,
+      summary: 'No restrictions are applied to this account.',
+      reason: '',
+      signals: [],
+    },
+    profileBadges: [],
     contact: {
       email: '',
       phoneNumber: '',
@@ -10117,6 +12043,19 @@ function readSettingsState() {
         typeof parsedState.presenceStatus === 'string'
           ? parsedState.presenceStatus
           : fallbackState.presenceStatus,
+      customStatus:
+        typeof parsedState.customStatus === 'string'
+          ? normalizeCustomStatus(parsedState.customStatus)
+          : fallbackState.customStatus,
+      activityStatus:
+        typeof parsedState.activityStatus === 'string'
+          ? normalizeActivityStatus(parsedState.activityStatus)
+          : fallbackState.activityStatus,
+      accountStanding:
+        parsedState.accountStanding && typeof parsedState.accountStanding === 'object'
+          ? { ...fallbackState.accountStanding, ...parsedState.accountStanding }
+          : fallbackState.accountStanding,
+      profileBadges: normalizeProfileBadges(parsedState.profileBadges),
       contact:
         parsedState.contact && typeof parsedState.contact === 'object'
           ? { ...fallbackState.contact, ...parsedState.contact }
@@ -10511,6 +12450,8 @@ async function persistAccountSettings(state = readSettingsState()) {
   delete settingsPayload.verification;
   delete settingsPayload.twoFactor;
   delete settingsPayload.privacy;
+  delete settingsPayload.accountStanding;
+  delete settingsPayload.activityStatus;
 
   await axios.post(`${homeApiBase}/api/Account/UpdateAccountSettings`, {
     settings: settingsPayload,
@@ -10569,6 +12510,21 @@ function applyAccountSettingsResponse(data) {
       ...(data.privacy || {}),
     },
     presenceStatus: data.presenceStatus || serverState.presenceStatus || fallback.presenceStatus,
+    customStatus: normalizeCustomStatus(
+      data.customStatus ?? serverState.customStatus ?? fallback.customStatus
+    ),
+    activityStatus: normalizeActivityStatus(
+      data.activityStatus ?? serverState.activityStatus ?? fallback.activityStatus
+    ),
+    accountStanding:
+      data.accountStanding && typeof data.accountStanding === 'object'
+        ? { ...fallback.accountStanding, ...data.accountStanding }
+        : serverState.accountStanding && typeof serverState.accountStanding === 'object'
+          ? { ...fallback.accountStanding, ...serverState.accountStanding }
+          : fallback.accountStanding,
+    profileBadges: normalizeProfileBadges(
+      data.profileBadges ?? data.badges ?? serverState.profileBadges ?? fallback.profileBadges
+    ),
     profileBannerColor:
       data.profileBannerColor || serverState.profileBannerColor || fallback.profileBannerColor,
     profileBannerUrl: data.profileBannerUrl || serverState.profileBannerUrl || '',
@@ -10710,6 +12666,43 @@ function getRadioItemValue(item, index = 0) {
   return slugifySettingsValue(titleText || index);
 }
 
+function updateAccountStandingPanel(state = readSettingsState()) {
+  const standing = getAccountStanding(state);
+  const standingLabel = document.getElementById('accountStandingLabel');
+  const standingSummary = document.getElementById('accountStandingSummary');
+  const trustScore = document.getElementById('accountTrustScore');
+  const trustMeter = document.getElementById('accountTrustMeter');
+  const signalsList = document.getElementById('accountStandingSignals');
+
+  if (standingLabel) {
+    standingLabel.textContent = standing.label;
+    standingLabel.dataset.standing = standing.standing;
+  }
+
+  if (standingSummary) {
+    standingSummary.textContent = standing.reason || standing.summary;
+  }
+
+  if (trustScore) {
+    trustScore.textContent = `${Math.round(standing.trustScore)}/100`;
+  }
+
+  if (trustMeter) {
+    trustMeter.style.width = `${standing.trustScore}%`;
+    trustMeter.dataset.standing = standing.standing;
+  }
+
+  if (signalsList) {
+    const signals = standing.signals.length ? standing.signals : [standing.summary];
+    signalsList.textContent = '';
+    signals.forEach((signal) => {
+      const item = document.createElement('li');
+      item.textContent = signal;
+      signalsList.appendChild(item);
+    });
+  }
+}
+
 function setRadioGroupSelection(group, desiredValue) {
   if (!group) {
     return { item: null, value: desiredValue };
@@ -10798,6 +12791,12 @@ function updateSettingsIdentityFields() {
   setElementVisible(disableTwoFactorBtn, state.twoFactor.enabled);
   if (regenerateBackupCodesBtn) regenerateBackupCodesBtn.disabled = !state.twoFactor.enabled;
   if (presenceStatusSelect) presenceStatusSelect.value = state.presenceStatus || 'online';
+  applyCurrentProfileStatus(state.customStatus || '', state.presenceStatus || 'online');
+  setActivityStatusInputs(state.activityStatus || '');
+  updateAccountStandingPanel(state);
+  renderUserBadges('#settingsAccountBadges', state.profileBadges || [], { compact: true });
+  renderUserBadges('#profilePreviewBadges', state.profileBadges || []);
+  setProfileBadgePickerSelection(state.profileBadges || []);
   if (previewName) previewName.textContent = JWTusername;
   if (previewTag) {
     previewTag.textContent =
@@ -10805,12 +12804,22 @@ function updateSettingsIdentityFields() {
   }
 }
 
-function updateProfileVisuals(profilePictureUrl, description, profileBannerUrl = null, profileBannerColor = '') {
+function updateProfileVisuals(
+  profilePictureUrl,
+  description,
+  profileBannerUrl = null,
+  profileBannerColor = '',
+  customStatus = null,
+  presenceStatus = null,
+  profileBadges = null
+) {
   const nextAvatarUrl = profilePictureUrl || homeDefaultAvatarUrl;
-  const nextDescription = description || 'Click to add custom status';
   const settingsState = readSettingsState();
   const nextBannerColor = profileBannerColor || settingsState.profileBannerColor || '#0c0c0c';
   const nextBannerUrl = profileBannerUrl === null ? settingsState.profileBannerUrl || '' : profileBannerUrl;
+  const nextCustomStatus = customStatus === null ? settingsState.customStatus || '' : customStatus;
+  const nextPresenceStatus = presenceStatus || settingsState.presenceStatus || 'online';
+  const nextProfileBadges = profileBadges === null ? settingsState.profileBadges || [] : profileBadges;
 
   document
     .querySelectorAll('.settings-avatar, .preview-avatar img, #popoutAvatar')
@@ -10826,10 +12835,14 @@ function updateProfileVisuals(profilePictureUrl, description, profileBannerUrl =
       img.src = nextAvatarUrl;
     });
 
-  const customStatus = document.querySelector('.preview-custom-status');
-  if (customStatus) {
-    customStatus.textContent = nextDescription;
+  const aboutMe = document.getElementById('popoutDescription');
+  if (aboutMe) {
+    aboutMe.textContent = description || 'No bio provided.';
   }
+
+  applyCurrentProfileStatus(nextCustomStatus, nextPresenceStatus);
+  renderUserBadges('#settingsAccountBadges', nextProfileBadges, { compact: true });
+  renderUserBadges('#profilePreviewBadges', nextProfileBadges);
 
   applyDynamicProfileBanner(nextBannerColor, nextBannerUrl);
 }
@@ -11225,11 +13238,101 @@ function handleRadioStateChange(settingKey, value) {
 }
 
 function syncPresenceStatus(presenceStatus) {
+  const normalizedPresence = normalizePresenceStatus(presenceStatus);
+  writeSettingsState((state) => ({
+    ...state,
+    presenceStatus: normalizedPresence,
+  }));
+  applyCurrentProfileStatus(readSettingsState().customStatus || '', normalizedPresence);
+
   axios
-    .post(`${homeApiBase}/api/Account/UpdatePresence`, { presenceStatus })
+    .post(`${homeApiBase}/api/Account/UpdatePresence`, { presenceStatus: normalizedPresence })
+    .then((response) => {
+      if (response.data) {
+        applyAccountSettingsResponse(response.data);
+      }
+    })
     .catch((error) => {
       showAppMessage(getApiErrorMessage(error, 'Could not update status.'), 'error');
     });
+}
+
+async function syncCustomStatus(customStatus, { silent = false } = {}) {
+  const normalizedCustomStatus = normalizeCustomStatus(customStatus);
+  const previousState = readSettingsState();
+  writeSettingsState((state) => ({
+    ...state,
+    customStatus: normalizedCustomStatus,
+  }));
+  applyCurrentProfileStatus(normalizedCustomStatus, previousState.presenceStatus || 'online');
+
+  try {
+    const response = await axios.post(`${homeApiBase}/api/Account/UpdateCustomStatus`, {
+      customStatus: normalizedCustomStatus,
+    });
+    if (response.data) {
+      applyAccountSettingsResponse(response.data);
+    }
+    if (!silent) {
+      showAppMessage(normalizedCustomStatus ? 'Custom status updated.' : 'Custom status cleared.', 'success');
+    }
+    return normalizedCustomStatus;
+  } catch (error) {
+    writeSettingsState(previousState);
+    applyCurrentProfileStatus(previousState.customStatus || '', previousState.presenceStatus || 'online');
+    showAppMessage(getApiErrorMessage(error, 'Could not update custom status.'), 'error');
+    throw error;
+  }
+}
+
+async function saveCustomStatusFromInputs() {
+  const sourceInput =
+    document.activeElement?.matches?.('#customStatusInput, #profileCustomStatusInput')
+      ? document.activeElement
+      : document.getElementById('customStatusInput') || document.getElementById('profileCustomStatusInput');
+  await syncCustomStatus(sourceInput?.value || '');
+}
+
+async function clearCustomStatus() {
+  setCustomStatusInputs('');
+  await syncCustomStatus('');
+}
+
+async function syncActivityStatus(activityStatus, { silent = false } = {}) {
+  const normalizedActivityStatus = normalizeActivityStatus(activityStatus);
+  const previousState = readSettingsState();
+  writeSettingsState((state) => ({
+    ...state,
+    activityStatus: normalizedActivityStatus,
+  }));
+  setActivityStatusInputs(normalizedActivityStatus);
+
+  try {
+    const response = await axios.post(`${homeApiBase}/api/Account/UpdateActivityStatus`, {
+      activityStatus: normalizedActivityStatus,
+    });
+    if (response.data) {
+      applyAccountSettingsResponse(response.data);
+    }
+    if (!silent) {
+      showAppMessage(normalizedActivityStatus ? 'Activity updated.' : 'Activity cleared.', 'success');
+    }
+    return normalizedActivityStatus;
+  } catch (error) {
+    writeSettingsState(previousState);
+    setActivityStatusInputs(previousState.activityStatus || '');
+    showAppMessage(getApiErrorMessage(error, 'Could not update activity.'), 'error');
+    throw error;
+  }
+}
+
+async function saveActivityStatusFromInput() {
+  await syncActivityStatus(document.getElementById('activityStatusInput')?.value || '');
+}
+
+async function clearActivityStatus() {
+  setActivityStatusInputs('');
+  await syncActivityStatus('');
 }
 
 function buildPrivacyPayload(state = readSettingsState()) {
@@ -12278,6 +14381,39 @@ function setupSettingsActionButtons() {
     }));
   });
 
+  renderProfileBadgePicker(readSettingsState().profileBadges || []);
+
+  document.getElementById('saveCustomStatusBtn')?.addEventListener('click', saveCustomStatusFromInputs);
+  document.getElementById('saveProfileCustomStatusBtn')?.addEventListener('click', saveCustomStatusFromInputs);
+  document.getElementById('clearCustomStatusBtn')?.addEventListener('click', clearCustomStatus);
+  document.getElementById('saveActivityStatusBtn')?.addEventListener('click', saveActivityStatusFromInput);
+  document.getElementById('clearActivityStatusBtn')?.addEventListener('click', clearActivityStatus);
+  document.querySelectorAll('#customStatusInput, #profileCustomStatusInput').forEach((input) => {
+    input.addEventListener('input', () => {
+      input.value = input.value.slice(0, customStatusMaxLength);
+      setCustomStatusInputs(input.value);
+      applyCurrentProfileStatus(input.value, readSettingsState().presenceStatus || 'online');
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        saveCustomStatusFromInputs();
+      }
+    });
+  });
+  document.querySelectorAll('#activityStatusInput').forEach((input) => {
+    input.addEventListener('input', () => {
+      input.value = input.value.slice(0, activityStatusMaxLength);
+      setActivityStatusInputs(input.value);
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        saveActivityStatusFromInput();
+      }
+    });
+  });
+
   const avatarFileInput = document.getElementById('profileAvatarFileInput');
   const bannerFileInput = document.getElementById('profileBannerFileInput');
   document.getElementById('uploadProfileAvatarBtn')?.addEventListener('click', () => {
@@ -12609,6 +14745,7 @@ function refreshSettingsModal() {
 document.addEventListener('DOMContentLoaded', () => {
   refreshIceServersConfig();
   setupEmojiPicker();
+  setupSlashCommandInputs();
   setupMessageSearch();
   setupSettingsInteractivity();
   loadAccountSettings();
@@ -12767,8 +14904,13 @@ function setupSettingsInteractivity() {
       const profilePicUrl = document.getElementById('profilePictureUrlInput')?.value?.trim() || '';
       const profileBannerUrl = document.getElementById('profileBannerUrlInput')?.value?.trim() || '';
       const profileBannerColor = readSettingsState().profileBannerColor || '#0c0c0c';
-      const description =
+      const bio =
         document.getElementById('profileDescriptionInput')?.value?.trim() || '';
+      const profileBadges = getSelectedProfileBadges();
+      const customStatus =
+        document.getElementById('profileCustomStatusInput')?.value?.trim() ||
+        document.getElementById('customStatusInput')?.value?.trim() ||
+        '';
 
       try {
         saveProfileBtn.textContent = 'Saving...';
@@ -12778,14 +14920,27 @@ function setupSettingsInteractivity() {
           profilePictureUrl: profilePicUrl,
           profileBannerUrl,
           profileBannerColor,
-          description: description,
+          bio,
+          description: bio,
+          badges: profileBadges,
         });
+        await syncCustomStatus(customStatus, { silent: true });
 
-        updateProfileVisuals(profilePicUrl, description, profileBannerUrl, profileBannerColor);
+        updateProfileVisuals(
+          profilePicUrl,
+          bio,
+          profileBannerUrl,
+          profileBannerColor,
+          customStatus,
+          readSettingsState().presenceStatus,
+          profileBadges
+        );
         writeSettingsState((state) => ({
           ...state,
           profileBannerUrl,
           profileBannerColor,
+          customStatus: normalizeCustomStatus(customStatus),
+          profileBadges,
         }));
         saveProfileBtn.textContent = 'Saved!';
         setTimeout(() => {
@@ -13085,19 +15240,42 @@ async function loadUserProfile() {
       const picInput = document.getElementById('profilePictureUrlInput');
       const bannerInput = document.getElementById('profileBannerUrlInput');
       const descInput = document.getElementById('profileDescriptionInput');
+      const customStatus = getProfileCustomStatus(res.data);
+      const profileBadges = getProfileBadges(res.data);
       const nextAvatarUrl = res.data.profilePictureUrl || homeDefaultAvatarUrl;
-      const nextDescription = res.data.description || 'Click to add custom status';
+      const nextDescription = getProfileBio(res.data);
       const nextBannerUrl = res.data.profileBannerUrl || '';
       const nextBannerColor = res.data.profileBannerColor || readSettingsState().profileBannerColor || '#0c0c0c';
+      cacheProfileSummary({
+        ...res.data,
+        username: JWTusername,
+        profilePictureUrl: nextAvatarUrl,
+        customStatus,
+        badges: profileBadges,
+        presenceStatus: getProfilePresenceStatus(res.data),
+      });
       
       if (picInput) picInput.value = res.data.profilePictureUrl || '';
       if (bannerInput) bannerInput.value = nextBannerUrl;
-      if (descInput) descInput.value = res.data.description || '';
-      updateProfileVisuals(nextAvatarUrl, nextDescription, nextBannerUrl, nextBannerColor);
+      if (descInput) descInput.value = nextDescription;
+      setCustomStatusInputs(customStatus);
+      setProfileBadgePickerSelection(profileBadges);
+      updateProfileVisuals(
+        nextAvatarUrl,
+        nextDescription,
+        nextBannerUrl,
+        nextBannerColor,
+        customStatus,
+        getProfilePresenceStatus(res.data),
+        profileBadges
+      );
       writeSettingsState((state) => ({
         ...state,
         profileBannerUrl: nextBannerUrl,
         profileBannerColor: nextBannerColor,
+        customStatus,
+        profileBadges,
+        presenceStatus: getProfilePresenceStatus(res.data),
       }));
     }
   } catch (err) {
