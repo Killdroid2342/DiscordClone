@@ -9,8 +9,8 @@
   <link rel="stylesheet" href="../CSS/Home.css?v=21" />
   <script src="../JS/AppConfig.js?v=1"></script>
   <script src="../JS/AppPaths.js?v=1"></script>
-  <script src="../JS/emojis.js?v=2"></script>
-  <script src="../JS/Home.js?v=132" defer></script>
+  <script src="../JS/emojis.js?v=3"></script>
+  <script src="../JS/Home.js?v=133" defer></script>
 </head>
 
 <body>
@@ -208,6 +208,8 @@
               <div class="emoji-picker-header">
                 <div class="emoji-tabs">
                   <div class="emoji-tab active" data-tab="emoji">Emoji</div>
+                  <div class="emoji-tab" data-tab="custom">Custom</div>
+                  <div class="emoji-tab" data-tab="stickers">Stickers</div>
                   <div class="emoji-tab" data-tab="gif">GIFs</div>
                 </div>
                 <div class="emoji-search-container">
@@ -240,7 +242,7 @@
             </div>
             <div class="chat-input-icons">
               <button type="button" class="chat-icon-btn" onclick="openPollComposer()" title="Create a poll">Poll</button>
-              <button type="button" class="chat-icon-btn" onclick="toggleEmojiPicker()">😊</button>
+              <button type="button" class="chat-icon-btn" data-emoji-picker-toggle onclick="toggleEmojiPicker(event)">😊</button>
             </div>
 
             <button type="submit" class="extracted-inline-2"></button>
@@ -310,9 +312,14 @@
 
         <div class="chatMessages"></div>
         <form action="" class="chatForm" onsubmit="ServerChat(event)">
-          <input type="text" name="userText" class="chatInput" placeholder="Message" />
-          <button type="button" class="formButton poll-form-button" onclick="openPollComposer()">Poll</button>
-          <button class="formButton">Send</button>
+          <div class="chat-input-container">
+            <input type="text" name="userText" class="chatInput" placeholder="Message" autocomplete="off" />
+            <div class="chat-input-icons">
+              <button type="button" class="chat-icon-btn" onclick="openPollComposer()" title="Create a poll">Poll</button>
+              <button type="button" class="chat-icon-btn" data-emoji-picker-toggle onclick="toggleEmojiPicker(event)">😊</button>
+            </div>
+            <button type="submit" class="extracted-inline-2"></button>
+          </div>
         </form>
       </div>
 
