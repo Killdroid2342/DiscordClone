@@ -172,3 +172,18 @@ const gifList = [
     { url: 'https://media.giphy.com/media/mokQK7oyiR8Sk/giphy.gif', keywords: ['dog', 'funny', 'animal'] },
     { url: 'https://media.giphy.com/media/l3V0lsGtTMSB5YNgc/giphy.gif', keywords: ['dance', 'party', 'fun'] }
 ];
+
+function makeStickerDataUrl(label, fill, accent) {
+    const safeLabel = String(label || '').replace(/[<>&"]/g, '');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="180" viewBox="0 0 220 180"><rect width="220" height="180" rx="28" fill="${fill}"/><circle cx="178" cy="42" r="22" fill="${accent}" opacity=".85"/><circle cx="42" cy="136" r="24" fill="${accent}" opacity=".35"/><path d="M31 55c23-33 70-39 104-19s45 62 24 91-73 35-104 13S8 88 31 55Z" fill="rgba(255,255,255,.22)"/><text x="110" y="105" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="900" fill="#fff">${safeLabel}</text></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+const stickerList = [
+    { id: 'hype', name: 'Hype', url: makeStickerDataUrl('HYPE', '#5865f2', '#23a559'), keywords: ['hype', 'party', 'excited'] },
+    { id: 'lol', name: 'LOL', url: makeStickerDataUrl('LOL', '#f23f43', '#fee75c'), keywords: ['lol', 'laugh', 'funny'] },
+    { id: 'gg', name: 'GG', url: makeStickerDataUrl('GG', '#23a559', '#5865f2'), keywords: ['gg', 'game', 'nice'] },
+    { id: 'brb', name: 'BRB', url: makeStickerDataUrl('BRB', '#4e5058', '#f0b232'), keywords: ['brb', 'away', 'wait'] },
+    { id: 'yes', name: 'YES', url: makeStickerDataUrl('YES', '#1d8f5f', '#57f287'), keywords: ['yes', 'agree', 'ok'] },
+    { id: 'nope', name: 'Nope', url: makeStickerDataUrl('NOPE', '#a73df0', '#eb459e'), keywords: ['no', 'nope', 'nah'] }
+];
