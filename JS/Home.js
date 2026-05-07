@@ -18,6 +18,7 @@ const customStatusMaxLength = 128;
 const activityStatusMaxLength = 120;
 const defaultCustomStatusText = 'Click to add custom status';
 const profileBadgeMaxCount = 6;
+const messagePageSize = 50;
 const presenceStatusLabels = {
   online: 'Online',
   idle: 'Idle',
@@ -152,6 +153,12 @@ let currentServerRole = 'user';
 let currentServerRoles = [];
 let currentServerChannels = [];
 let currentServerCategories = [];
+let currentServerMembers = [];
+let currentServerSlashCommands = [];
+let currentServerSlashCommandServerId = null;
+let currentServerIconUrl = '';
+let currentServerBannerUrl = '';
+let selectedServerTemplateId = 'friends';
 let currentServerVerificationLevel = 'none';
 let currentServerRequireVerifiedEmail = false;
 let currentServerMinimumAccountAgeMinutes = 0;
@@ -200,6 +207,11 @@ const renderedMessageCache = {
   server: new Map(),
   dm: new Map(),
   group: new Map(),
+};
+const messagePaginationState = {
+  server: createEmptyMessagePaginationState(),
+  dm: createEmptyMessagePaginationState(),
+  group: createEmptyMessagePaginationState(),
 };
 const stickerMessageContentType = 'application/x-mydiscord-sticker';
 const expressionPackCache = new Map();
@@ -831,12 +843,39 @@ function cleanNotificationBody(text, fallback = 'New activity') {
 
 function getMessageSender(message = {}) {
   return (
+    message.senderDisplayName ||
+    message.SenderDisplayName ||
     message.messagesUserSender ||
     message.MessagesUserSender ||
     message.sender ||
     message.Sender ||
     'Unknown'
   );
+}
+
+function getMessageIsBot(message = {}) {
+  return Boolean(message.isBot ?? message.IsBot);
+}
+
+function getMessageIsWebhook(message = {}) {
+  return Boolean(message.isWebhook ?? message.IsWebhook);
+}
+
+function createMessageSourceBadge(message = {}) {
+  const label = getMessageIsWebhook(message)
+    ? 'Webhook'
+    : getMessageIsBot(message)
+      ? 'Bot'
+      : '';
+  if (!label) {
+    return null;
+  }
+
+  const badge = document.createElement('span');
+  badge.className = 'message-source-badge';
+  badge.dataset.source = label.toLowerCase();
+  badge.textContent = label;
+  return badge;
 }
 
 function getMessageId(message = {}) {
@@ -996,6 +1035,135 @@ function cacheMessageForScope(scope, message = {}) {
 
 function getCachedMessage(scope, messageId) {
   return renderedMessageCache[scope]?.get(String(messageId || '')) || null;
+}
+
+function createEmptyMessagePaginationState() {
+  return {
+    conversationId: '',
+    messages: [],
+    hasMore: false,
+    totalCount: 0,
+    olderPagesLoaded: false,
+    isLoadingOlder: false,
+  };
+}
+
+function getMessageDateValue(message = {}) {
+  return message.date || message.Date || '';
+}
+
+function getMessageSortTime(message = {}) {
+  const parsed = new Date(getMessageDateValue(message));
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function normalizePagedMessageResponse(data) {
+  const messages = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.messages)
+      ? data.messages
+      : Array.isArray(data?.items)
+        ? data.items
+        : [];
+
+  return {
+    messages,
+    hasMore: Boolean(data?.hasMore),
+    nextBeforeMessageId: data?.nextBeforeMessageId || getMessageId(messages[0]) || '',
+    totalCount: Number(data?.totalCount ?? messages.length),
+    returnedCount: Number(data?.returnedCount ?? messages.length),
+  };
+}
+
+function getMessagePaginationState(scope, conversationId) {
+  const state = messagePaginationState[scope] || createEmptyMessagePaginationState();
+  const key = String(conversationId || '');
+  if (state.conversationId !== key) {
+    Object.assign(state, createEmptyMessagePaginationState(), { conversationId: key });
+  }
+  messagePaginationState[scope] = state;
+  return state;
+}
+
+function mergeMessagePages(existingMessages = [], incomingMessages = []) {
+  const byId = new Map();
+  [...existingMessages, ...incomingMessages].forEach((message) => {
+    const id = getMessageId(message);
+    if (id) {
+      byId.set(String(id), message);
+    }
+  });
+
+  return Array.from(byId.values()).sort((left, right) => {
+    const timeDelta = getMessageSortTime(left) - getMessageSortTime(right);
+    if (timeDelta !== 0) return timeDelta;
+    return String(getMessageId(left)).localeCompare(String(getMessageId(right)));
+  });
+}
+
+function applyMessagePage(scope, conversationId, pageInfo, mode = 'latest') {
+  const state = getMessagePaginationState(scope, conversationId);
+  const isOlderPage = mode === 'older';
+  const shouldMerge = isOlderPage || state.olderPagesLoaded;
+
+  state.messages = shouldMerge
+    ? mergeMessagePages(state.messages, pageInfo.messages)
+    : pageInfo.messages;
+  state.totalCount = Math.max(pageInfo.totalCount || 0, state.messages.length);
+
+  if (isOlderPage) {
+    state.olderPagesLoaded = true;
+    state.hasMore = pageInfo.hasMore && state.messages.length < state.totalCount;
+  } else if (!state.olderPagesLoaded) {
+    state.hasMore = pageInfo.hasMore;
+  } else if (state.totalCount > 0 && state.messages.length >= state.totalCount) {
+    state.hasMore = false;
+  }
+
+  return state;
+}
+
+function upsertMessageIntoPaginationState(scope, conversationId, message) {
+  const state = getMessagePaginationState(scope, conversationId);
+  state.messages = mergeMessagePages(state.messages, [message]);
+  state.totalCount = Math.max(state.totalCount || 0, state.messages.length);
+  return state;
+}
+
+function isScrolledNearBottom(container, threshold = 96) {
+  if (!container) return true;
+  return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+}
+
+function createLoadOlderMessagesButton({ disabled = false, onClick }) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-pagination-row';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'load-older-messages';
+  button.disabled = disabled;
+  button.textContent = disabled ? 'Loading older messages...' : 'Load older messages';
+  button.addEventListener('click', onClick);
+
+  wrapper.appendChild(button);
+  return wrapper;
+}
+
+function renderPaginatedMessages(container, scope, state, onLoadOlder) {
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (state.hasMore || state.isLoadingOlder) {
+    container.appendChild(createLoadOlderMessagesButton({
+      disabled: state.isLoadingOlder,
+      onClick: onLoadOlder,
+    }));
+  }
+
+  state.messages.forEach((message) => {
+    container.appendChild(renderCompactMessage(message, scope));
+  });
 }
 
 function buildReplyPreviewFromMessage(message = {}) {
@@ -1504,6 +1672,7 @@ function closeSettingsModal() {
 
 function openSecondModal() {
   closeModal();
+  selectServerTemplate(selectedServerTemplateId || 'friends');
   showElement('.outerSecondModal', 'flex');
 }
 function closeSecondModal() {
@@ -1513,7 +1682,32 @@ function BackToFirstModal() {
   closeSecondModal();
   openModal();
 }
-function OpenCreationModal() {
+function getSelectedServerTemplateLabel() {
+  const selectedTemplateButton = document.querySelector(
+    `.server-template-option[data-template-id="${escapeCssIdentifier(selectedServerTemplateId)}"]`
+  );
+  return selectedTemplateButton?.querySelector('strong')?.textContent?.trim() || 'Friends';
+}
+
+function updateSelectedServerTemplateCopy() {
+  const copy = document.getElementById('selectedServerTemplateName');
+  if (copy) {
+    copy.textContent = `${getSelectedServerTemplateLabel()} template`;
+  }
+}
+
+function selectServerTemplate(templateId = 'friends') {
+  selectedServerTemplateId = templateId || 'friends';
+  document.querySelectorAll('.server-template-option').forEach((button) => {
+    const isSelected = button.dataset.templateId === selectedServerTemplateId;
+    button.classList.toggle('active', isSelected);
+    button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+  });
+  updateSelectedServerTemplateCopy();
+}
+
+function OpenCreationModal(templateId = selectedServerTemplateId) {
+  selectServerTemplate(templateId || 'friends');
   closeSecondModal();
   showElement('.outerCreationModal', 'flex');
 }
@@ -1530,9 +1724,57 @@ function buildServerRoleBadge(role = 'user') {
   const roleBadge = document.createElement('span');
   roleBadge.classList.add('role-badge');
   roleBadge.dataset.role = normalizedRole;
+  applyRoleColorStyle(roleBadge, normalizedRole);
   roleBadge.textContent = normalizedRole.slice(0, 1).toUpperCase();
   roleBadge.title = formatRoleName(normalizedRole);
   return roleBadge;
+}
+
+function createServerIconElement(serverName = '', iconUrl = '', className = 'server-icon') {
+  const icon = document.createElement('span');
+  icon.className = className;
+  if (iconUrl) {
+    const image = document.createElement('img');
+    image.src = iconUrl;
+    image.alt = '';
+    image.loading = 'lazy';
+    icon.appendChild(image);
+  } else {
+    icon.textContent = getServerInitials(serverName);
+  }
+  return icon;
+}
+
+function renderCurrentServerHeader(role = currentServerRole) {
+  const serverTitle = document.querySelector('.currentServerName');
+  if (!serverTitle) return;
+
+  serverTitle.innerHTML = '';
+  const banner = document.createElement('span');
+  banner.className = 'current-server-banner';
+  if (currentServerBannerUrl) {
+    banner.style.backgroundImage = `linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(43, 45, 49, 0.7)), url("${cssString(currentServerBannerUrl)}")`;
+  }
+
+  const body = document.createElement('span');
+  body.className = 'current-server-header-body';
+  const icon = createServerIconElement(currentServerName, currentServerIconUrl, 'current-server-icon');
+  const copy = document.createElement('span');
+  copy.className = 'current-server-copy';
+  const name = document.createElement('span');
+  name.className = 'current-server-title-text';
+  name.textContent = currentServerName || 'Server';
+  const roleText = document.createElement('span');
+  roleText.className = 'current-server-role-text';
+  roleText.textContent = formatRoleName(role);
+
+  copy.appendChild(name);
+  copy.appendChild(roleText);
+  body.appendChild(icon);
+  body.appendChild(copy);
+  serverTitle.appendChild(banner);
+  serverTitle.appendChild(body);
+  serverTitle.title = `${currentServerName || 'Server'} (${formatRoleName(role)})`;
 }
 
 async function openServer(server, fallbackRole = 'user') {
@@ -1543,18 +1785,17 @@ async function openServer(server, fallbackRole = 'user') {
   currentServerName = server.serverName;
   currentServerRole = role;
   currentServerRoles = [];
+  currentServerMembers = [];
   applyServerRuleState(server);
   applyServerListingState(server);
+  applyServerAppearanceState(server);
   applyServerWelcomeState(server);
 
   hideElement('.secondColumn');
   hideElement('.lastSection');
   showElement('#serverDetails', 'flex');
 
-  const serverTitle = document.querySelector('.currentServerName');
-  if (serverTitle) {
-    serverTitle.textContent = `${server.serverName} (${role})`;
-  }
+  renderCurrentServerHeader(role);
 
   chatMessages.innerHTML = '';
 
@@ -1591,11 +1832,9 @@ function createServerListItem(server, fallbackRole = 'user') {
   newServerElement.title = `${server.serverName} (${server.role || fallbackRole || 'user'})`;
   newServerElement.setAttribute('aria-label', newServerElement.title);
 
-  const serverNameSpan = document.createElement('span');
-  serverNameSpan.classList.add('server-name');
-  serverNameSpan.textContent = String(server.serverName || '?').trim().slice(0, 1).toUpperCase();
-
-  newServerElement.appendChild(serverNameSpan);
+  newServerElement.appendChild(
+    createServerIconElement(server.serverName, getServerVisualUrl(server, 'icon'), 'server-name server-list-icon')
+  );
   newServerElement.appendChild(
     buildServerRoleBadge(server.role || fallbackRole || 'user')
   );
@@ -1639,6 +1878,7 @@ async function CreateServer(event) {
     ServerID: ServerID,
     ServerName: ServerName,
     ServerOwner: ServerOwner,
+    TemplateId: selectedServerTemplateId || 'friends',
   };
   try {
     const response = await axios.post(
@@ -2646,7 +2886,16 @@ function renderCompactMessage(message, scope = 'server') {
   header.className = 'compact-message-header';
   const sender = getMessageSender(message);
   const headerText = document.createElement('span');
-  headerText.textContent = `${sender} · ${formatMessageDate(message.date || message.Date)}`;
+  if (scope === 'server') {
+    applyRoleColorStyle(headerText, getServerMemberRole(sender));
+  }
+  headerText.textContent = sender;
+  const sourceBadge = createMessageSourceBadge(message);
+  if (sourceBadge) {
+    headerText.appendChild(document.createTextNode(' '));
+    headerText.appendChild(sourceBadge);
+  }
+  headerText.appendChild(document.createTextNode(` · ${formatMessageDate(message.date || message.Date)}`));
   header.appendChild(headerText);
   const headerActions = document.createElement('span');
   headerActions.className = 'compact-message-actions';
@@ -3478,9 +3727,9 @@ const slashCommands = [
     name: 'help',
     usage: '/help',
     description: 'Show available slash commands.',
-    handler: () => {
+    handler: ({ scope }) => {
       showAppMessage(
-        slashCommands
+        getAvailableSlashCommands(scope)
           .map((command) => `${command.usage} - ${command.description}`)
           .join('\n'),
         'info',
@@ -3579,6 +3828,84 @@ const slashCommands = [
 let slashCommandActiveIndex = 0;
 let slashCommandActiveInput = null;
 
+function normalizeRemoteSlashCommand(command = {}) {
+  const rawName = getIntegrationField(command, 'name', '');
+  const name = String(rawName || '').trim().replace(/^\/+/, '').toLowerCase();
+  if (!name) return null;
+
+  const usage = getIntegrationField(command, 'usage', `/${name}`) || `/${name}`;
+  const description = getIntegrationField(command, 'description', 'Server slash command.');
+  return {
+    id: getIntegrationField(command, 'id', ''),
+    name,
+    usage: String(usage || `/${name}`).startsWith('/') ? String(usage || `/${name}`) : `/${usage}`,
+    description,
+    remote: true,
+    botAccountId: getIntegrationField(command, 'botAccountId', ''),
+    botDisplayName: getIntegrationField(command, 'botDisplayName', 'Bot'),
+    isEnabled: getIntegrationField(command, 'isEnabled', true),
+    botEnabled: getIntegrationField(command, 'botEnabled', true),
+  };
+}
+
+function getAvailableSlashCommands(scope = '') {
+  if (scope !== 'server') {
+    return slashCommands;
+  }
+
+  const remoteCommands = currentServerSlashCommands
+    .filter((command) => command?.isEnabled !== false && command?.botEnabled !== false);
+  return [...slashCommands, ...remoteCommands];
+}
+
+function getSlashCommandScopeForInput(input) {
+  if (input?.closest('.chatForm') && selectedServerID && selectedChannelID && isElementVisible('#serverDetails')) {
+    return 'server';
+  }
+
+  if (input?.closest('.chatForm') && currentGroupId) {
+    return 'group';
+  }
+
+  return 'dm';
+}
+
+async function loadServerSlashCommands(serverId = selectedServerID, { force = false, silent = true } = {}) {
+  const normalizedServerId = String(serverId || '').trim();
+  if (!normalizedServerId) {
+    currentServerSlashCommands = [];
+    currentServerSlashCommandServerId = null;
+    return [];
+  }
+
+  if (!force && currentServerSlashCommandServerId === normalizedServerId) {
+    return currentServerSlashCommands;
+  }
+
+  try {
+    const response = await axios.get(
+      `${homeApiBase}/api/ServerIntegrations/GetSlashCommands?serverId=${encodeURIComponent(normalizedServerId)}`
+    );
+    const commands = (Array.isArray(response.data) ? response.data : [])
+      .map(normalizeRemoteSlashCommand)
+      .filter(Boolean);
+    if (selectedServerID === normalizedServerId) {
+      currentServerSlashCommands = commands;
+      currentServerSlashCommandServerId = normalizedServerId;
+    }
+    return commands;
+  } catch (error) {
+    if (!silent) {
+      showAppMessage(getApiErrorMessage(error, 'Could not load server slash commands.'), 'error');
+    }
+    if (selectedServerID === normalizedServerId) {
+      currentServerSlashCommands = [];
+      currentServerSlashCommandServerId = normalizedServerId;
+    }
+    return [];
+  }
+}
+
 function setPresenceFromSlashCommand(presenceStatus) {
   const normalizedPresence = normalizePresenceStatus(presenceStatus);
   const presenceSelect = document.getElementById('presenceStatusSelect');
@@ -3590,7 +3917,7 @@ function setPresenceFromSlashCommand(presenceStatus) {
   return { handled: true, clearInput: true };
 }
 
-function parseSlashCommand(text = '') {
+function parseSlashCommand(text = '', scope = '') {
   const trimmed = String(text || '').trim();
   if (!trimmed.startsWith('/')) {
     return null;
@@ -3603,7 +3930,7 @@ function parseSlashCommand(text = '') {
     return null;
   }
 
-  const command = slashCommands.find((item) => item.name === name);
+  const command = getAvailableSlashCommands(scope).find((item) => item.name === name);
   if (!command) {
     return {
       unknown: true,
@@ -3619,7 +3946,7 @@ function parseSlashCommand(text = '') {
 }
 
 async function handleSlashCommandBeforeSend(scope, input, rawText) {
-  const parsed = parseSlashCommand(rawText);
+  const parsed = parseSlashCommand(rawText, scope);
   if (!parsed) {
     return { handled: false, content: rawText };
   }
@@ -3630,6 +3957,29 @@ async function handleSlashCommandBeforeSend(scope, input, rawText) {
   }
 
   const { command, args } = parsed;
+  if (command.remote) {
+    if (scope !== 'server' || !selectedServerID || !selectedChannelID) {
+      showAppMessage('Server slash commands can only run in text channels.', 'error');
+      return { handled: true };
+    }
+
+    try {
+      const response = await axios.post(`${homeApiBase}/api/ServerIntegrations/ExecuteSlashCommand`, {
+        commandId: command.id,
+        serverId: selectedServerID,
+        channelId: selectedChannelID,
+        name: command.name,
+        arguments: args,
+      });
+      showAppMessage(response.data?.message || `Command /${command.name} sent.`, 'success');
+      if (input) input.value = '';
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, `Could not run /${command.name}.`), 'error');
+    }
+    closeSlashCommandPalette();
+    return { handled: true };
+  }
+
   if (command.handler) {
     let result = null;
     try {
@@ -3667,7 +4017,8 @@ function getSlashCommandMatches(input) {
   if (!match) return [];
 
   const query = match[1].toLowerCase();
-  return slashCommands.filter((command) => command.name.startsWith(query));
+  return getAvailableSlashCommands(getSlashCommandScopeForInput(input))
+    .filter((command) => command.name.startsWith(query));
 }
 
 function ensureSlashCommandPalette() {
@@ -4004,24 +4355,63 @@ function markActiveConversationRead() {
   refreshAllUnreadBadges();
 }
 
-async function fetchServerMessages() {
+async function fetchServerMessages({ appendOlder = false } = {}) {
+  if (!selectedChannelID || !chatMessages) return;
+  const state = getMessagePaginationState('server', selectedChannelID);
+  if (appendOlder && (state.isLoadingOlder || !state.messages.length)) return;
+
+  const previousScrollHeight = chatMessages.scrollHeight;
+  const previousScrollTop = chatMessages.scrollTop;
+  const shouldStickBottom = !appendOlder && isScrolledNearBottom(chatMessages);
+  const beforeMessageId = appendOlder ? getMessageId(state.messages[0]) : '';
+
   try {
+    if (appendOlder) {
+      state.isLoadingOlder = true;
+      renderPaginatedMessages(chatMessages, 'server', state, () => fetchServerMessages({ appendOlder: true }));
+    }
+
+    const params = new URLSearchParams({
+      channelId: selectedChannelID,
+      take: String(messagePageSize),
+      includePageInfo: 'true',
+    });
+    if (beforeMessageId) {
+      params.set('beforeMessageId', beforeMessageId);
+    }
+
     const messageRes = await axios.get(
-      `${homeApiBase}/api/ServerMessages/GetServerMessages?channelId=${encodeURIComponent(selectedChannelID)}`
+      `${homeApiBase}/api/ServerMessages/GetServerMessages?${params.toString()}`
     );
-    const messages = Array.isArray(messageRes.data) ? messageRes.data : [];
-    notifyPolledMessages(messages, {
-      scope: 'server',
-      conversationId: selectedChannelID,
-      conversationName: getSelectedChannelNotificationName(),
-    });
-    cacheMessagesForScope('server', messages);
-    chatMessages.innerHTML = '';
-    messages.forEach((message) => {
-      chatMessages.appendChild(renderCompactMessage(message, 'server'));
-    });
-    await markSelectedChannelRead(messages);
+    const pageInfo = normalizePagedMessageResponse(messageRes.data);
+    if (!appendOlder) {
+      notifyPolledMessages(pageInfo.messages, {
+        scope: 'server',
+        conversationId: selectedChannelID,
+        conversationName: getSelectedChannelNotificationName(),
+      });
+    }
+
+    const nextState = applyMessagePage(
+      'server',
+      selectedChannelID,
+      pageInfo,
+      appendOlder ? 'older' : 'latest'
+    );
+    nextState.isLoadingOlder = false;
+    cacheMessagesForScope('server', nextState.messages);
+    renderPaginatedMessages(chatMessages, 'server', nextState, () => fetchServerMessages({ appendOlder: true }));
+
+    if (appendOlder) {
+      chatMessages.scrollTop = chatMessages.scrollHeight - previousScrollHeight + previousScrollTop;
+    } else if (shouldStickBottom) {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    await markSelectedChannelRead(nextState.messages);
   } catch (e) {
+    state.isLoadingOlder = false;
+    renderPaginatedMessages(chatMessages, 'server', state, () => fetchServerMessages({ appendOlder: true }));
     console.error('couldnt fetch channel messages:', e);
   }
 }
@@ -4578,6 +4968,7 @@ function handleDirectSocketMessage(event) {
   }
 
   const messagesDisplay = document.querySelector('.messagesDisplay');
+  upsertMessageIntoPaginationState('dm', currentFriend, message);
   const messageElement = renderCompactMessage(message, 'dm');
   messagesDisplay.appendChild(messageElement);
   messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
@@ -4609,6 +5000,7 @@ async function handleGroupSocketMessage(event) {
       conversationId: groupId,
       conversationName: currentGroupName,
     });
+    upsertMessageIntoPaginationState('group', groupId, message);
     const messageElement = renderCompactMessage(message, 'group');
     messagesDisplay.appendChild(messageElement);
     messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
@@ -4809,25 +5201,59 @@ async function markDmRead(targetUsername, lastReadMessageId = null) {
   );
 }
 
-async function GetPrivateMessage() {
+async function GetPrivateMessage({ appendOlder = false } = {}) {
+  if (!currentFriend) return;
+  const messagesDisplay = document.querySelector('.messagesDisplay');
+  const state = getMessagePaginationState('dm', currentFriend);
+  if (!messagesDisplay || (appendOlder && (state.isLoadingOlder || !state.messages.length))) return;
+
+  const previousScrollHeight = messagesDisplay.scrollHeight;
+  const previousScrollTop = messagesDisplay.scrollTop;
+  const shouldStickBottom = !appendOlder && isScrolledNearBottom(messagesDisplay);
+  const beforeMessageId = appendOlder ? getMessageId(state.messages[0]) : '';
+
   try {
-    const res = await axios.get(
-      `${homeApiBase}/api/PrivateMessageFriend/GetPrivateMessage?targetUsername=${encodeURIComponent(currentFriend)}`
-    );
-    const messagesDisplay = document.querySelector('.messagesDisplay');
-    messagesDisplay.innerHTML = '';
-    currentChatHistory = res.data;
-    cacheMessagesForScope('dm', res.data);
-    res.data.forEach((message) => {
-      messagesDisplay.appendChild(renderCompactMessage(message, 'dm'));
+    if (appendOlder) {
+      state.isLoadingOlder = true;
+      renderPaginatedMessages(messagesDisplay, 'dm', state, () => GetPrivateMessage({ appendOlder: true }));
+    }
+
+    const params = new URLSearchParams({
+      targetUsername: currentFriend,
+      take: String(messagePageSize),
+      includePageInfo: 'true',
     });
-    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    if (beforeMessageId) {
+      params.set('beforeMessageId', beforeMessageId);
+    }
+
+    const res = await axios.get(
+      `${homeApiBase}/api/PrivateMessageFriend/GetPrivateMessage?${params.toString()}`
+    );
+    const pageInfo = normalizePagedMessageResponse(res.data);
+    const nextState = applyMessagePage(
+      'dm',
+      currentFriend,
+      pageInfo,
+      appendOlder ? 'older' : 'latest'
+    );
+    nextState.isLoadingOlder = false;
+    currentChatHistory = nextState.messages;
+    cacheMessagesForScope('dm', nextState.messages);
+    renderPaginatedMessages(messagesDisplay, 'dm', nextState, () => GetPrivateMessage({ appendOlder: true }));
+
+    if (appendOlder) {
+      messagesDisplay.scrollTop = messagesDisplay.scrollHeight - previousScrollHeight + previousScrollTop;
+    } else if (shouldStickBottom || !nextState.olderPagesLoaded) {
+      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    }
+
     if (
-      res.data.length > 0 &&
+      nextState.messages.length > 0 &&
       isAppWindowFocused() &&
       isCurrentNotificationContextVisible('dm', currentFriend)
     ) {
-      const lastMessage = res.data[res.data.length - 1];
+      const lastMessage = nextState.messages[nextState.messages.length - 1];
       await markDmRead(currentFriend, lastMessage.privateMessageID || lastMessage.PrivateMessageID);
     } else {
       await refreshDmUnreadBadges();
@@ -4848,6 +5274,8 @@ async function GetPrivateMessage() {
       showElement('.nav', 'flex');
     });
   } catch (e) {
+    state.isLoadingOlder = false;
+    renderPaginatedMessages(messagesDisplay, 'dm', state, () => GetPrivateMessage({ appendOlder: true }));
     console.error('ugh something went wrong with private msgs:', e);
     showAppMessage(getApiErrorMessage(e, 'Could not load this conversation.'), 'error');
   }
@@ -5062,17 +5490,23 @@ function renderPublicServerListings(servers = []) {
 
   servers.forEach((server) => {
     const serverId = getServerListingId(server);
+    const serverName = getServerField(server, 'serverName') || 'Unnamed server';
+    const serverIconUrl = getServerVisualUrl(server, 'icon');
+    const serverBannerUrl = getServerVisualUrl(server, 'banner');
     const row = document.createElement('div');
     row.className = 'publicServerListing';
+    if (serverBannerUrl) {
+      row.style.backgroundImage = `linear-gradient(90deg, rgba(35, 36, 40, 0.92), rgba(35, 36, 40, 0.78)), url("${cssString(serverBannerUrl)}")`;
+    }
 
     const icon = document.createElement('div');
     icon.className = 'publicServerIcon';
-    icon.textContent = String(getServerField(server, 'serverName') || '?').trim().slice(0, 1).toUpperCase();
+    icon.appendChild(createServerIconElement(serverName, serverIconUrl, 'public-server-icon-inner'));
 
     const details = document.createElement('div');
     details.className = 'publicServerDetails';
     const name = document.createElement('strong');
-    name.textContent = getServerField(server, 'serverName') || 'Unnamed server';
+    name.textContent = serverName;
     const meta = document.createElement('span');
     meta.textContent = formatPublicServerMeta(server);
     const description = document.createElement('p');
@@ -6399,33 +6833,68 @@ async function markGroupRead(groupId, lastReadMessageId = null) {
   );
 }
 
-async function GetGroupMessages(groupId) {
+async function GetGroupMessages(groupId, { appendOlder = false } = {}) {
+  if (!groupId) return;
+  const messagesDisplay = document.querySelector('.messagesDisplay');
+  const state = getMessagePaginationState('group', groupId);
+  if (!messagesDisplay || (appendOlder && (state.isLoadingOlder || !state.messages.length))) return;
+
+  const previousScrollHeight = messagesDisplay.scrollHeight;
+  const previousScrollTop = messagesDisplay.scrollTop;
+  const shouldStickBottom = !appendOlder && isScrolledNearBottom(messagesDisplay);
+  const beforeMessageId = appendOlder ? getMessageId(state.messages[0]) : '';
+
   try {
-    const res = await axios.get(`${homeApiBase}/api/GroupChat/GetGroupMessages?groupId=${encodeURIComponent(groupId)}`);
-    const messagesDisplay = document.querySelector('.messagesDisplay');
-    messagesDisplay.innerHTML = '';
-    currentChatHistory = res.data.map(m => ({
+    if (appendOlder) {
+      state.isLoadingOlder = true;
+      renderPaginatedMessages(messagesDisplay, 'group', state, () => GetGroupMessages(groupId, { appendOlder: true }));
+    }
+
+    const params = new URLSearchParams({
+      groupId,
+      take: String(messagePageSize),
+      includePageInfo: 'true',
+    });
+    if (beforeMessageId) {
+      params.set('beforeMessageId', beforeMessageId);
+    }
+
+    const res = await axios.get(`${homeApiBase}/api/GroupChat/GetGroupMessages?${params.toString()}`);
+    const pageInfo = normalizePagedMessageResponse(res.data);
+    const nextState = applyMessagePage(
+      'group',
+      groupId,
+      pageInfo,
+      appendOlder ? 'older' : 'latest'
+    );
+    nextState.isLoadingOlder = false;
+    currentChatHistory = nextState.messages.map(m => ({
       messagesUserSender: getMessageSender(m),
       friendMessagesData: getMessageText(m),
       date: m.date || m.Date,
     }));
-    cacheMessagesForScope('group', res.data);
+    cacheMessagesForScope('group', nextState.messages);
 
-    res.data.forEach((message) => {
-      messagesDisplay.appendChild(renderCompactMessage(message, 'group'));
-    });
-    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    renderPaginatedMessages(messagesDisplay, 'group', nextState, () => GetGroupMessages(groupId, { appendOlder: true }));
+    if (appendOlder) {
+      messagesDisplay.scrollTop = messagesDisplay.scrollHeight - previousScrollHeight + previousScrollTop;
+    } else if (shouldStickBottom || !nextState.olderPagesLoaded) {
+      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    }
+
     if (
-      res.data.length > 0 &&
+      nextState.messages.length > 0 &&
       isAppWindowFocused() &&
       isCurrentNotificationContextVisible('group', groupId)
     ) {
-      const lastMessage = res.data[res.data.length - 1];
+      const lastMessage = nextState.messages[nextState.messages.length - 1];
       await markGroupRead(groupId, lastMessage.id || lastMessage.Id);
     } else {
       await refreshGroupUnreadBadges();
     }
   } catch (e) {
+    state.isLoadingOlder = false;
+    renderPaginatedMessages(messagesDisplay, 'group', state, () => GetGroupMessages(groupId, { appendOlder: true }));
     console.error('Failed to load group messages', e);
     showAppMessage(getApiErrorMessage(e, 'Failed to load group messages.'), 'error');
   }
@@ -8395,9 +8864,31 @@ const DEFAULT_ROLE_SORT_ORDER = {
   moderator: 2,
   user: 100,
 };
+const DEFAULT_ROLE_COLORS = {
+  owner: '#f0b232',
+  admin: '#ed4245',
+  moderator: '#23a559',
+  user: '#5865f2',
+  default: '#949ba4',
+};
 
 function getServerVerificationLabel(level) {
   return SERVER_VERIFICATION_LEVELS.find((item) => item.value === level)?.label || 'None';
+}
+
+function getServerVisualUrl(server = {}, kind = 'icon') {
+  const camelKey = kind === 'banner' ? 'serverBannerUrl' : 'serverIconUrl';
+  const pascalKey = kind === 'banner' ? 'ServerBannerUrl' : 'ServerIconUrl';
+  return server?.[camelKey] || server?.[pascalKey] || '';
+}
+
+function getServerInitials(serverName = '') {
+  const words = String(serverName || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  }
+
+  return String(serverName || '?').trim().slice(0, 2).toUpperCase() || '?';
 }
 
 function normalizeServerRuleMinutes(value) {
@@ -8428,6 +8919,11 @@ function applyServerListingState(server = {}) {
   currentServerDescription = server.description || '';
   currentServerDiscoveryCategory = server.discoveryCategory || '';
   currentServerDiscoveryTags = normalizeDiscoveryTags(server.discoveryTags || []);
+}
+
+function applyServerAppearanceState(server = {}) {
+  currentServerIconUrl = getServerVisualUrl(server, 'icon');
+  currentServerBannerUrl = getServerVisualUrl(server, 'banner');
 }
 
 function normalizeServerWelcomeChecklist(value) {
@@ -8487,6 +8983,12 @@ function formatServerWelcomeSummary() {
   return `${status} | ${checklistCount} onboarding ${checklistCount === 1 ? 'step' : 'steps'}`;
 }
 
+function formatServerAppearanceSummary() {
+  const icon = currentServerIconUrl ? 'Icon set' : 'No icon';
+  const banner = currentServerBannerUrl ? 'Banner set' : 'No banner';
+  return `${icon} | ${banner}`;
+}
+
 function normalizeRoleName(value) {
   return String(value || 'user').trim().toLowerCase().replace(/\s+/g, '-');
 }
@@ -8521,10 +9023,41 @@ function getServerRolePosition(role = {}) {
   return Number.isFinite(position) ? position : 0;
 }
 
+function getDefaultRoleColor(roleName = 'user') {
+  return DEFAULT_ROLE_COLORS[normalizeRoleName(roleName)] || DEFAULT_ROLE_COLORS.default;
+}
+
+function getServerRoleColor(role = {}) {
+  const roleName = getServerRoleName(role);
+  return normalizeHexColor(getRoleProperty(role, 'color', ''), getDefaultRoleColor(roleName));
+}
+
+function getRoleColorByName(roleName = 'user') {
+  const normalizedRole = normalizeRoleName(roleName);
+  const role = currentServerRoles.find((item) => getServerRoleName(item) === normalizedRole);
+  return role ? getServerRoleColor(role) : getDefaultRoleColor(normalizedRole);
+}
+
+function getServerMemberRole(username = '') {
+  const member = currentServerMembers.find((item) =>
+    String(item.username || item.Username || '').toLowerCase() === String(username || '').toLowerCase()
+  );
+  return normalizeRoleName(member?.role || member?.Role || 'user');
+}
+
+function applyRoleColorStyle(element, roleName = 'user', color = '') {
+  if (!element) return;
+  const roleColor = normalizeHexColor(color, getRoleColorByName(roleName));
+  const softBackground = mixColors(roleColor, '#000000', 0.78);
+  element.style.setProperty('--role-color', roleColor);
+  element.style.setProperty('--role-color-soft', softBackground);
+}
+
 function normalizeServerRole(role = {}) {
   const normalizedRole = {
     id: getServerRoleId(role),
     name: getServerRoleName(role),
+    color: getServerRoleColor(role),
     position: getServerRolePosition(role),
   };
 
@@ -8681,6 +9214,11 @@ function renderServerManagementControls(container) {
   welcomeSummary.textContent = formatServerWelcomeSummary();
   container.appendChild(welcomeSummary);
 
+  const appearanceSummary = document.createElement('div');
+  appearanceSummary.className = 'server-verification-summary';
+  appearanceSummary.textContent = formatServerAppearanceSummary();
+  container.appendChild(appearanceSummary);
+
   const tools = document.createElement('div');
   tools.className = 'server-management-tools';
 
@@ -8688,8 +9226,11 @@ function renderServerManagementControls(container) {
     ['+ Channel', createChannelFromPrompt],
     ['+ Category', createCategoryFromPrompt],
     ['Roles', openRolesAndPermissionsDialog],
+    ['Appearance', openServerAppearanceDialog],
     ['Expressions', () => openExpressionManagerDialog('emoji')],
-    ['Voice Perms', () => openVoiceChannelPermissionsDialog()],
+    ['Integrations', openServerIntegrationsDialog],
+    ['Media', openMediaBrowserDialog],
+    ['Perms', () => openChannelPermissionsDialog()],
     ['Invite', createLimitedInviteFromPrompt],
     ['Listing', updatePublicListingFromPrompt],
     ['Welcome', updateServerWelcomeFromPrompt],
@@ -8709,6 +9250,184 @@ function renderServerManagementControls(container) {
   });
 
   container.appendChild(tools);
+}
+
+function openServerAppearanceDialog() {
+  if (!selectedServerID) return;
+
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog server-appearance-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Server Appearance';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = currentServerName || 'Server visuals';
+
+  const preview = document.createElement('div');
+  preview.className = 'server-appearance-preview';
+  const previewBanner = document.createElement('div');
+  previewBanner.className = 'server-appearance-preview-banner';
+  const previewIcon = document.createElement('div');
+  previewIcon.className = 'server-appearance-preview-icon';
+  const previewName = document.createElement('strong');
+  previewName.textContent = currentServerName || 'Server';
+  preview.appendChild(previewBanner);
+  preview.appendChild(previewIcon);
+  preview.appendChild(previewName);
+
+  const form = document.createElement('form');
+  form.className = 'account-action-form';
+
+  const iconLabel = document.createElement('label');
+  iconLabel.textContent = 'Icon URL';
+  const iconInput = document.createElement('input');
+  iconInput.name = 'serverIconUrl';
+  iconInput.value = currentServerIconUrl || '';
+  iconInput.placeholder = 'https://example.com/icon.png';
+  iconInput.required = false;
+  iconLabel.appendChild(iconInput);
+
+  const bannerLabel = document.createElement('label');
+  bannerLabel.textContent = 'Banner URL';
+  const bannerInput = document.createElement('input');
+  bannerInput.name = 'serverBannerUrl';
+  bannerInput.value = currentServerBannerUrl || '';
+  bannerInput.placeholder = 'https://example.com/banner.png';
+  bannerInput.required = false;
+  bannerLabel.appendChild(bannerInput);
+
+  const uploadRow = document.createElement('div');
+  uploadRow.className = 'server-appearance-upload-row';
+  const iconUploadButton = document.createElement('button');
+  iconUploadButton.type = 'button';
+  iconUploadButton.className = 'account-action-cancel';
+  iconUploadButton.textContent = 'Upload Icon';
+  const bannerUploadButton = document.createElement('button');
+  bannerUploadButton.type = 'button';
+  bannerUploadButton.className = 'account-action-cancel';
+  bannerUploadButton.textContent = 'Upload Banner';
+  uploadRow.appendChild(iconUploadButton);
+  uploadRow.appendChild(bannerUploadButton);
+
+  const iconFileInput = document.createElement('input');
+  iconFileInput.type = 'file';
+  iconFileInput.accept = 'image/*';
+  iconFileInput.className = 'is-hidden';
+  const bannerFileInput = document.createElement('input');
+  bannerFileInput.type = 'file';
+  bannerFileInput.accept = 'image/*';
+  bannerFileInput.className = 'is-hidden';
+
+  const error = document.createElement('div');
+  error.className = 'account-action-error';
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.className = 'account-action-cancel';
+  cancelButton.textContent = 'Cancel';
+  const saveButton = document.createElement('button');
+  saveButton.type = 'submit';
+  saveButton.className = 'account-action-submit';
+  saveButton.textContent = 'Save Appearance';
+  actions.appendChild(cancelButton);
+  actions.appendChild(saveButton);
+
+  const updatePreview = () => {
+    const iconUrl = iconInput.value.trim();
+    const bannerUrl = bannerInput.value.trim();
+    previewBanner.style.backgroundImage = bannerUrl
+      ? `linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(35, 36, 40, 0.62)), url("${cssString(bannerUrl)}")`
+      : '';
+    previewIcon.innerHTML = '';
+    previewIcon.appendChild(createServerIconElement(currentServerName, iconUrl, 'server-appearance-preview-icon-inner'));
+  };
+
+  const close = () => overlay.remove();
+  cancelButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  iconInput.addEventListener('input', updatePreview);
+  bannerInput.addEventListener('input', updatePreview);
+  iconUploadButton.addEventListener('click', () => iconFileInput.click());
+  bannerUploadButton.addEventListener('click', () => bannerFileInput.click());
+
+  const handleUpload = async (fileInput, targetInput, button, busyLabel) => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    try {
+      setBusyState(button, true, busyLabel);
+      const url = await uploadImageFile(file);
+      targetInput.value = url;
+      updatePreview();
+      showAppMessage('Image uploaded.', 'success');
+    } catch (uploadError) {
+      error.textContent = getApiErrorMessage(uploadError, 'Could not upload image.');
+    } finally {
+      fileInput.value = '';
+      setBusyState(button, false);
+    }
+  };
+
+  iconFileInput.addEventListener('change', () => handleUpload(iconFileInput, iconInput, iconUploadButton, 'Uploading...'));
+  bannerFileInput.addEventListener('change', () => handleUpload(bannerFileInput, bannerInput, bannerUploadButton, 'Uploading...'));
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.textContent = '';
+    const serverIconUrl = iconInput.value.trim();
+    const serverBannerUrl = bannerInput.value.trim();
+
+    try {
+      setBusyState(saveButton, true, 'Saving...');
+      const res = await axios.post(`${homeApiBase}/api/Server/UpdateServerAppearance`, {
+        serverId: selectedServerID,
+        serverIconUrl,
+        serverBannerUrl,
+      });
+      const server = res.data || { serverIconUrl, serverBannerUrl };
+      applyServerAppearanceState(server);
+      renderCurrentServerHeader(currentServerRole);
+      upsertServerListItem({
+        ...(server || {}),
+        serverID: getServerListingId(server) || selectedServerID,
+        serverName: getServerField(server, 'serverName') || currentServerName,
+        role: getServerField(server, 'role') || currentServerRole,
+      });
+      await fetchServerDetails();
+      showAppMessage('Server appearance updated.', 'success');
+      close();
+    } catch (saveError) {
+      error.textContent = getApiErrorMessage(saveError, 'Could not save server appearance.');
+    } finally {
+      setBusyState(saveButton, false);
+    }
+  });
+
+  form.appendChild(iconLabel);
+  form.appendChild(bannerLabel);
+  form.appendChild(uploadRow);
+  form.appendChild(iconFileInput);
+  form.appendChild(bannerFileInput);
+  form.appendChild(error);
+  form.appendChild(actions);
+
+  dialog.appendChild(heading);
+  dialog.appendChild(copy);
+  dialog.appendChild(preview);
+  dialog.appendChild(form);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  updatePreview();
+  iconInput.focus();
 }
 
 async function updatePublicListingFromPrompt() {
@@ -8960,10 +9679,13 @@ function openServerWelcomeScreen({ preview = false } = {}) {
 
   const header = document.createElement('div');
   header.className = 'server-welcome-header';
+  if (currentServerBannerUrl) {
+    header.style.backgroundImage = `linear-gradient(90deg, rgba(35, 36, 40, 0.88), rgba(35, 36, 40, 0.68)), url("${cssString(currentServerBannerUrl)}")`;
+  }
 
   const icon = document.createElement('div');
   icon.className = 'server-welcome-icon';
-  icon.textContent = String(currentServerName || '?').trim().slice(0, 1).toUpperCase();
+  icon.appendChild(createServerIconElement(currentServerName, currentServerIconUrl, 'server-welcome-icon-inner'));
 
   const headingWrap = document.createElement('div');
   const eyebrow = document.createElement('div');
@@ -9251,10 +9973,10 @@ async function createChannelFromPrompt() {
   }
 }
 
-async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
-  const voiceChannels = currentServerChannels.filter((channel) => isVoiceLikeChannelType(channel.type));
-  if (!selectedServerID || voiceChannels.length === 0) {
-    showAppMessage('Create a voice or stage channel first.', 'error');
+async function openChannelPermissionsDialog(initialChannelId = null) {
+  const channels = currentServerChannels.filter((channel) => channel.id);
+  if (!selectedServerID || channels.length === 0) {
+    showAppMessage('Create a channel first.', 'error');
     return;
   }
 
@@ -9263,15 +9985,15 @@ async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
   const overlay = document.createElement('div');
   overlay.className = 'account-action-overlay';
   const dialog = document.createElement('div');
-  dialog.className = 'account-action-dialog voice-permissions-dialog';
+  dialog.className = 'account-action-dialog voice-permissions-dialog channel-permissions-dialog';
 
   const heading = document.createElement('h3');
-  heading.textContent = 'Voice Channel Permissions';
+  heading.textContent = 'Channel Permissions';
   dialog.appendChild(heading);
 
   const copy = document.createElement('p');
   copy.className = 'account-action-copy';
-  copy.textContent = 'Choose which roles can connect to voice and stage channels.';
+  copy.textContent = 'Choose which roles can view, send, connect, or speak in a channel.';
   dialog.appendChild(copy);
 
   const form = document.createElement('form');
@@ -9281,16 +10003,16 @@ async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
   channelLabel.textContent = 'Channel';
   const channelSelect = document.createElement('select');
   channelSelect.className = 'account-action-select';
-  voiceChannels.forEach((channel) => {
+  channels.forEach((channel) => {
     const option = document.createElement('option');
     option.value = channel.id;
     option.textContent = `${getChannelTypeIcon(channel.type)} ${channel.name}`;
     channelSelect.appendChild(option);
   });
   channelSelect.value =
-    voiceChannels.some((channel) => channel.id === initialChannelId)
+    channels.some((channel) => channel.id === initialChannelId)
       ? initialChannelId
-      : voiceChannels[0].id;
+      : channels[0].id;
   channelLabel.appendChild(channelSelect);
   form.appendChild(channelLabel);
 
@@ -9300,7 +10022,7 @@ async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
   form.appendChild(loading);
 
   const rowsContainer = document.createElement('div');
-  rowsContainer.className = 'voice-permission-rows';
+  rowsContainer.className = 'voice-permission-rows channel-permission-rows';
   form.appendChild(rowsContainer);
 
   const actions = document.createElement('div');
@@ -9332,92 +10054,121 @@ async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
 
     try {
       const res = await axios.get(
-        `${homeApiBase}/api/Server/GetChannelVoicePermissions?channelId=${encodeURIComponent(channelSelect.value)}`
+        `${homeApiBase}/api/Server/GetChannelPermissions?channelId=${encodeURIComponent(channelSelect.value)}`
       );
       activePermissions = res.data;
       loading.textContent = '';
 
-      const isStage = activePermissions.type === 'stage';
-      const connectRestricted = document.createElement('label');
-      connectRestricted.className = 'voice-permission-toggle';
-      const connectToggle = document.createElement('input');
-      connectToggle.type = 'checkbox';
-      connectToggle.name = 'voiceAccessRestricted';
-      connectToggle.checked = Boolean(activePermissions.voiceAccessRestricted);
-      connectRestricted.appendChild(connectToggle);
-      connectRestricted.appendChild(document.createTextNode(' Restrict who can connect'));
-      rowsContainer.appendChild(connectRestricted);
+      const channelType = activePermissions.type || 'text';
+      const isText = channelType === 'text';
+      const isVoiceLike = isVoiceLikeChannelType(channelType);
+      const isStage = channelType === 'stage';
+      const restrictionToggles = [];
 
-      let speakToggle = null;
-      if (isStage) {
-        const speakRestricted = document.createElement('label');
-        speakRestricted.className = 'voice-permission-toggle';
-        speakToggle = document.createElement('input');
-        speakToggle.type = 'checkbox';
-        speakToggle.name = 'stageSpeakerRestricted';
-        speakToggle.checked = Boolean(activePermissions.stageSpeakerRestricted);
-        speakRestricted.appendChild(speakToggle);
-        speakRestricted.appendChild(document.createTextNode(' Restrict who can speak on stage'));
-        rowsContainer.appendChild(speakRestricted);
-      }
+      const addRestrictionToggle = (name, checked, labelText) => {
+        const label = document.createElement('label');
+        label.className = 'voice-permission-toggle channel-permission-toggle';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = name;
+        input.checked = Boolean(checked);
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(` ${labelText}`));
+        rowsContainer.appendChild(label);
+        restrictionToggles.push(input);
+        return input;
+      };
 
+      const viewToggle = addRestrictionToggle(
+        'viewAccessRestricted',
+        activePermissions.viewAccessRestricted,
+        'Restrict who can view this channel'
+      );
+      const sendToggle = isText
+        ? addRestrictionToggle(
+            'messageSendRestricted',
+            activePermissions.messageSendRestricted,
+            'Restrict who can send messages'
+          )
+        : null;
+      const connectToggle = isVoiceLike
+        ? addRestrictionToggle(
+            'voiceAccessRestricted',
+            activePermissions.voiceAccessRestricted,
+            'Restrict who can connect'
+          )
+        : null;
+      const speakToggle = isStage
+        ? addRestrictionToggle(
+            'stageSpeakerRestricted',
+            activePermissions.stageSpeakerRestricted,
+            'Restrict who can speak on stage'
+          )
+        : null;
+
+      const viewRoles = new Set(parseRoleNameList(activePermissions.viewAllowedRoleNames));
+      const sendRoles = new Set(parseRoleNameList(activePermissions.messageSendAllowedRoleNames));
       const allowedRoles = new Set(parseRoleNameList(activePermissions.voiceAllowedRoleNames));
       const speakerRoles = new Set(parseRoleNameList(activePermissions.stageSpeakerRoleNames));
       const roleRows = document.createElement('div');
-      roleRows.className = 'voice-permission-role-list';
+      roleRows.className = 'voice-permission-role-list channel-permission-role-list';
+
+      const appendPermissionInput = (row, permission, labelText, checked, disabled) => {
+        const permissionLabel = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.dataset.permission = permission;
+        input.checked = checked;
+        input.disabled = disabled;
+        permissionLabel.appendChild(input);
+        permissionLabel.appendChild(document.createTextNode(` ${labelText}`));
+        row.appendChild(permissionLabel);
+      };
 
       (activePermissions.roles || []).forEach((role) => {
         const roleName = normalizeRoleName(role.name);
         const row = document.createElement('div');
-        row.className = 'voice-permission-row';
+        row.className = 'voice-permission-row channel-permission-row';
         row.dataset.role = roleName;
 
         const name = document.createElement('span');
         name.className = 'voice-permission-role-name';
         name.textContent = roleName;
+        applyRoleColorStyle(name, roleName, role.color);
         row.appendChild(name);
 
-        const connectLabel = document.createElement('label');
-        const connectInput = document.createElement('input');
-        connectInput.type = 'checkbox';
-        connectInput.dataset.permission = 'connect';
-        connectInput.checked = !connectToggle.checked || allowedRoles.has(roleName);
-        connectInput.disabled = !connectToggle.checked;
-        connectLabel.appendChild(connectInput);
-        connectLabel.appendChild(document.createTextNode(' Connect'));
-        row.appendChild(connectLabel);
-
-        if (isStage) {
-          const speakLabel = document.createElement('label');
-          const speakInput = document.createElement('input');
-          speakInput.type = 'checkbox';
-          speakInput.dataset.permission = 'speak';
-          speakInput.checked = !speakToggle.checked || speakerRoles.has(roleName);
-          speakInput.disabled = !speakToggle.checked;
-          speakLabel.appendChild(speakInput);
-          speakLabel.appendChild(document.createTextNode(' Speak'));
-          row.appendChild(speakLabel);
+        appendPermissionInput(row, 'view', 'View', !viewToggle.checked || viewRoles.has(roleName), !viewToggle.checked);
+        if (sendToggle) {
+          appendPermissionInput(row, 'send', 'Send', !sendToggle.checked || sendRoles.has(roleName), !sendToggle.checked);
+        }
+        if (connectToggle) {
+          appendPermissionInput(row, 'connect', 'Connect', !connectToggle.checked || allowedRoles.has(roleName), !connectToggle.checked);
+        }
+        if (speakToggle) {
+          appendPermissionInput(row, 'speak', 'Speak', !speakToggle.checked || speakerRoles.has(roleName), !speakToggle.checked);
         }
 
         roleRows.appendChild(row);
       });
 
-      connectToggle.addEventListener('change', () => {
-        roleRows.querySelectorAll('input[data-permission="connect"]').forEach((input) => {
-          input.disabled = !connectToggle.checked;
-          if (!connectToggle.checked) input.checked = true;
+      const syncPermissionInputs = (toggle, permission) => {
+        roleRows.querySelectorAll(`input[data-permission="${permission}"]`).forEach((input) => {
+          input.disabled = !toggle.checked;
+          if (!toggle.checked) input.checked = true;
         });
-      });
+      };
 
-      if (speakToggle) {
-        speakToggle.addEventListener('change', () => {
-          roleRows.querySelectorAll('input[data-permission="speak"]').forEach((input) => {
-            input.disabled = !speakToggle.checked;
-            if (!speakToggle.checked) input.checked = true;
-          });
-        });
+      viewToggle.addEventListener('change', () => syncPermissionInputs(viewToggle, 'view'));
+      if (sendToggle) sendToggle.addEventListener('change', () => syncPermissionInputs(sendToggle, 'send'));
+      if (connectToggle) connectToggle.addEventListener('change', () => syncPermissionInputs(connectToggle, 'connect'));
+      if (speakToggle) speakToggle.addEventListener('change', () => syncPermissionInputs(speakToggle, 'speak'));
+
+      if (restrictionToggles.length > 0) {
+        const note = document.createElement('p');
+        note.className = 'channel-permission-scope-note';
+        note.textContent = 'Roles with server or channel management can still reach restricted channels.';
+        rowsContainer.appendChild(note);
       }
-
       rowsContainer.appendChild(roleRows);
     } catch (error) {
       loading.textContent = getApiErrorMessage(error, 'Could not load channel permissions.');
@@ -9430,39 +10181,56 @@ async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
     event.preventDefault();
     if (!activePermissions) return;
 
-    const voiceAccessRestricted = Boolean(form.elements.voiceAccessRestricted?.checked);
-    const stageSpeakerRestricted = Boolean(form.elements.stageSpeakerRestricted?.checked);
-    const roleRows = [...rowsContainer.querySelectorAll('.voice-permission-row')];
-    const voiceAllowedRoleNames = roleRows
-      .filter((row) => row.querySelector('input[data-permission="connect"]')?.checked)
-      .map((row) => row.dataset.role);
-    const stageSpeakerRoleNames = roleRows
-      .filter((row) => row.querySelector('input[data-permission="speak"]')?.checked)
+    const channelType = activePermissions.type || 'text';
+    const viewAccessRestricted = Boolean(form.elements.viewAccessRestricted?.checked);
+    const messageSendRestricted = channelType === 'text' && Boolean(form.elements.messageSendRestricted?.checked);
+    const voiceAccessRestricted = isVoiceLikeChannelType(channelType) && Boolean(form.elements.voiceAccessRestricted?.checked);
+    const stageSpeakerRestricted = channelType === 'stage' && Boolean(form.elements.stageSpeakerRestricted?.checked);
+    const roleRows = [...rowsContainer.querySelectorAll('.channel-permission-row')];
+    const selectedRolesFor = (permission) => roleRows
+      .filter((row) => row.querySelector(`input[data-permission="${permission}"]`)?.checked)
       .map((row) => row.dataset.role);
 
+    const viewAllowedRoleNames = selectedRolesFor('view');
+    const messageSendAllowedRoleNames = selectedRolesFor('send');
+    const voiceAllowedRoleNames = selectedRolesFor('connect');
+    const stageSpeakerRoleNames = selectedRolesFor('speak');
+
+    if (viewAccessRestricted && viewAllowedRoleNames.length === 0) {
+      showAppMessage('Allow at least one role to view this channel.', 'error');
+      return;
+    }
+    if (messageSendRestricted && messageSendAllowedRoleNames.length === 0) {
+      showAppMessage('Allow at least one role to send messages.', 'error');
+      return;
+    }
     if (voiceAccessRestricted && voiceAllowedRoleNames.length === 0) {
       showAppMessage('Allow at least one role to connect.', 'error');
       return;
     }
-    if (activePermissions.type === 'stage' && stageSpeakerRestricted && stageSpeakerRoleNames.length === 0) {
+    if (stageSpeakerRestricted && stageSpeakerRoleNames.length === 0) {
       showAppMessage('Allow at least one role to speak on stage.', 'error');
       return;
     }
 
     try {
       setBusyState(saveButton, true, 'Saving...');
-      await axios.post(`${homeApiBase}/api/Server/UpdateChannelVoicePermissions`, {
+      await axios.post(`${homeApiBase}/api/Server/UpdateChannelPermissions`, {
         channelId: channelSelect.value,
+        viewAccessRestricted,
+        viewAllowedRoleNames,
+        messageSendRestricted,
+        messageSendAllowedRoleNames,
         voiceAccessRestricted,
         voiceAllowedRoleNames,
-        stageSpeakerRestricted: activePermissions.type === 'stage' && stageSpeakerRestricted,
+        stageSpeakerRestricted,
         stageSpeakerRoleNames,
       });
       await fetchServerDetails();
       close();
-      showAppMessage('Voice permissions updated.', 'success');
+      showAppMessage('Channel permissions updated.', 'success');
     } catch (error) {
-      showAppMessage(getApiErrorMessage(error, 'Could not save voice permissions.'), 'error');
+      showAppMessage(getApiErrorMessage(error, 'Could not save channel permissions.'), 'error');
     } finally {
       setBusyState(saveButton, false);
     }
@@ -9472,6 +10240,10 @@ async function openVoiceChannelPermissionsDialog(initialChannelId = null) {
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
   renderPermissions();
+}
+
+function openVoiceChannelPermissionsDialog(initialChannelId = null) {
+  return openChannelPermissionsDialog(initialChannelId);
 }
 
 async function createCategoryFromPrompt() {
@@ -9518,11 +10290,711 @@ async function createLimitedInviteFromPrompt() {
   }
 }
 
-function createRoleChip(roleName, extraClass = '') {
+function getIntegrationField(item = {}, key, fallback = '') {
+  const pascalKey = key.charAt(0).toUpperCase() + key.slice(1);
+  return item[key] ?? item[pascalKey] ?? fallback;
+}
+
+function getTextChannelOptions() {
+  return currentServerChannels
+    .filter((channel) => channel.type === 'text')
+    .map((channel) => ({
+      value: channel.id,
+      label: `# ${channel.name}`,
+    }));
+}
+
+function getIntegrationRoleOptions(roles = currentServerRoles) {
+  const sourceRoles = roles.length
+    ? roles
+    : [{ name: 'user' }, { name: 'moderator' }, { name: 'admin' }];
+  return sourceRoles
+    .map((role) => getServerRoleName(role))
+    .filter((roleName) => roleName !== 'owner')
+    .filter((roleName, index, all) => all.indexOf(roleName) === index)
+    .map((roleName) => ({
+      value: roleName,
+      label: formatRoleName(roleName),
+    }));
+}
+
+async function copyIntegrationValue(value, successMessage = 'Copied.') {
+  if (!value || !navigator.clipboard) {
+    showAppMessage('Clipboard is not available.', 'error');
+    return;
+  }
+
+  await navigator.clipboard.writeText(value);
+  showAppMessage(successMessage, 'success');
+}
+
+function openIntegrationSecretDialog({ title, description = '', values = [] }) {
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog integration-secret-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  dialog.appendChild(heading);
+
+  if (description) {
+    const copy = document.createElement('p');
+    copy.className = 'account-action-copy';
+    copy.textContent = description;
+    dialog.appendChild(copy);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'integration-secret-list';
+  values.forEach(({ label, value }) => {
+    if (!value) return;
+    const row = document.createElement('div');
+    row.className = 'integration-secret-row';
+    const rowLabel = document.createElement('span');
+    rowLabel.textContent = label;
+    const input = document.createElement('input');
+    input.className = 'integration-code-input';
+    input.value = value;
+    input.readOnly = true;
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.className = 'server-tool-btn';
+    copyButton.textContent = 'Copy';
+    copyButton.addEventListener('click', () => copyIntegrationValue(value));
+    row.appendChild(rowLabel);
+    row.appendChild(input);
+    row.appendChild(copyButton);
+    list.appendChild(row);
+  });
+  dialog.appendChild(list);
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const doneButton = document.createElement('button');
+  doneButton.type = 'button';
+  doneButton.className = 'account-action-submit';
+  doneButton.textContent = 'Done';
+  actions.appendChild(doneButton);
+  dialog.appendChild(actions);
+
+  const close = () => overlay.remove();
+  doneButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  dialog.querySelector('input')?.select();
+}
+
+function openServerIntegrationsDialog() {
+  if (!selectedServerID) {
+    return;
+  }
+
+  closeAccountActionDialog();
+
+  let bots = [];
+  let webhooks = [];
+  let registeredCommands = [];
+  let roles = [];
+  let isLoading = false;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog integrations-dialog';
+
+  const header = document.createElement('div');
+  header.className = 'integration-manager-header';
+  const titleBlock = document.createElement('div');
+  const heading = document.createElement('h3');
+  heading.textContent = 'Integrations';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = currentServerName || 'Server integrations';
+  titleBlock.appendChild(heading);
+  titleBlock.appendChild(copy);
+
+  const headerActions = document.createElement('div');
+  headerActions.className = 'integration-header-actions';
+  const addBotButton = document.createElement('button');
+  addBotButton.type = 'button';
+  addBotButton.className = 'account-action-submit';
+  addBotButton.textContent = '+ Bot';
+  const addWebhookButton = document.createElement('button');
+  addWebhookButton.type = 'button';
+  addWebhookButton.className = 'account-action-submit';
+  addWebhookButton.textContent = '+ Webhook';
+  const addCommandButton = document.createElement('button');
+  addCommandButton.type = 'button';
+  addCommandButton.className = 'account-action-submit';
+  addCommandButton.textContent = '+ Command';
+  headerActions.appendChild(addBotButton);
+  headerActions.appendChild(addWebhookButton);
+  headerActions.appendChild(addCommandButton);
+  header.appendChild(titleBlock);
+  header.appendChild(headerActions);
+
+  const status = document.createElement('div');
+  status.className = 'role-manager-status';
+  status.setAttribute('role', 'status');
+
+  const grid = document.createElement('div');
+  grid.className = 'integration-grid';
+  const botsPanel = document.createElement('section');
+  botsPanel.className = 'integration-panel';
+  const webhooksPanel = document.createElement('section');
+  webhooksPanel.className = 'integration-panel';
+  const commandsPanel = document.createElement('section');
+  commandsPanel.className = 'integration-panel';
+  grid.appendChild(botsPanel);
+  grid.appendChild(webhooksPanel);
+  grid.appendChild(commandsPanel);
+
+  const footer = document.createElement('div');
+  footer.className = 'account-action-buttons';
+  const doneButton = document.createElement('button');
+  doneButton.type = 'button';
+  doneButton.className = 'account-action-cancel';
+  doneButton.textContent = 'Done';
+  const refreshButton = document.createElement('button');
+  refreshButton.type = 'button';
+  refreshButton.className = 'account-action-submit';
+  refreshButton.textContent = 'Refresh';
+  footer.appendChild(doneButton);
+  footer.appendChild(refreshButton);
+
+  const close = () => overlay.remove();
+  doneButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  const setStatus = (message, variant = '') => {
+    status.textContent = message;
+    status.dataset.variant = variant;
+  };
+
+  const renderIntegrationRow = (kind, item) => {
+    const row = document.createElement('div');
+    row.className = 'integration-row';
+    row.dataset.kind = kind;
+    row.classList.toggle('is-disabled', !getIntegrationField(item, 'isEnabled', true));
+
+    const marker = document.createElement('div');
+    marker.className = 'integration-marker';
+    marker.textContent = kind === 'bot' ? 'B' : kind === 'webhook' ? 'W' : '/';
+
+    const copyBlock = document.createElement('div');
+    copyBlock.className = 'integration-row-copy';
+    const name = document.createElement('strong');
+    name.textContent = kind === 'bot'
+      ? getIntegrationField(item, 'displayName', getIntegrationField(item, 'username', 'Bot'))
+      : kind === 'webhook'
+        ? getIntegrationField(item, 'name', 'Webhook')
+        : getIntegrationField(item, 'usage', `/${getIntegrationField(item, 'name', 'command')}`);
+    const meta = document.createElement('span');
+    if (kind === 'bot') {
+      meta.textContent = `${formatRoleName(getIntegrationField(item, 'role', 'user'))} role`;
+    } else if (kind === 'webhook') {
+      meta.textContent = getIntegrationField(item, 'channelName', 'Text channel');
+    } else {
+      meta.textContent = `${getIntegrationField(item, 'botDisplayName', 'Bot')} | ${getIntegrationField(item, 'description', 'Slash command')}`;
+    }
+    copyBlock.appendChild(name);
+    copyBlock.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'integration-row-actions';
+    const actionDefinitions = kind === 'command'
+      ? [
+        ['Edit', () => editSlashCommand(item)],
+        [
+          getIntegrationField(item, 'isEnabled', true) ? 'Disable' : 'Enable',
+          () => toggleSlashCommand(item),
+        ],
+        ['Delete', () => deleteSlashCommand(item)],
+      ]
+      : [
+        ['Edit', () => kind === 'bot' ? editBot(item) : editWebhook(item)],
+        ['Rotate', () => kind === 'bot' ? rotateBotToken(item) : rotateWebhookToken(item)],
+        [
+          getIntegrationField(item, 'isEnabled', true) ? 'Disable' : 'Enable',
+          () => kind === 'bot' ? toggleBot(item) : toggleWebhook(item),
+        ],
+        ['Delete', () => kind === 'bot' ? deleteBot(item) : deleteWebhook(item)],
+      ];
+
+    actionDefinitions.forEach(([label, handler]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'server-tool-btn';
+      button.textContent = label;
+      button.addEventListener('click', handler);
+      actions.appendChild(button);
+    });
+
+    row.appendChild(marker);
+    row.appendChild(copyBlock);
+    row.appendChild(actions);
+    return row;
+  };
+
+  const renderPanel = (panel, title, items, kind) => {
+    panel.innerHTML = '';
+    const panelHeader = document.createElement('div');
+    panelHeader.className = 'integration-panel-header';
+    const panelTitle = document.createElement('h4');
+    panelTitle.textContent = title;
+    const panelCount = document.createElement('span');
+    panelCount.textContent = String(items.length);
+    panelHeader.appendChild(panelTitle);
+    panelHeader.appendChild(panelCount);
+    panel.appendChild(panelHeader);
+
+    const list = document.createElement('div');
+    list.className = 'integration-list';
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state-card padded';
+      empty.textContent = kind === 'bot'
+        ? 'No bot accounts yet.'
+        : kind === 'webhook'
+          ? 'No webhooks yet.'
+          : 'No slash commands yet.';
+      list.appendChild(empty);
+    } else {
+      items.forEach((item) => list.appendChild(renderIntegrationRow(kind, item)));
+    }
+    panel.appendChild(list);
+  };
+
+  const render = () => {
+    renderPanel(botsPanel, 'Bot Accounts', bots, 'bot');
+    renderPanel(webhooksPanel, 'Webhooks', webhooks, 'webhook');
+    renderPanel(commandsPanel, 'Slash Commands', registeredCommands, 'command');
+  };
+
+  const confirmIntegrationAction = async (title, description, { danger = false, confirmText = 'Confirm' } = {}) => {
+    const result = await openSimpleFormDialog({
+      title,
+      description,
+      fields: [],
+      danger,
+      confirmText,
+      preserveExisting: true,
+    });
+    return result !== null;
+  };
+
+  const load = async () => {
+    if (isLoading) return;
+    isLoading = true;
+    setStatus('Loading integrations...');
+    try {
+      const [botRes, webhookRes, commandRes, loadedRoles] = await Promise.all([
+        axios.get(`${homeApiBase}/api/ServerIntegrations/GetBotAccounts?serverId=${encodeURIComponent(selectedServerID)}`),
+        axios.get(`${homeApiBase}/api/ServerIntegrations/GetWebhooks?serverId=${encodeURIComponent(selectedServerID)}`),
+        axios.get(`${homeApiBase}/api/ServerIntegrations/GetSlashCommands?serverId=${encodeURIComponent(selectedServerID)}`),
+        fetchServerRoles({ force: true, silent: true }).catch(() => []),
+      ]);
+      bots = Array.isArray(botRes.data) ? botRes.data : [];
+      webhooks = Array.isArray(webhookRes.data) ? webhookRes.data : [];
+      registeredCommands = Array.isArray(commandRes.data) ? commandRes.data : [];
+      roles = loadedRoles;
+      currentServerSlashCommands = registeredCommands.map(normalizeRemoteSlashCommand).filter(Boolean);
+      currentServerSlashCommandServerId = selectedServerID;
+      setStatus(`${bots.length} bots | ${webhooks.length} webhooks | ${registeredCommands.length} commands`);
+      render();
+    } catch (error) {
+      setStatus(getApiErrorMessage(error, 'Could not load integrations.'), 'error');
+    } finally {
+      isLoading = false;
+    }
+  };
+
+  const showBotSecret = (bot) => {
+    openIntegrationSecretDialog({
+      title: 'Bot Token',
+      description: 'Store this token now. It is only shown after creation or rotation.',
+      values: [
+        { label: 'Token', value: getIntegrationField(bot, 'botToken', '') },
+        { label: 'Authorization', value: getIntegrationField(bot, 'authorizationHeader', '') },
+      ],
+    });
+  };
+
+  const showWebhookSecret = (webhook) => {
+    openIntegrationSecretDialog({
+      title: 'Webhook URL',
+      description: 'Store this URL now. It is only shown after creation or rotation.',
+      values: [
+        { label: 'URL', value: getIntegrationField(webhook, 'url', '') },
+        { label: 'Token', value: getIntegrationField(webhook, 'webhookToken', '') },
+      ],
+    });
+  };
+
+  const getBotOptions = () => bots.map((bot) => ({
+    value: getIntegrationField(bot, 'id', ''),
+    label: getIntegrationField(bot, 'displayName', getIntegrationField(bot, 'username', 'Bot')),
+  })).filter((option) => option.value);
+
+  const getSlashCommandPayload = (values, command = null) => ({
+    commandId: command ? getIntegrationField(command, 'id', '') : null,
+    serverId: selectedServerID,
+    botAccountId: values.botAccountId,
+    name: values.name,
+    description: values.description,
+    usage: values.usage || null,
+    isEnabled: values.isEnabled === undefined ? true : values.isEnabled === 'true',
+  });
+
+  const createBot = async () => {
+    const values = await openSimpleFormDialog({
+      title: 'Create Bot Account',
+      fields: [
+        { name: 'name', label: 'Bot name', maxLength: 80 },
+        { name: 'role', label: 'Role', value: 'user', options: getIntegrationRoleOptions(roles) },
+        { name: 'avatarUrl', label: 'Avatar URL', required: false },
+        { name: 'description', label: 'Description', type: 'textarea', rows: 3, maxLength: 240, required: false },
+      ],
+      confirmText: 'Create Bot',
+      preserveExisting: true,
+    });
+    if (!values) return;
+
+    try {
+      const res = await axios.post(`${homeApiBase}/api/ServerIntegrations/CreateBotAccount`, {
+        serverId: selectedServerID,
+        name: values.name,
+        role: values.role || 'user',
+        avatarUrl: values.avatarUrl || null,
+        description: values.description || null,
+      });
+      showBotSecret(res.data || {});
+      await load();
+      await fetchServerMembers();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not create bot account.'), 'error');
+    }
+  };
+
+  const editBot = async (bot) => {
+    const values = await openSimpleFormDialog({
+      title: 'Edit Bot Account',
+      fields: [
+        { name: 'name', label: 'Bot name', value: getIntegrationField(bot, 'displayName', ''), maxLength: 80 },
+        { name: 'role', label: 'Role', value: getIntegrationField(bot, 'role', 'user'), options: getIntegrationRoleOptions(roles) },
+        { name: 'avatarUrl', label: 'Avatar URL', value: getIntegrationField(bot, 'avatarUrl', ''), required: false },
+        { name: 'description', label: 'Description', type: 'textarea', rows: 3, maxLength: 240, value: getIntegrationField(bot, 'description', ''), required: false },
+        {
+          name: 'isEnabled',
+          label: 'Status',
+          value: getIntegrationField(bot, 'isEnabled', true) ? 'true' : 'false',
+          options: [
+            { value: 'true', label: 'Enabled' },
+            { value: 'false', label: 'Disabled' },
+          ],
+        },
+      ],
+      confirmText: 'Save Bot',
+      preserveExisting: true,
+    });
+    if (!values) return;
+
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/UpdateBotAccount`, {
+        botId: getIntegrationField(bot, 'id', ''),
+        serverId: selectedServerID,
+        name: values.name,
+        role: values.role || 'user',
+        avatarUrl: values.avatarUrl || null,
+        description: values.description || null,
+        isEnabled: values.isEnabled === 'true',
+      });
+      await load();
+      await fetchServerMembers();
+      showAppMessage('Bot account saved.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not save bot account.'), 'error');
+    }
+  };
+
+  const rotateBotToken = async (bot) => {
+    if (!await confirmIntegrationAction('Rotate Bot Token', 'Existing bot clients will stop working until they use the new token.', { danger: true, confirmText: 'Rotate' })) return;
+    try {
+      const res = await axios.post(`${homeApiBase}/api/ServerIntegrations/RotateBotToken`, {
+        botId: getIntegrationField(bot, 'id', ''),
+      });
+      showBotSecret(res.data || {});
+      await load();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not rotate bot token.'), 'error');
+    }
+  };
+
+  const toggleBot = async (bot) => {
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/UpdateBotAccount`, {
+        botId: getIntegrationField(bot, 'id', ''),
+        serverId: selectedServerID,
+        name: getIntegrationField(bot, 'displayName', ''),
+        role: getIntegrationField(bot, 'role', 'user'),
+        avatarUrl: getIntegrationField(bot, 'avatarUrl', '') || null,
+        description: getIntegrationField(bot, 'description', '') || null,
+        isEnabled: !getIntegrationField(bot, 'isEnabled', true),
+      });
+      await load();
+      await fetchServerMembers();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not update bot account.'), 'error');
+    }
+  };
+
+  const deleteBot = async (bot) => {
+    if (!await confirmIntegrationAction('Delete Bot Account', `Delete ${getIntegrationField(bot, 'displayName', 'this bot')}?`, { danger: true, confirmText: 'Delete' })) return;
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/DeleteBotAccount`, {
+        botId: getIntegrationField(bot, 'id', ''),
+      });
+      await load();
+      await fetchServerMembers();
+      showAppMessage('Bot account deleted.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not delete bot account.'), 'error');
+    }
+  };
+
+  const createSlashCommand = async () => {
+    const botOptions = getBotOptions();
+    if (!botOptions.length) {
+      showAppMessage('Create a bot account before adding slash commands.', 'error');
+      return;
+    }
+
+    const values = await openSimpleFormDialog({
+      title: 'Create Slash Command',
+      fields: [
+        { name: 'botAccountId', label: 'Bot', value: botOptions[0].value, options: botOptions },
+        { name: 'name', label: 'Command name', maxLength: 32, autocapitalize: 'none', spellcheck: false },
+        { name: 'description', label: 'Description', maxLength: 120 },
+        { name: 'usage', label: 'Usage', maxLength: 120, required: false },
+      ],
+      confirmText: 'Create Command',
+      preserveExisting: true,
+    });
+    if (!values) return;
+
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/CreateSlashCommand`, getSlashCommandPayload(values));
+      await load();
+      showAppMessage('Slash command created.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not create slash command.'), 'error');
+    }
+  };
+
+  const editSlashCommand = async (command) => {
+    const botOptions = getBotOptions();
+    const values = await openSimpleFormDialog({
+      title: 'Edit Slash Command',
+      fields: [
+        { name: 'botAccountId', label: 'Bot', value: getIntegrationField(command, 'botAccountId', botOptions[0]?.value || ''), options: botOptions },
+        { name: 'name', label: 'Command name', value: getIntegrationField(command, 'name', ''), maxLength: 32, autocapitalize: 'none', spellcheck: false },
+        { name: 'description', label: 'Description', value: getIntegrationField(command, 'description', ''), maxLength: 120 },
+        { name: 'usage', label: 'Usage', value: getIntegrationField(command, 'usage', ''), maxLength: 120, required: false },
+        {
+          name: 'isEnabled',
+          label: 'Status',
+          value: getIntegrationField(command, 'isEnabled', true) ? 'true' : 'false',
+          options: [
+            { value: 'true', label: 'Enabled' },
+            { value: 'false', label: 'Disabled' },
+          ],
+        },
+      ],
+      confirmText: 'Save Command',
+      preserveExisting: true,
+    });
+    if (!values) return;
+
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/UpdateSlashCommand`, getSlashCommandPayload(values, command));
+      await load();
+      showAppMessage('Slash command saved.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not save slash command.'), 'error');
+    }
+  };
+
+  const toggleSlashCommand = async (command) => {
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/UpdateSlashCommand`, {
+        commandId: getIntegrationField(command, 'id', ''),
+        serverId: selectedServerID,
+        botAccountId: getIntegrationField(command, 'botAccountId', ''),
+        name: getIntegrationField(command, 'name', ''),
+        description: getIntegrationField(command, 'description', ''),
+        usage: getIntegrationField(command, 'usage', ''),
+        isEnabled: !getIntegrationField(command, 'isEnabled', true),
+      });
+      await load();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not update slash command.'), 'error');
+    }
+  };
+
+  const deleteSlashCommand = async (command) => {
+    if (!await confirmIntegrationAction('Delete Slash Command', `Delete /${getIntegrationField(command, 'name', 'command')}?`, { danger: true, confirmText: 'Delete' })) return;
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/DeleteSlashCommand`, {
+        commandId: getIntegrationField(command, 'id', ''),
+      });
+      await load();
+      showAppMessage('Slash command deleted.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not delete slash command.'), 'error');
+    }
+  };
+
+  const createWebhook = async () => {
+    const channelOptions = getTextChannelOptions();
+    if (!channelOptions.length) {
+      showAppMessage('Create a text channel before adding a webhook.', 'error');
+      return;
+    }
+
+    const values = await openSimpleFormDialog({
+      title: 'Create Webhook',
+      fields: [
+        { name: 'name', label: 'Webhook name', maxLength: 80 },
+        { name: 'channelId', label: 'Channel', value: selectedChannelID || channelOptions[0].value, options: channelOptions },
+        { name: 'avatarUrl', label: 'Avatar URL', required: false },
+      ],
+      confirmText: 'Create Webhook',
+      preserveExisting: true,
+    });
+    if (!values) return;
+
+    try {
+      const res = await axios.post(`${homeApiBase}/api/ServerIntegrations/CreateWebhook`, {
+        serverId: selectedServerID,
+        channelId: values.channelId,
+        name: values.name,
+        avatarUrl: values.avatarUrl || null,
+      });
+      showWebhookSecret(res.data || {});
+      await load();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not create webhook.'), 'error');
+    }
+  };
+
+  const editWebhook = async (webhook) => {
+    const channelOptions = getTextChannelOptions();
+    const values = await openSimpleFormDialog({
+      title: 'Edit Webhook',
+      fields: [
+        { name: 'name', label: 'Webhook name', value: getIntegrationField(webhook, 'name', ''), maxLength: 80 },
+        { name: 'channelId', label: 'Channel', value: getIntegrationField(webhook, 'channelId', selectedChannelID), options: channelOptions },
+        { name: 'avatarUrl', label: 'Avatar URL', value: getIntegrationField(webhook, 'avatarUrl', ''), required: false },
+        {
+          name: 'isEnabled',
+          label: 'Status',
+          value: getIntegrationField(webhook, 'isEnabled', true) ? 'true' : 'false',
+          options: [
+            { value: 'true', label: 'Enabled' },
+            { value: 'false', label: 'Disabled' },
+          ],
+        },
+      ],
+      confirmText: 'Save Webhook',
+      preserveExisting: true,
+    });
+    if (!values) return;
+
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/UpdateWebhook`, {
+        webhookId: getIntegrationField(webhook, 'id', ''),
+        serverId: selectedServerID,
+        channelId: values.channelId,
+        name: values.name,
+        avatarUrl: values.avatarUrl || null,
+        isEnabled: values.isEnabled === 'true',
+      });
+      await load();
+      showAppMessage('Webhook saved.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not save webhook.'), 'error');
+    }
+  };
+
+  const rotateWebhookToken = async (webhook) => {
+    if (!await confirmIntegrationAction('Rotate Webhook URL', 'Existing callers will stop working until they use the new URL.', { danger: true, confirmText: 'Rotate' })) return;
+    try {
+      const res = await axios.post(`${homeApiBase}/api/ServerIntegrations/RotateWebhookToken`, {
+        webhookId: getIntegrationField(webhook, 'id', ''),
+      });
+      showWebhookSecret(res.data || {});
+      await load();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not rotate webhook URL.'), 'error');
+    }
+  };
+
+  const toggleWebhook = async (webhook) => {
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/UpdateWebhook`, {
+        webhookId: getIntegrationField(webhook, 'id', ''),
+        serverId: selectedServerID,
+        channelId: getIntegrationField(webhook, 'channelId', ''),
+        name: getIntegrationField(webhook, 'name', ''),
+        avatarUrl: getIntegrationField(webhook, 'avatarUrl', '') || null,
+        isEnabled: !getIntegrationField(webhook, 'isEnabled', true),
+      });
+      await load();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not update webhook.'), 'error');
+    }
+  };
+
+  const deleteWebhook = async (webhook) => {
+    if (!await confirmIntegrationAction('Delete Webhook', `Delete ${getIntegrationField(webhook, 'name', 'this webhook')}?`, { danger: true, confirmText: 'Delete' })) return;
+    try {
+      await axios.post(`${homeApiBase}/api/ServerIntegrations/DeleteWebhook`, {
+        webhookId: getIntegrationField(webhook, 'id', ''),
+      });
+      await load();
+      showAppMessage('Webhook deleted.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not delete webhook.'), 'error');
+    }
+  };
+
+  addBotButton.addEventListener('click', createBot);
+  addWebhookButton.addEventListener('click', createWebhook);
+  addCommandButton.addEventListener('click', createSlashCommand);
+  refreshButton.addEventListener('click', load);
+
+  dialog.appendChild(header);
+  dialog.appendChild(status);
+  dialog.appendChild(grid);
+  dialog.appendChild(footer);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  load();
+}
+
+function createRoleChip(roleName, extraClass = '', color = '') {
   const chip = document.createElement('span');
   const normalizedRole = normalizeRoleName(roleName);
   chip.className = `server-member-role-chip ${extraClass}`.trim();
   chip.dataset.role = normalizedRole;
+  applyRoleColorStyle(chip, normalizedRole, color);
   chip.textContent = formatRoleName(normalizedRole);
   chip.title = normalizedRole;
   return chip;
@@ -9532,6 +11004,7 @@ function createDraftRole() {
   return normalizeServerRole({
     id: 'draft',
     name: 'new-role',
+    color: DEFAULT_ROLE_COLORS.default,
     position: currentServerRoles.length + 1,
     canCreateInvites: true,
     canSendMessages: true,
@@ -9687,6 +11160,10 @@ function openRolesAndPermissionsDialog() {
       item.dataset.role = roleName;
       item.classList.toggle('active', roleId === selectedRoleId);
 
+      const swatch = document.createElement('span');
+      swatch.className = 'role-color-swatch';
+      applyRoleColorStyle(swatch, roleName, role.color);
+
       const main = document.createElement('span');
       main.className = 'role-list-main';
       const name = document.createElement('strong');
@@ -9702,6 +11179,7 @@ function openRolesAndPermissionsDialog() {
       count.className = 'role-list-count';
       count.textContent = role.isDraft ? 'New' : String(countMembersForRole(members, roleName));
 
+      item.appendChild(swatch);
       item.appendChild(main);
       item.appendChild(count);
       item.addEventListener('click', () => selectRole(roleId));
@@ -9732,7 +11210,7 @@ function openRolesAndPermissionsDialog() {
     top.className = 'role-detail-top';
     const title = document.createElement('div');
     title.className = 'role-detail-title';
-    title.appendChild(createRoleChip(roleName, 'large'));
+    title.appendChild(createRoleChip(roleName, 'large', role.color));
     const summary = document.createElement('span');
     summary.textContent = getRolePermissionSummary(role);
     title.appendChild(summary);
@@ -9751,6 +11229,17 @@ function openRolesAndPermissionsDialog() {
     nameInput.required = true;
     nameLabel.appendChild(nameInput);
     form.appendChild(nameLabel);
+
+    const colorLabel = document.createElement('label');
+    colorLabel.className = 'role-field-label';
+    colorLabel.textContent = 'Role color';
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.name = 'color';
+    colorInput.value = normalizeHexColor(role.color, getDefaultRoleColor(roleName));
+    colorInput.disabled = controlsLocked;
+    colorLabel.appendChild(colorInput);
+    form.appendChild(colorLabel);
 
     const permissionGroups = document.createElement('div');
     permissionGroups.className = 'role-permission-grid';
@@ -9838,6 +11327,7 @@ function openRolesAndPermissionsDialog() {
         roleId: isDraft ? null : getServerRoleId(role),
         serverId: selectedServerID,
         name: normalizedName,
+        color: normalizeHexColor(colorInput.value, getDefaultRoleColor(normalizedName)),
       };
       ROLE_PERMISSION_DEFINITIONS.forEach(({ key }) => {
         payload[key] = Boolean(form.elements[key]?.checked);
@@ -9849,6 +11339,7 @@ function openRolesAndPermissionsDialog() {
         const savedRole = normalizeServerRole(response.data || {});
         draftRole = null;
         await loadRolesAndMembers(savedRole.id || selectedRoleId);
+        await fetchServerMembers();
         showAppMessage(isDraft ? 'Role created.' : 'Role permissions saved.', 'success');
       } catch (errorResponse) {
         error.textContent = getApiErrorMessage(errorResponse, 'Could not save role.');
@@ -10076,6 +11567,52 @@ function openAuditLogsDialog() {
   copy.className = 'account-action-copy';
   copy.textContent = currentServerName || 'Server activity';
 
+  const controls = document.createElement('form');
+  controls.className = 'audit-log-search';
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.className = 'textInput audit-log-search-input';
+  searchInput.placeholder = 'Search audit logs';
+  const actionInput = document.createElement('input');
+  actionInput.type = 'text';
+  actionInput.className = 'textInput audit-log-search-input';
+  actionInput.placeholder = 'Action';
+  const actorInput = document.createElement('input');
+  actorInput.type = 'text';
+  actorInput.className = 'textInput audit-log-search-input';
+  actorInput.placeholder = 'Actor';
+  const targetInput = document.createElement('input');
+  targetInput.type = 'text';
+  targetInput.className = 'textInput audit-log-search-input';
+  targetInput.placeholder = 'Target';
+  const afterInput = document.createElement('input');
+  afterInput.type = 'date';
+  afterInput.className = 'textInput audit-log-search-input';
+  const beforeInput = document.createElement('input');
+  beforeInput.type = 'date';
+  beforeInput.className = 'textInput audit-log-search-input';
+  const searchButton = document.createElement('button');
+  searchButton.type = 'submit';
+  searchButton.className = 'account-action-submit';
+  searchButton.textContent = 'Search';
+  const clearButton = document.createElement('button');
+  clearButton.type = 'button';
+  clearButton.className = 'account-action-cancel';
+  clearButton.textContent = 'Clear';
+  [
+    searchInput,
+    actionInput,
+    actorInput,
+    targetInput,
+    afterInput,
+    beforeInput,
+    searchButton,
+    clearButton,
+  ].forEach((element) => controls.appendChild(element));
+
+  const status = document.createElement('div');
+  status.className = 'audit-log-status';
+
   const list = document.createElement('div');
   list.className = 'audit-log-list';
   list.textContent = 'Loading audit logs...';
@@ -10099,32 +11636,78 @@ function openAuditLogsDialog() {
     if (event.target === overlay) close();
   });
 
+  let auditSearchTimer = null;
+  const buildAuditUrl = () => {
+    const params = new URLSearchParams({
+      serverId: selectedServerID,
+      take: '75',
+    });
+    const values = {
+      query: searchInput.value.trim(),
+      actionType: actionInput.value.trim(),
+      actor: actorInput.value.trim(),
+      target: targetInput.value.trim(),
+      after: afterInput.value,
+      before: beforeInput.value,
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      if (value) {
+        params.set(key, value);
+      }
+    });
+    return `${homeApiBase}/api/Server/GetAuditLogs?${params.toString()}`;
+  };
+
   const loadLogs = async () => {
-    list.textContent = 'Loading audit logs...';
+    status.textContent = 'Loading audit logs...';
+    list.innerHTML = '';
     try {
-      const res = await axios.get(
-        `${homeApiBase}/api/Server/GetAuditLogs?serverId=${encodeURIComponent(selectedServerID)}&take=75`
-      );
+      const res = await axios.get(buildAuditUrl());
       const logs = Array.isArray(res.data) ? res.data : [];
+      status.textContent = `${logs.length} ${logs.length === 1 ? 'entry' : 'entries'}`;
       list.innerHTML = '';
       if (!logs.length) {
         const empty = document.createElement('div');
         empty.className = 'empty-state-card padded';
-        empty.textContent = 'No audit entries yet.';
+        empty.textContent = 'No audit entries matched.';
         list.appendChild(empty);
         return;
       }
 
       logs.forEach((log) => list.appendChild(renderAuditLogRow(log)));
     } catch (error) {
+      status.textContent = '';
       list.textContent = getApiErrorMessage(error, 'Could not load audit logs.');
     }
   };
 
+  const scheduleLoad = () => {
+    window.clearTimeout(auditSearchTimer);
+    auditSearchTimer = window.setTimeout(loadLogs, 280);
+  };
+
+  controls.addEventListener('submit', (event) => {
+    event.preventDefault();
+    loadLogs();
+  });
+  [searchInput, actionInput, actorInput, targetInput].forEach((input) => {
+    input.addEventListener('input', scheduleLoad);
+  });
+  [afterInput, beforeInput].forEach((input) => {
+    input.addEventListener('change', loadLogs);
+  });
+  clearButton.addEventListener('click', () => {
+    [searchInput, actionInput, actorInput, targetInput, afterInput, beforeInput].forEach((input) => {
+      input.value = '';
+    });
+    loadLogs();
+  });
   refreshButton.addEventListener('click', loadLogs);
 
   dialog.appendChild(heading);
   dialog.appendChild(copy);
+  dialog.appendChild(controls);
+  dialog.appendChild(status);
   dialog.appendChild(list);
   dialog.appendChild(actions);
   overlay.appendChild(dialog);
@@ -10453,13 +12036,16 @@ async function fetchServerDetails() {
     if (server) {
       applyServerRuleState(server);
       applyServerListingState(server);
+      applyServerAppearanceState(server);
       applyServerWelcomeState(server);
       currentServerRole = server.role || currentServerRole || 'user';
     }
     if (server?.serverName) {
       currentServerName = server.serverName;
     }
+    renderCurrentServerHeader(currentServerRole);
     await loadServerExpressions(selectedServerID, { force: true });
+    await loadServerSlashCommands(selectedServerID, { force: true });
     refreshEmojiPicker();
     const channelsList = document.getElementById('channelsList');
     channelsList.innerHTML = '';
@@ -10474,6 +12060,16 @@ async function fetchServerDetails() {
       label.className = 'channel-name';
       label.textContent = `${getChannelTypeIcon(channel.type)} ${channel.name}`;
       channelEl.appendChild(label);
+      const permissionButton = document.createElement('button');
+      permissionButton.type = 'button';
+      permissionButton.className = 'channel-inline-action';
+      permissionButton.textContent = 'Perms';
+      permissionButton.title = 'Channel permissions';
+      permissionButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openChannelPermissionsDialog(channel.id);
+      });
+      channelEl.appendChild(permissionButton);
       if (channel.type === 'text') {
         channelEl.onclick = () => {
           clearReplyDraft();
@@ -10491,17 +12087,6 @@ async function fetchServerDetails() {
           fetchServerMessages();
         };
       } else if (isVoiceLikeChannelType(channel.type)) {
-        const permissionButton = document.createElement('button');
-        permissionButton.type = 'button';
-        permissionButton.className = 'channel-inline-action';
-        permissionButton.textContent = 'Perms';
-        permissionButton.title = 'Voice permissions';
-        permissionButton.addEventListener('click', (event) => {
-          event.stopPropagation();
-          openVoiceChannelPermissionsDialog(channel.id);
-        });
-        channelEl.appendChild(permissionButton);
-
         channelEl.onclick = () => {
           selectedChannelID = channel.id;
           closeServerThreadPanel();
@@ -10549,6 +12134,13 @@ async function fetchServerDetails() {
     await refreshUnreadIndicators();
 
     await fetchServerRoles({ force: true, silent: true }).catch(() => []);
+    upsertServerListItem({
+      serverID: selectedServerID,
+      serverName: currentServerName,
+      role: currentServerRole,
+      serverIconUrl: currentServerIconUrl,
+      serverBannerUrl: currentServerBannerUrl,
+    });
     await fetchServerMembers();
     watchVoiceServer(selectedServerID).catch((err) => {
       console.error('Voice roster watch failed after loading channels:', err);
@@ -10569,7 +12161,8 @@ async function fetchServerMembers() {
     const response = await axios.get(
       `${homeApiBase}/api/Server/GetServerMembers?serverId=${encodeURIComponent(selectedServerID)}`
     );
-    const members = response.data;
+    const members = Array.isArray(response.data) ? response.data : [];
+    currentServerMembers = members;
     const membersList = document.querySelector('.viewServerAccounts');
 
     membersList.innerHTML = '<p class="serverAccounts">Members</p>';
@@ -10581,11 +12174,13 @@ async function fetchServerMembers() {
 
     members.forEach(member => {
       const memberRole = normalizeRoleName(member.role);
+      const isBotMember = Boolean(member.isBot ?? member.IsBot);
       const memberEl = document.createElement('div');
       memberEl.dataset.username = member.username;
       memberEl.dataset.role = memberRole;
       memberEl.classList.add('server-member-row');
         memberEl.classList.toggle('is-owner', memberRole === 'owner');
+        memberEl.classList.toggle('is-bot', isBotMember);
 
         const avatar = document.createElement('div');
         avatar.className = 'server-member-avatar default-avatar-bg';
@@ -10603,7 +12198,9 @@ async function fetchServerMembers() {
         if (memberPictureUrl) {
           avatar.style.backgroundImage = `url("${cssString(memberPictureUrl)}")`;
         }
-        avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
+        if (!isBotMember) {
+          avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
+        }
 
         const statusDot = document.createElement('span');
         statusDot.className = 'member-status-dot';
@@ -10611,14 +12208,26 @@ async function fetchServerMembers() {
 
         const copy = document.createElement('div');
         copy.className = 'server-member-copy';
+        const nameLine = document.createElement('span');
+        nameLine.className = 'server-member-name-line';
         const name = document.createElement('span');
         name.className = 'server-member-name';
         name.textContent = member.username;
-        name.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
+        applyRoleColorStyle(name, memberRole);
+        if (!isBotMember) {
+          name.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
+        }
+        nameLine.appendChild(name);
+        if (isBotMember) {
+          const botBadge = document.createElement('span');
+          botBadge.className = 'server-member-automation-badge';
+          botBadge.textContent = 'Bot';
+          nameLine.appendChild(botBadge);
+        }
         const status = document.createElement('span');
         status.className = 'server-member-status';
         status.textContent = getStatusSummary(member);
-        copy.appendChild(name);
+        copy.appendChild(nameLine);
         const profileBadges = document.createElement('span');
         profileBadges.className = 'user-badges server-member-profile-badges';
         renderUserBadges(profileBadges, memberBadges, { compact: true });
@@ -12314,108 +13923,875 @@ function setupEmojiPicker() {
   });
 }
 
-function setupMessageSearch() {
-  const form = document.querySelector('.search-form');
-  const input = document.getElementById('dmSearchInput');
+const messageSearchState = {
+  query: '',
+  scope: null,
+  fromUser: '',
+  mentions: '',
+  after: '',
+  before: '',
+  hasAttachment: null,
+  attachmentType: 'any',
+  hasLink: null,
+  pinned: null,
+  sort: 'newest',
+  timer: null,
+  requestId: 0,
+};
 
-  if (!form || !input) return;
-
-  const newForm = form.cloneNode(true);
-  form.parentNode.replaceChild(newForm, form);
-
-  const newInput = document.getElementById('dmSearchInput');
-
-  newForm.onsubmit = (e) => {
-    e.preventDefault();
-    handleSearchSubmit(newInput.value);
-  };
+function parseSearchNullableBoolean(value) {
+  return value === 'true' ? true : value === 'false' ? false : null;
 }
 
-function handleSearchSubmit(query) {
-  if (!query.trim()) return;
+function formatSearchFilterDate(value = '') {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
 
-  const sidebar = document.getElementById('searchResultsSidebar');
-  const list = document.getElementById('searchResultsList');
-  const countSpan = document.getElementById('searchResultCount');
+function getSearchAttachmentTypeLabel(value = 'any') {
+  return {
+    image: 'Images',
+    video: 'Videos',
+    audio: 'Audio',
+    file: 'Files',
+  }[value] || '';
+}
 
-  if (!sidebar || !list) return;
+function getMessageSearchFilterDescriptors(scope = getActiveMessageScope()) {
+  const filters = [];
+  if (messageSearchState.fromUser) {
+    filters.push({ key: 'fromUser', label: `From ${messageSearchState.fromUser}` });
+  }
+  if (messageSearchState.mentions) {
+    filters.push({ key: 'mentions', label: `Mentions @${messageSearchState.mentions.replace(/^@/, '')}` });
+  }
+  if (messageSearchState.after) {
+    filters.push({ key: 'after', label: `After ${formatSearchFilterDate(messageSearchState.after)}` });
+  }
+  if (messageSearchState.before) {
+    filters.push({ key: 'before', label: `Before ${formatSearchFilterDate(messageSearchState.before)}` });
+  }
+  if (messageSearchState.hasAttachment !== null) {
+    filters.push({
+      key: 'hasAttachment',
+      label: messageSearchState.hasAttachment ? 'With attachments' : 'Text only',
+    });
+  }
+  if (messageSearchState.attachmentType !== 'any') {
+    filters.push({
+      key: 'attachmentType',
+      label: getSearchAttachmentTypeLabel(messageSearchState.attachmentType),
+    });
+  }
+  if (messageSearchState.hasLink !== null) {
+    filters.push({
+      key: 'hasLink',
+      label: messageSearchState.hasLink ? 'Has links' : 'No links',
+    });
+  }
+  if (scope === 'server' && messageSearchState.pinned !== null) {
+    filters.push({
+      key: 'pinned',
+      label: messageSearchState.pinned ? 'Pinned' : 'Not pinned',
+    });
+  }
+  return filters;
+}
 
-  list.innerHTML = '';
-  showElement(sidebar, 'flex');
+function hasActiveMessageSearchFilters(scope = getActiveMessageScope()) {
+  return getMessageSearchFilterDescriptors(scope).length > 0;
+}
 
-  const messages = document.querySelectorAll('.messagesDisplay p');
-  let matchCount = 0;
-
-  messages.forEach(msg => {
-
-    const content = msg.textContent;
-    const lowerContent = content.toLowerCase();
-    const lowerQuery = query.toLowerCase();
-
-    if (lowerContent.includes(lowerQuery)) {
-      matchCount++;
-
-
-
-      let username = "User";
-      let messageText = content;
-      let date = "";
-
-      const firstColon = content.indexOf(':');
-      const lastParenOpen = content.lastIndexOf('(');
-      const lastParenClose = content.lastIndexOf(')');
-
-      if (firstColon > -1) {
-        username = content.substring(0, firstColon).trim();
-
-        if (lastParenOpen > firstColon && lastParenClose > lastParenOpen) {
-
-          messageText = content.substring(firstColon + 1, lastParenOpen).trim();
-          date = content.substring(lastParenOpen + 1, lastParenClose);
-        } else {
-
-          messageText = content.substring(firstColon + 1).trim();
-        }
-      }
-
-      const card = createSearchResultCard(username, messageText, date, query);
-      list.appendChild(card);
-    }
-  });
-
-  if (countSpan) {
-    countSpan.textContent = `${matchCount} Results`;
+function clearMessageSearchFilter(key) {
+  if (key === 'fromUser' || key === 'mentions' || key === 'after' || key === 'before') {
+    messageSearchState[key] = '';
+  } else if (key === 'attachmentType') {
+    messageSearchState.attachmentType = 'any';
+  } else if (key === 'hasAttachment' || key === 'hasLink' || key === 'pinned') {
+    messageSearchState[key] = null;
+  }
+  updateMessageSearchControls();
+  if (messageSearchState.query || hasActiveMessageSearchFilters()) {
+    handleSearchSubmit(messageSearchState.query).catch((error) => {
+      console.warn('Could not refresh filtered search results:', error);
+    });
+  } else {
+    closeSearchResults();
   }
 }
 
-function createSearchResultCard(username, text, date, query) {
+function clearAllMessageSearchFilters() {
+  messageSearchState.fromUser = '';
+  messageSearchState.mentions = '';
+  messageSearchState.after = '';
+  messageSearchState.before = '';
+  messageSearchState.hasAttachment = null;
+  messageSearchState.attachmentType = 'any';
+  messageSearchState.hasLink = null;
+  messageSearchState.pinned = null;
+  updateMessageSearchControls();
+  if (messageSearchState.query) {
+    handleSearchSubmit(messageSearchState.query).catch((error) => {
+      console.warn('Could not refresh cleared search results:', error);
+    });
+  } else {
+    closeSearchResults();
+  }
+}
+
+function ensureMessageSearchSidebar() {
+  const sidebar = document.getElementById('searchResultsSidebar');
+  if (sidebar && sidebar.parentElement !== document.body) {
+    document.body.appendChild(sidebar);
+  }
+  return sidebar;
+}
+
+function setupMessageSearch() {
+  ensureMessageSearchSidebar();
+
+  document.querySelectorAll('.search-form, .server-search-form').forEach((form) => {
+    if (form.dataset.messageSearchReady === 'true') {
+      return;
+    }
+
+    form.dataset.messageSearchReady = 'true';
+    const input = form.querySelector('input');
+    if (!input) {
+      return;
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      handleSearchSubmit(input.value);
+    });
+
+    input.addEventListener('input', handleSearchInput);
+  });
+
+  document.querySelector('.search-filter-btn')?.addEventListener('click', openMessageSearchFilterDialog);
+  document.querySelector('.search-sort-btn')?.addEventListener('click', toggleMessageSearchSort);
+  updateMessageSearchControls();
+}
+
+function updateMessageSearchControls() {
+  const scope = getActiveMessageScope();
+  const activeFilters = getMessageSearchFilterDescriptors(scope);
+  const filterButton = document.querySelector('.search-filter-btn');
+  if (filterButton) {
+    filterButton.textContent = activeFilters.length ? `${activeFilters.length} Filters` : 'Filters';
+  }
+
+  const sortButton = document.querySelector('.search-sort-btn');
+  if (sortButton) {
+    sortButton.textContent = messageSearchState.sort === 'oldest' ? 'Oldest' : 'Newest';
+  }
+
+  renderMessageSearchFilterSummary(activeFilters);
+}
+
+function renderMessageSearchFilterSummary(filters = getMessageSearchFilterDescriptors()) {
+  const container = document.getElementById('searchActiveFilters');
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = '';
+  if (!filters.length) {
+    container.style.display = 'none';
+    return;
+  }
+
+  filters.forEach((filter) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'search-filter-chip';
+    chip.textContent = `${filter.label} x`;
+    chip.addEventListener('click', () => clearMessageSearchFilter(filter.key));
+    container.appendChild(chip);
+  });
+
+  const clearAll = document.createElement('button');
+  clearAll.type = 'button';
+  clearAll.className = 'search-filter-clear';
+  clearAll.textContent = 'Clear';
+  clearAll.addEventListener('click', clearAllMessageSearchFilters);
+  container.appendChild(clearAll);
+  container.style.display = 'flex';
+}
+
+function handleSearchInput(event) {
+  scheduleMessageSearch(event.target.value);
+}
+
+function scheduleMessageSearch(query, delay = 280) {
+  window.clearTimeout(messageSearchState.timer);
+  messageSearchState.timer = window.setTimeout(() => {
+    handleSearchSubmit(query);
+  }, delay);
+}
+
+async function handleSearchSubmit(query) {
+  messageSearchState.query = String(query || '').trim();
+  if (!messageSearchState.query && !hasActiveMessageSearchFilters()) {
+    closeSearchResults();
+    return;
+  }
+
+  await performMessageSearch();
+}
+
+function getMessageSearchScopeLabel(scope = getActiveMessageScope()) {
+  if (scope === 'server') {
+    return getSelectedChannelNotificationName();
+  }
+  if (scope === 'group') {
+    return currentGroupName || 'Group DM';
+  }
+  if (scope === 'dm') {
+    return currentFriend || 'Direct Message';
+  }
+  return 'Messages';
+}
+
+function buildScopedMessageSearchUrl(scope, filters = {}) {
+  const params = new URLSearchParams({
+    query: filters.query || '',
+    take: String(filters.take || 100),
+  });
+
+  if (filters.fromUser) {
+    params.set('fromUser', filters.fromUser);
+  }
+  if (filters.mentions) {
+    params.set('mentions', filters.mentions.replace(/^@/, ''));
+  }
+  if (filters.after) {
+    params.set('after', filters.after);
+  }
+  if (filters.before) {
+    params.set('before', filters.before);
+  }
+  if (filters.hasAttachment !== null && filters.hasAttachment !== undefined) {
+    params.set('hasAttachment', String(filters.hasAttachment));
+  }
+  if (filters.attachmentType && filters.attachmentType !== 'any') {
+    params.set('attachmentType', filters.attachmentType);
+  }
+  if (filters.hasLink !== null && filters.hasLink !== undefined) {
+    params.set('hasLink', String(filters.hasLink));
+  }
+
+  if (scope === 'dm' && currentFriend) {
+    params.set('targetUsername', currentFriend);
+    return `${homeApiBase}/api/PrivateMessageFriend/SearchPrivateMessages?${params.toString()}`;
+  }
+
+  if (scope === 'group' && currentGroupId) {
+    params.set('groupId', currentGroupId);
+    return `${homeApiBase}/api/GroupChat/SearchGroupMessages?${params.toString()}`;
+  }
+
+  if (scope === 'server' && selectedChannelID) {
+    params.set('channelId', selectedChannelID);
+    if (filters.pinned !== null && filters.pinned !== undefined) {
+      params.set('pinned', String(filters.pinned));
+    }
+    return `${homeApiBase}/api/ServerMessages/SearchMessages?${params.toString()}`;
+  }
+
+  return '';
+}
+
+function buildMessageSearchUrl(scope) {
+  return buildScopedMessageSearchUrl(scope, messageSearchState);
+}
+
+function getSearchResultTimestamp(message = {}) {
+  const date = new Date(message.date || message.Date || '');
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function sortSearchResults(messages = []) {
+  return [...messages].sort((left, right) => {
+    const diff = getSearchResultTimestamp(left) - getSearchResultTimestamp(right);
+    return messageSearchState.sort === 'oldest' ? diff : -diff;
+  });
+}
+
+async function performMessageSearch() {
+  const scope = getActiveMessageScope();
+  const url = buildMessageSearchUrl(scope);
+  const sidebar = ensureMessageSearchSidebar();
+  const list = document.getElementById('searchResultsList');
+  const countSpan = document.getElementById('searchResultCount');
+
+  if (!sidebar || !list || !countSpan) {
+    return;
+  }
+
+  if (!url || !scope) {
+    list.innerHTML = '<div class="search-empty-state">Open a conversation or text channel to search.</div>';
+    countSpan.textContent = '0 Results';
+    showElement(sidebar, 'flex');
+    return;
+  }
+
+  const requestId = ++messageSearchState.requestId;
+  messageSearchState.scope = scope;
+  updateMessageSearchControls();
+  list.innerHTML = '<div class="search-empty-state">Searching...</div>';
+  countSpan.textContent = `Searching ${getMessageSearchScopeLabel(scope)}`;
+  showElement(sidebar, 'flex');
+
+  try {
+    const response = await (apiClient || axios).get(url);
+    if (requestId !== messageSearchState.requestId) {
+      return;
+    }
+
+    const results = sortSearchResults(Array.isArray(response.data) ? response.data : []);
+    renderMessageSearchResults(results, scope);
+  } catch (error) {
+    if (requestId !== messageSearchState.requestId) {
+      return;
+    }
+
+    list.innerHTML = '<div class="search-empty-state">Search failed.</div>';
+    countSpan.textContent = '0 Results';
+    showAppMessage(getApiErrorMessage(error, 'Could not search messages.'), 'error');
+  }
+}
+
+function renderMessageSearchResults(results, scope) {
+  const list = document.getElementById('searchResultsList');
+  const countSpan = document.getElementById('searchResultCount');
+  if (!list || !countSpan) {
+    return;
+  }
+
+  list.innerHTML = '';
+  countSpan.textContent = `${results.length} ${results.length === 1 ? 'Result' : 'Results'}`;
+
+  if (!results.length) {
+    const empty = document.createElement('div');
+    empty.className = 'search-empty-state';
+    empty.textContent = 'No results found.';
+    list.appendChild(empty);
+    return;
+  }
+
+  results.forEach((message) => {
+    list.appendChild(createSearchResultCard(message, messageSearchState.query, scope));
+  });
+}
+
+function escapeRegExp(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function appendHighlightedText(container, text = '', query = '') {
+  const source = String(text || '');
+  const safeQuery = String(query || '').trim();
+  if (!safeQuery) {
+    container.textContent = source || 'Sent an attachment.';
+    return;
+  }
+
+  const regex = new RegExp(escapeRegExp(safeQuery), 'gi');
+  let cursor = 0;
+  let match;
+  while ((match = regex.exec(source)) !== null) {
+    if (match.index > cursor) {
+      container.appendChild(document.createTextNode(source.slice(cursor, match.index)));
+    }
+
+    const highlight = document.createElement('span');
+    highlight.className = 'highlight';
+    highlight.textContent = match[0];
+    container.appendChild(highlight);
+    cursor = match.index + match[0].length;
+  }
+
+  if (cursor < source.length) {
+    container.appendChild(document.createTextNode(source.slice(cursor)));
+  }
+
+  if (!container.textContent) {
+    container.textContent = 'Sent an attachment.';
+  }
+}
+
+function getSearchResultAttachmentLabel(message = {}) {
+  if (!getMessageAttachmentUrl(message)) {
+    return '';
+  }
+
+  const contentType = getMessageAttachmentContentType(message).toLowerCase();
+  if (contentType.startsWith('image/')) return 'Image';
+  if (contentType.startsWith('video/')) return 'Video';
+  if (contentType.startsWith('audio/')) return 'Audio';
+  return 'Attachment';
+}
+
+function getSearchResultTags(message = {}, scope = getActiveMessageScope()) {
+  const tags = [];
+  const attachmentLabel = getSearchResultAttachmentLabel(message);
+  if (attachmentLabel) {
+    tags.push(attachmentLabel);
+  }
+  if (scope === 'server' && Boolean(message.isPinned ?? message.IsPinned)) {
+    tags.push('Pinned');
+  }
+  if (getMessageIsWebhook(message)) {
+    tags.push('Webhook');
+  } else if (getMessageIsBot(message)) {
+    tags.push('Bot');
+  }
+  return tags;
+}
+
+function createSearchResultCard(message, query, scope) {
+  const username = getMessageSender(message);
+  const text = getMessageText(message);
+  const date = formatMessageDate(message.date || message.Date);
+  const messageId = getMessageId(message);
   const card = document.createElement('div');
   card.className = 'search-result-card';
+  card.dataset.messageId = messageId;
+  card.dataset.messageScope = scope;
+  card.title = messageId ? 'Jump to message' : '';
 
+  const header = document.createElement('div');
+  header.className = 'card-header';
 
-  const regex = new RegExp(`(${query})`, 'gi');
-  const highlightedText = text.replace(regex, '<span class="highlight">$1</span>');
+  const avatar = document.createElement('div');
+  avatar.className = 'card-avatar';
+  avatar.textContent = username.charAt(0).toUpperCase() || '?';
 
+  const meta = document.createElement('div');
+  meta.className = 'card-meta';
+  const name = document.createElement('span');
+  name.className = 'card-username';
+  name.textContent = username;
+  const time = document.createElement('span');
+  time.className = 'card-date';
+  time.textContent = date;
+  meta.appendChild(name);
+  meta.appendChild(time);
+  header.appendChild(avatar);
+  header.appendChild(meta);
 
-  const avatarLetter = username.charAt(0).toUpperCase();
+  const content = document.createElement('div');
+  content.className = 'card-content';
+  appendHighlightedText(content, text, query);
 
-  card.innerHTML = `
-    <div class="card-header">
-      <div class="card-avatar">${avatarLetter}</div>
-      <div class="card-meta">
-        <span class="card-username">${username}</span>
-        <span class="card-date">${date}</span>
-      </div>
-    </div>
-    <div class="card-content">${highlightedText}</div>
-  `;
+  card.appendChild(header);
+  card.appendChild(content);
+  const tags = getSearchResultTags(message, scope);
+  if (tags.length) {
+    const tagRow = document.createElement('div');
+    tagRow.className = 'search-result-tags';
+    tags.forEach((tag) => {
+      const tagEl = document.createElement('span');
+      tagEl.className = 'search-result-tag';
+      tagEl.textContent = tag;
+      tagRow.appendChild(tagEl);
+    });
+    card.appendChild(tagRow);
+  }
+  card.addEventListener('click', () => {
+    if (messageId) {
+      jumpToMessage(messageId, scope);
+    }
+  });
 
   return card;
+}
+
+function getAttachmentMediaKind(message = {}) {
+  const attachmentUrl = getMessageAttachmentUrl(message);
+  const contentType = getMessageAttachmentContentType(message).toLowerCase();
+  if (!attachmentUrl) {
+    return '';
+  }
+
+  if (contentType.startsWith('image/') || isStickerContentType(contentType) || /\.(png|jpe?g|gif|webp)$/i.test(attachmentUrl)) {
+    return 'image';
+  }
+  if (contentType.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(attachmentUrl)) {
+    return 'video';
+  }
+  if (contentType.startsWith('audio/') || /\.(mp3|wav|ogg|m4a)$/i.test(attachmentUrl)) {
+    return 'audio';
+  }
+  return 'file';
+}
+
+function getAttachmentFileName(attachmentUrl = '') {
+  const rawName = String(attachmentUrl || '').split('/').pop()?.split(/[?#]/)[0] || 'attachment';
+  try {
+    return decodeURIComponent(rawName);
+  } catch {
+    return rawName;
+  }
+}
+
+function getMediaBrowserScopeLabel(scope = getActiveMessageScope()) {
+  if (scope === 'server') {
+    return `# ${getSelectedChannelNotificationName()}`;
+  }
+  if (scope === 'group') {
+    return currentGroupName || 'Group DM';
+  }
+  if (scope === 'dm') {
+    return currentFriend || 'Direct Message';
+  }
+  return 'Conversation';
+}
+
+function createMediaBrowserPreview(message = {}) {
+  const attachmentUrl = getMessageAttachmentUrl(message);
+  const resolvedUrl = resolveMediaUrl(attachmentUrl);
+  const kind = getAttachmentMediaKind(message);
+  const preview = document.createElement('div');
+  preview.className = `media-browser-preview media-browser-preview-${kind || 'file'}`;
+
+  if (kind === 'image') {
+    const image = document.createElement('img');
+    image.src = resolvedUrl;
+    image.alt = getAttachmentFileName(attachmentUrl);
+    image.loading = 'lazy';
+    preview.appendChild(image);
+  } else if (kind === 'video') {
+    const video = document.createElement('video');
+    video.src = resolvedUrl;
+    video.controls = true;
+    video.preload = 'metadata';
+    preview.appendChild(video);
+  } else if (kind === 'audio') {
+    const audio = document.createElement('audio');
+    audio.src = resolvedUrl;
+    audio.controls = true;
+    audio.preload = 'metadata';
+    preview.appendChild(audio);
+  } else {
+    const fileIcon = document.createElement('div');
+    fileIcon.className = 'media-browser-file-icon';
+    fileIcon.textContent = 'FILE';
+    preview.appendChild(fileIcon);
+  }
+
+  return preview;
+}
+
+function createMediaBrowserCard(message = {}, scope, closeDialog) {
+  const attachmentUrl = getMessageAttachmentUrl(message);
+  const resolvedUrl = resolveMediaUrl(attachmentUrl);
+  const messageId = getMessageId(message);
+  const card = document.createElement('div');
+  card.className = 'media-browser-card';
+
+  card.appendChild(createMediaBrowserPreview(message));
+
+  const body = document.createElement('div');
+  body.className = 'media-browser-card-body';
+
+  const title = document.createElement('strong');
+  title.textContent = getAttachmentFileName(attachmentUrl);
+  const meta = document.createElement('span');
+  meta.textContent = `${getMessageSender(message)} - ${formatMessageDate(message.date || message.Date)}`;
+  body.appendChild(title);
+  body.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'media-browser-card-actions';
+  const openLink = document.createElement('a');
+  openLink.className = 'server-tool-btn media-browser-open-link';
+  openLink.href = resolvedUrl;
+  openLink.target = '_blank';
+  openLink.rel = 'noreferrer';
+  openLink.textContent = 'Open';
+  actions.appendChild(openLink);
+
+  if (messageId) {
+    const jumpButton = document.createElement('button');
+    jumpButton.type = 'button';
+    jumpButton.className = 'server-tool-btn';
+    jumpButton.textContent = 'Jump';
+    jumpButton.addEventListener('click', () => {
+      closeDialog?.();
+      jumpToMessage(messageId, scope);
+    });
+    actions.appendChild(jumpButton);
+  }
+
+  body.appendChild(actions);
+  card.appendChild(body);
+  return card;
+}
+
+function openMediaBrowserDialog() {
+  const scope = getActiveMessageScope();
+  if (!scope || (scope === 'server' && !isSelectedTextChannel())) {
+    showAppMessage('Open a conversation or text channel first.', 'error');
+    return;
+  }
+
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog media-browser-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Media Browser';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = getMediaBrowserScopeLabel(scope);
+
+  const controls = document.createElement('form');
+  controls.className = 'media-browser-controls';
+  controls.addEventListener('submit', (event) => {
+    event.preventDefault();
+    loadMedia();
+  });
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.className = 'textInput media-browser-search';
+  searchInput.placeholder = 'Search media';
+
+  const typeSelect = document.createElement('select');
+  typeSelect.className = 'settings-select media-browser-type';
+  [
+    ['image', 'Images'],
+    ['video', 'Videos'],
+    ['audio', 'Audio'],
+    ['file', 'Files'],
+    ['any', 'All'],
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    typeSelect.appendChild(option);
+  });
+
+  const refreshButton = document.createElement('button');
+  refreshButton.type = 'submit';
+  refreshButton.className = 'account-action-submit';
+  refreshButton.textContent = 'Refresh';
+
+  controls.appendChild(searchInput);
+  controls.appendChild(typeSelect);
+  controls.appendChild(refreshButton);
+
+  const status = document.createElement('div');
+  status.className = 'media-browser-status';
+  status.textContent = 'Loading media...';
+
+  const grid = document.createElement('div');
+  grid.className = 'media-browser-grid';
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const doneButton = document.createElement('button');
+  doneButton.type = 'button';
+  doneButton.className = 'account-action-cancel';
+  doneButton.textContent = 'Done';
+  actions.appendChild(doneButton);
+
+  const close = () => overlay.remove();
+  doneButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+
+  let mediaRequestId = 0;
+  let mediaTimer = null;
+  const loadMedia = async () => {
+    const requestId = ++mediaRequestId;
+    const attachmentType = typeSelect.value || 'image';
+    const url = buildScopedMessageSearchUrl(scope, {
+      query: searchInput.value.trim(),
+      hasAttachment: true,
+      attachmentType,
+      take: 100,
+    });
+
+    if (!url) {
+      status.textContent = 'No conversation selected.';
+      grid.innerHTML = '';
+      return;
+    }
+
+    status.textContent = 'Loading media...';
+    grid.innerHTML = '';
+    try {
+      const response = await (apiClient || axios).get(url);
+      if (requestId !== mediaRequestId) {
+        return;
+      }
+
+      const messages = sortSearchResults(Array.isArray(response.data) ? response.data : [])
+        .filter((message) => getMessageAttachmentUrl(message));
+      status.textContent = `${messages.length} ${messages.length === 1 ? 'item' : 'items'}`;
+      if (!messages.length) {
+        grid.innerHTML = '<div class="empty-state-card padded media-browser-empty">No media found.</div>';
+        return;
+      }
+
+      messages.forEach((message) => {
+        grid.appendChild(createMediaBrowserCard(message, scope, close));
+      });
+    } catch (error) {
+      status.textContent = getApiErrorMessage(error, 'Could not load media.');
+    }
+  };
+
+  searchInput.addEventListener('input', () => {
+    window.clearTimeout(mediaTimer);
+    mediaTimer = window.setTimeout(loadMedia, 280);
+  });
+  typeSelect.addEventListener('change', loadMedia);
+
+  dialog.appendChild(heading);
+  dialog.appendChild(copy);
+  dialog.appendChild(controls);
+  dialog.appendChild(status);
+  dialog.appendChild(grid);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  searchInput.focus();
+  loadMedia();
+}
+
+async function openMessageSearchFilterDialog() {
+  const scope = getActiveMessageScope();
+  const fields = [
+    {
+      name: 'fromUser',
+      label: 'From user',
+      value: messageSearchState.fromUser,
+      required: false,
+    },
+    {
+      name: 'mentions',
+      label: 'Mentions user',
+      value: messageSearchState.mentions,
+      required: false,
+    },
+    {
+      name: 'after',
+      label: 'After date',
+      type: 'date',
+      value: messageSearchState.after,
+      required: false,
+    },
+    {
+      name: 'before',
+      label: 'Before date',
+      type: 'date',
+      value: messageSearchState.before,
+      required: false,
+    },
+    {
+      name: 'hasAttachment',
+      label: 'Attachments',
+      value: messageSearchState.hasAttachment === null ? 'any' : String(messageSearchState.hasAttachment),
+      options: [
+        { value: 'any', label: 'Any' },
+        { value: 'true', label: 'With attachments' },
+        { value: 'false', label: 'Text only' },
+      ],
+    },
+    {
+      name: 'attachmentType',
+      label: 'Attachment type',
+      value: messageSearchState.attachmentType,
+      options: [
+        { value: 'any', label: 'Any' },
+        { value: 'image', label: 'Images' },
+        { value: 'video', label: 'Videos' },
+        { value: 'audio', label: 'Audio' },
+        { value: 'file', label: 'Files' },
+      ],
+    },
+    {
+      name: 'hasLink',
+      label: 'Links',
+      value: messageSearchState.hasLink === null ? 'any' : String(messageSearchState.hasLink),
+      options: [
+        { value: 'any', label: 'Any' },
+        { value: 'true', label: 'Has links' },
+        { value: 'false', label: 'No links' },
+      ],
+    },
+  ];
+
+  if (scope === 'server') {
+    fields.push({
+      name: 'pinned',
+      label: 'Pinned',
+      value: messageSearchState.pinned === null ? 'any' : String(messageSearchState.pinned),
+      options: [
+        { value: 'any', label: 'Any' },
+        { value: 'true', label: 'Pinned' },
+        { value: 'false', label: 'Not pinned' },
+      ],
+    });
+  }
+
+  const values = await openSimpleFormDialog({
+    title: 'Advanced Search',
+    fields,
+    confirmText: 'Apply',
+    preserveExisting: true,
+  });
+
+  if (!values) {
+    return;
+  }
+
+  messageSearchState.fromUser = values.fromUser || '';
+  messageSearchState.mentions = (values.mentions || '').replace(/^@/, '');
+  messageSearchState.after = values.after || '';
+  messageSearchState.before = values.before || '';
+  messageSearchState.attachmentType = values.attachmentType || 'any';
+  messageSearchState.hasAttachment = messageSearchState.attachmentType === 'any'
+    ? parseSearchNullableBoolean(values.hasAttachment)
+    : true;
+  messageSearchState.hasLink = parseSearchNullableBoolean(values.hasLink);
+  if (scope === 'server') {
+    messageSearchState.pinned = parseSearchNullableBoolean(values.pinned);
+  }
+  updateMessageSearchControls();
+  await handleSearchSubmit(messageSearchState.query);
+}
+
+function toggleMessageSearchSort() {
+  messageSearchState.sort = messageSearchState.sort === 'newest' ? 'oldest' : 'newest';
+  updateMessageSearchControls();
+  if (messageSearchState.query || hasActiveMessageSearchFilters()) {
+    handleSearchSubmit(messageSearchState.query).catch((error) => {
+      console.warn('Could not refresh sorted search results:', error);
+    });
+  }
 }
 
 function closeSearchResults() {
   const sidebar = document.getElementById('searchResultsSidebar');
   if (sidebar) hideElement(sidebar);
+  document.querySelectorAll('#dmSearchInput, #serverSearchInput').forEach((input) => {
+    input.value = '';
+  });
+  messageSearchState.query = '';
+  messageSearchState.requestId += 1;
 }
 
 function toggleEmojiPicker(event = null) {
@@ -12807,7 +15183,7 @@ function renderMemberModerationActions(member) {
   const actions = document.createElement('div');
   actions.className = 'member-actions';
 
-  if (member.username === JWTusername || normalizeRoleName(member.role) === 'owner') {
+  if (Boolean(member.isBot ?? member.IsBot) || member.username === JWTusername || normalizeRoleName(member.role) === 'owner') {
     return actions;
   }
 
@@ -15025,6 +17401,92 @@ async function clearPhoneNumber() {
   }
 }
 
+function getFilenameFromContentDisposition(value = '') {
+  const match = String(value).match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
+  if (!match) {
+    return '';
+  }
+
+  try {
+    return decodeURIComponent(match[1].replace(/"$/g, '').trim());
+  } catch {
+    return match[1].replace(/"$/g, '').trim();
+  }
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function downloadUserDataExport() {
+  const button = document.getElementById('downloadDataExportBtn');
+  try {
+    setBusyState(button, true, 'Preparing...');
+    const response = await axios.get(`${homeApiBase}/api/Account/ExportUserData`, {
+      responseType: 'blob',
+    });
+    const filename =
+      getFilenameFromContentDisposition(response.headers?.['content-disposition']) ||
+      `${JWTusername || 'mydiscord'}-data-export.json`;
+    downloadBlob(response.data, filename);
+    showAppMessage('Data export downloaded.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not download data export.'), 'error');
+  } finally {
+    setBusyState(button, false);
+  }
+}
+
+async function fetchUserDataExportJson() {
+  const response = await axios.get(`${homeApiBase}/api/Account/ExportUserData`, {
+    responseType: 'json',
+  });
+  return typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+}
+
+function buildDataExportSummaryText(exportData = {}) {
+  const summary = exportData.summary || {};
+  const account = exportData.account || {};
+  return [
+    `MyDiscord data export for ${account.username || JWTusername || 'user'}`,
+    `Exported at: ${exportData.exportedAt || new Date().toISOString()}`,
+    `Direct messages: ${summary.directMessageCount ?? 0}`,
+    `Group chats: ${summary.groupChatCount ?? 0}`,
+    `Group messages: ${summary.groupMessageCount ?? 0}`,
+    `Server memberships: ${summary.serverMembershipCount ?? 0}`,
+    `Owned servers: ${summary.ownedServerCount ?? 0}`,
+    `Authored server messages: ${summary.authoredServerMessageCount ?? 0}`,
+    `Reports: ${summary.reportCount ?? 0}`,
+    `Authorized apps: ${summary.authorizedApplicationCount ?? 0}`,
+  ].join('\n');
+}
+
+async function copyUserDataExportSummary() {
+  const button = document.getElementById('copyDataExportSummaryBtn');
+  try {
+    setBusyState(button, true, 'Copying...');
+    const exportData = await fetchUserDataExportJson();
+    const summaryText = buildDataExportSummaryText(exportData);
+    if (!navigator.clipboard) {
+      throw new Error('Clipboard access is unavailable.');
+    }
+
+    await navigator.clipboard.writeText(summaryText);
+    showAppMessage('Export summary copied.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not copy data export summary.'), 'error');
+  } finally {
+    setBusyState(button, false);
+  }
+}
+
 function setupSettingsActionButtons() {
   document.querySelectorAll('.account-detail-row .edit-detail-btn:not(#editContactInfoBtn):not(#editContactInfoBtnSecondary)').forEach((button) => {
     button.addEventListener('click', () => switchSettingsTab('profiles'));
@@ -15039,6 +17501,8 @@ function setupSettingsActionButtons() {
   document.getElementById('enableTwoFactorBtn')?.addEventListener('click', enableAuthenticatorApp);
   document.getElementById('disableTwoFactorBtn')?.addEventListener('click', disableAuthenticatorApp);
   document.getElementById('regenerateBackupCodesBtn')?.addEventListener('click', regenerateBackupCodes);
+  document.getElementById('downloadDataExportBtn')?.addEventListener('click', downloadUserDataExport);
+  document.getElementById('copyDataExportSummaryBtn')?.addEventListener('click', copyUserDataExportSummary);
 
   document.querySelectorAll('.reveal-link').forEach((link) => {
     link.addEventListener('click', () => {
@@ -15160,6 +17624,15 @@ function setupSettingsActionButtons() {
 
   document.getElementById('addKeybindBtn')?.addEventListener('click', addSettingsKeybind);
   document.getElementById('runCallDiagnosticsBtn')?.addEventListener('click', startCallDiagnosticsAutoRefresh);
+  document.getElementById('createDeveloperAppBtn')?.addEventListener('click', () => openDeveloperAppDialog());
+  document.getElementById('refreshDeveloperAppsBtn')?.addEventListener('click', () => {
+    developerPortalLoaded = false;
+    loadDeveloperPortalApplications({ force: true });
+  });
+  document.getElementById('refreshAuthorizedAppsBtn')?.addEventListener('click', () => {
+    authorizedAppsLoaded = false;
+    loadAuthorizedApps({ force: true });
+  });
 
   document.querySelectorAll('.app-item .settings-btn-danger').forEach((button) => {
     button.addEventListener('click', () => {
@@ -15422,6 +17895,448 @@ async function populateVoiceDeviceSettings() {
   }
 }
 
+const oauthScopeCatalog = [
+  'identify',
+  'servers.read',
+  'messages.read',
+  'slash.commands',
+  'bot',
+  'webhooks.manage',
+];
+let developerPortalLoaded = false;
+let authorizedAppsLoaded = false;
+
+function getOAuthArrayField(item = {}, key) {
+  const value = getIntegrationField(item, key, []);
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[\s,;]+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeOAuthListInput(value = '') {
+  return String(value || '')
+    .split(/[\n,;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part, index, all) => all.indexOf(part) === index);
+}
+
+function normalizeOAuthScopeInput(value = '') {
+  const allowed = new Set(oauthScopeCatalog);
+  const scopes = String(value || '')
+    .split(/[\s,;]+/)
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => allowed.has(part))
+    .filter((part, index, all) => all.indexOf(part) === index);
+  return scopes.length ? scopes : ['identify'];
+}
+
+function formatOAuthDate(value) {
+  if (!value) {
+    return 'Never';
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+}
+
+function getDeveloperAppId(app = {}) {
+  return getIntegrationField(app, 'clientId', getIntegrationField(app, 'id', ''));
+}
+
+function getDeveloperAppName(app = {}) {
+  return getIntegrationField(app, 'name', 'Untitled app');
+}
+
+function getDeveloperAppDescription(app = {}) {
+  return getIntegrationField(app, 'description', '') || 'No description';
+}
+
+function getDeveloperAppScopes(app = {}) {
+  return getOAuthArrayField(app, 'allowedScopes');
+}
+
+function buildOAuthMutationPayload(values = {}, app = null) {
+  const payload = {
+    name: values.name || '',
+    description: values.description || null,
+    iconUrl: values.iconUrl || null,
+    redirectUris: normalizeOAuthListInput(values.redirectUris),
+    allowedScopes: normalizeOAuthScopeInput(values.allowedScopes),
+    botAccountId: values.botAccountId || null,
+    isEnabled: values.isEnabled !== 'false',
+  };
+  if (app) {
+    payload.applicationId = getDeveloperAppId(app);
+  }
+  return payload;
+}
+
+function getDeveloperAuthorizationUrl(app = {}) {
+  const clientId = getDeveloperAppId(app);
+  const redirects = getOAuthArrayField(app, 'redirectUris');
+  const scopes = getDeveloperAppScopes(app);
+  const base = getIntegrationField(
+    app,
+    'authorizationUrl',
+    `${homeApiBase}/api/OAuthApps/GetAuthorizationPreview?clientId=${encodeURIComponent(clientId)}`
+  );
+
+  try {
+    const url = new URL(base, homeApiBase);
+    url.searchParams.set('clientId', clientId);
+    if (redirects[0]) {
+      url.searchParams.set('redirectUri', redirects[0]);
+    }
+    if (scopes.length) {
+      url.searchParams.set('scope', scopes.join(' '));
+    }
+    return url.toString();
+  } catch {
+    return base;
+  }
+}
+
+function showDeveloperAppSecret(app = {}) {
+  openIntegrationSecretDialog({
+    title: 'OAuth Client Secret',
+    description: 'Store this secret now. It is only shown after creation or rotation.',
+    values: [
+      { label: 'Client ID', value: getDeveloperAppId(app) },
+      { label: 'Client Secret', value: getIntegrationField(app, 'clientSecret', '') },
+      { label: 'Authorization URL', value: getDeveloperAuthorizationUrl(app) },
+    ],
+  });
+}
+
+function setDeveloperPortalStatus(message, variant = '') {
+  const status = document.getElementById('developerPortalStatus');
+  if (!status) {
+    return;
+  }
+  status.textContent = message;
+  status.dataset.variant = variant;
+}
+
+function createAppIconElement(item = {}, className = 'developer-app-icon') {
+  const icon = document.createElement('div');
+  icon.className = className;
+  const iconUrl = getIntegrationField(item, 'iconUrl', getIntegrationField(item, 'applicationIconUrl', ''));
+  if (iconUrl) {
+    const img = document.createElement('img');
+    img.src = iconUrl;
+    img.alt = '';
+    icon.appendChild(img);
+  } else {
+    icon.textContent = getDeveloperAppName(item).charAt(0).toUpperCase() || 'A';
+  }
+  return icon;
+}
+
+async function openDeveloperAppDialog(app = null) {
+  const scopes = app ? getDeveloperAppScopes(app).join(' ') : 'identify';
+  const redirectUris = app
+    ? getOAuthArrayField(app, 'redirectUris').join('\n')
+    : 'http://localhost/callback';
+  const values = await openSimpleFormDialog({
+    title: app ? 'Edit Application' : 'New Application',
+    fields: [
+      { name: 'name', label: 'Application name', value: app ? getDeveloperAppName(app) : '', maxLength: 80 },
+      {
+        name: 'description',
+        label: 'Description',
+        type: 'textarea',
+        rows: 3,
+        value: app ? getDeveloperAppDescription(app) : '',
+        maxLength: 240,
+        required: false,
+      },
+      {
+        name: 'redirectUris',
+        label: 'Redirect URLs',
+        type: 'textarea',
+        rows: 4,
+        value: redirectUris,
+        required: true,
+      },
+      {
+        name: 'allowedScopes',
+        label: 'Allowed scopes',
+        value: scopes,
+      },
+      {
+        name: 'iconUrl',
+        label: 'Icon URL',
+        value: app ? getIntegrationField(app, 'iconUrl', '') : '',
+        required: false,
+      },
+      {
+        name: 'botAccountId',
+        label: 'Linked bot ID',
+        value: app ? getIntegrationField(app, 'botAccountId', '') : '',
+        required: false,
+      },
+      {
+        name: 'isEnabled',
+        label: 'Status',
+        value: app && getIntegrationField(app, 'isEnabled', true) === false ? 'false' : 'true',
+        options: [
+          { value: 'true', label: 'Enabled' },
+          { value: 'false', label: 'Disabled' },
+        ],
+      },
+    ],
+    confirmText: app ? 'Save' : 'Create',
+    preserveExisting: true,
+  });
+
+  if (!values) {
+    return;
+  }
+
+  const payload = buildOAuthMutationPayload(values, app);
+  if (!payload.name || payload.redirectUris.length === 0) {
+    showAppMessage('Add an application name and at least one redirect URL.', 'error');
+    return;
+  }
+
+  try {
+    const endpoint = app ? 'UpdateOAuthApplication' : 'CreateOAuthApplication';
+    const response = await axios.post(`${homeApiBase}/api/OAuthApps/${endpoint}`, payload);
+    if (!app) {
+      showDeveloperAppSecret(response.data || {});
+    }
+    developerPortalLoaded = false;
+    await loadDeveloperPortalApplications({ force: true });
+    showAppMessage(app ? 'Application saved.' : 'Application created.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not save application.'), 'error');
+  }
+}
+
+async function rotateDeveloperAppSecret(app) {
+  const confirmed = await askConfirm(
+    'Rotate Client Secret',
+    'Existing clients will stop working until they use the new secret.',
+    { danger: true, confirmText: 'Rotate' }
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await axios.post(`${homeApiBase}/api/OAuthApps/RotateOAuthClientSecret`, {
+      applicationId: getDeveloperAppId(app),
+    });
+    showDeveloperAppSecret(response.data || {});
+    developerPortalLoaded = false;
+    await loadDeveloperPortalApplications({ force: true });
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not rotate client secret.'), 'error');
+  }
+}
+
+async function deleteDeveloperApp(app) {
+  const confirmed = await askConfirm(
+    'Delete Application',
+    `Delete ${getDeveloperAppName(app)}?`,
+    { danger: true, confirmText: 'Delete' }
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await axios.post(`${homeApiBase}/api/OAuthApps/DeleteOAuthApplication`, {
+      applicationId: getDeveloperAppId(app),
+    });
+    developerPortalLoaded = false;
+    await loadDeveloperPortalApplications({ force: true });
+    showAppMessage('Application deleted.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not delete application.'), 'error');
+  }
+}
+
+function renderDeveloperApp(app) {
+  const row = document.createElement('div');
+  row.className = 'developer-app-row';
+  row.appendChild(createAppIconElement(app));
+
+  const copy = document.createElement('div');
+  copy.className = 'developer-app-copy';
+  const name = document.createElement('strong');
+  name.textContent = getDeveloperAppName(app);
+  const desc = document.createElement('span');
+  desc.textContent = getDeveloperAppDescription(app);
+  const clientId = document.createElement('code');
+  clientId.textContent = `Client ID: ${getDeveloperAppId(app)}`;
+  const dates = document.createElement('span');
+  dates.textContent = `Created ${formatOAuthDate(getIntegrationField(app, 'createdAt', ''))} | Secret rotated ${formatOAuthDate(getIntegrationField(app, 'secretLastRotatedAt', ''))}`;
+  const scopes = document.createElement('div');
+  scopes.className = 'developer-scope-list';
+  getDeveloperAppScopes(app).forEach((scope) => {
+    const pill = document.createElement('span');
+    pill.className = 'developer-scope-pill';
+    pill.textContent = scope;
+    scopes.appendChild(pill);
+  });
+  copy.appendChild(name);
+  copy.appendChild(desc);
+  copy.appendChild(clientId);
+  copy.appendChild(dates);
+  copy.appendChild(scopes);
+
+  const actions = document.createElement('div');
+  actions.className = 'developer-app-actions';
+  [
+    ['Copy ID', () => copyIntegrationValue(getDeveloperAppId(app), 'Client ID copied.')],
+    ['Copy URL', () => copyIntegrationValue(getDeveloperAuthorizationUrl(app), 'Authorization URL copied.')],
+    ['Edit', () => openDeveloperAppDialog(app)],
+    ['Rotate', () => rotateDeveloperAppSecret(app)],
+    ['Delete', () => deleteDeveloperApp(app)],
+  ].forEach(([label, handler]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = label === 'Delete' ? 'settings-btn-danger settings-btn-compact' : 'server-tool-btn';
+    button.textContent = label;
+    button.addEventListener('click', handler);
+    actions.appendChild(button);
+  });
+
+  row.appendChild(copy);
+  row.appendChild(actions);
+  return row;
+}
+
+function renderDeveloperApps(apps = []) {
+  const list = document.getElementById('developerAppsList');
+  if (!list) {
+    return;
+  }
+
+  list.innerHTML = '';
+  if (!apps.length) {
+    list.innerHTML = '<div class="empty-state-card padded">No applications yet.</div>';
+    return;
+  }
+
+  apps.forEach((app) => list.appendChild(renderDeveloperApp(app)));
+}
+
+async function loadDeveloperPortalApplications({ force = false } = {}) {
+  const list = document.getElementById('developerAppsList');
+  if (!list || (developerPortalLoaded && !force)) {
+    return;
+  }
+
+  list.innerHTML = '<div class="empty-state-card padded">Loading applications...</div>';
+  setDeveloperPortalStatus('Loading applications...');
+  try {
+    const response = await axios.get(`${homeApiBase}/api/OAuthApps/GetOAuthApplications`);
+    const apps = Array.isArray(response.data) ? response.data : [];
+    renderDeveloperApps(apps);
+    setDeveloperPortalStatus(`${apps.length} ${apps.length === 1 ? 'application' : 'applications'}`);
+    developerPortalLoaded = true;
+  } catch (error) {
+    list.innerHTML = '<div class="empty-state-card padded">Could not load applications.</div>';
+    setDeveloperPortalStatus(getApiErrorMessage(error, 'Could not load applications.'), 'error');
+  }
+}
+
+function renderAuthorizedApp(authorization = {}) {
+  const row = document.createElement('div');
+  row.className = 'authorized-app-row';
+  row.appendChild(createAppIconElement(authorization, 'authorized-app-icon'));
+
+  const copy = document.createElement('div');
+  copy.className = 'authorized-app-copy';
+  const name = document.createElement('strong');
+  name.textContent = getIntegrationField(authorization, 'applicationName', 'Authorized app');
+  const desc = document.createElement('span');
+  const scopes = getOAuthArrayField(authorization, 'scopes').join(', ') || 'identify';
+  desc.textContent = `${scopes} | Authorized ${formatOAuthDate(getIntegrationField(authorization, 'createdAt', ''))}`;
+  copy.appendChild(name);
+  copy.appendChild(desc);
+
+  const actions = document.createElement('div');
+  actions.className = 'authorized-app-actions';
+  const revoke = document.createElement('button');
+  revoke.type = 'button';
+  revoke.className = 'settings-btn-danger';
+  revoke.textContent = 'Deauthorize';
+  revoke.addEventListener('click', () => revokeAuthorizedApp(getIntegrationField(authorization, 'id', '')));
+  actions.appendChild(revoke);
+
+  row.appendChild(copy);
+  row.appendChild(actions);
+  return row;
+}
+
+function renderAuthorizedApps(authorizations = []) {
+  const list = document.getElementById('authorizedAppsList');
+  if (!list) {
+    return;
+  }
+
+  list.innerHTML = '';
+  if (!authorizations.length) {
+    list.innerHTML = '<div class="empty-state-card padded">No authorized apps.</div>';
+    return;
+  }
+
+  authorizations.forEach((authorization) => list.appendChild(renderAuthorizedApp(authorization)));
+}
+
+async function loadAuthorizedApps({ force = false } = {}) {
+  const list = document.getElementById('authorizedAppsList');
+  if (!list || (authorizedAppsLoaded && !force)) {
+    return;
+  }
+
+  list.innerHTML = '<div class="empty-state-card padded">Loading authorized apps...</div>';
+  try {
+    const response = await axios.get(`${homeApiBase}/api/OAuthApps/GetAuthorizedApps`);
+    renderAuthorizedApps(Array.isArray(response.data) ? response.data : []);
+    authorizedAppsLoaded = true;
+  } catch (error) {
+    list.innerHTML = '<div class="empty-state-card padded">Could not load authorized apps.</div>';
+    showAppMessage(getApiErrorMessage(error, 'Could not load authorized apps.'), 'error');
+  }
+}
+
+async function revokeAuthorizedApp(authorizationId) {
+  if (!authorizationId) {
+    return;
+  }
+
+  const confirmed = await askConfirm(
+    'Deauthorize App',
+    'This app will lose access to your account.',
+    { danger: true, confirmText: 'Deauthorize' }
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await axios.post(`${homeApiBase}/api/OAuthApps/RevokeAuthorization`, {
+      authorizationId,
+    });
+    authorizedAppsLoaded = false;
+    await loadAuthorizedApps({ force: true });
+    showAppMessage('App deauthorized.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not deauthorize app.'), 'error');
+  }
+}
+
 function refreshSettingsModal() {
   loadAccountSettings().then(() => {
     loadSessions();
@@ -15480,6 +18395,16 @@ function switchSettingsTab(target) {
     ...state,
     selectedTab: target,
   }));
+
+  if (target === 'developer-portal') {
+    loadDeveloperPortalApplications().catch((error) => {
+      console.warn('Could not load developer portal:', error);
+    });
+  } else if (target === 'authorized-apps') {
+    loadAuthorizedApps().catch((error) => {
+      console.warn('Could not load authorized apps:', error);
+    });
+  }
 }
 window.switchSettingsTab = switchSettingsTab;
 
