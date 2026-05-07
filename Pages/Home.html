@@ -6,11 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Discord</title>
   <link rel="icon" href="../assets/img/titlePic.png" sizes="32x32" type="image/png" />
-  <link rel="stylesheet" href="../CSS/Home.css?v=21" />
+  <link rel="stylesheet" href="../CSS/Home.css?v=26" />
   <script src="../JS/AppConfig.js?v=1"></script>
   <script src="../JS/AppPaths.js?v=1"></script>
   <script src="../JS/emojis.js?v=3"></script>
-  <script src="../JS/Home.js?v=133" defer></script>
+  <script src="../JS/Home.js?v=138" defer></script>
 </head>
 
 <body>
@@ -130,8 +130,9 @@
           </div>
           <div class="header-controls">
             <button class="header-btn" onclick="startPrivateCall()" title="Start Voice Call">📞</button>
+            <button class="header-btn" type="button" onclick="openMediaBrowserDialog()" title="Browse Media">Media</button>
 
-            <form action="" class="search-form" onsubmit="event.preventDefault();">
+            <form action="" class="search-form" data-search-scope="conversation" onsubmit="event.preventDefault();">
               <input type="text" id="dmSearchInput" placeholder="Search" class="search-bar" />
               <span class="search-icon">🔍</span>
             </form>
@@ -192,6 +193,7 @@
               <button class="search-close-btn" onclick="closeSearchResults()">x</button>
             </div>
           </div>
+          <div id="searchActiveFilters" class="search-active-filters"></div>
           <div id="searchResultsList" class="search-results-list">
 
           </div>
@@ -290,7 +292,16 @@
         </button>
       </div>
       <div class="chatSection">
-        <p class="chatHeader">Text Channel</p>
+        <div class="server-chat-titlebar">
+          <p class="chatHeader">Text Channel</p>
+          <div class="server-title-actions">
+            <button class="header-btn" type="button" onclick="openMediaBrowserDialog()" title="Browse Media">Media</button>
+            <form action="" class="server-search-form" data-search-scope="server" onsubmit="event.preventDefault();">
+              <input type="text" id="serverSearchInput" placeholder="Search" class="search-bar" />
+              <span class="search-icon">🔍</span>
+            </form>
+          </div>
+        </div>
         <div class="server-call-strip">
           <div class="server-call-copy">
             <span>Voice Channel</span>
@@ -395,11 +406,32 @@
       <p class="closeSecond" onclick="closeSecondModal()">x</p>
       <h2 class="CreateSecondServerHead">Create Your Own Server</h2>
       <p class="modalSecondSubhead">
-        In order to help you with your setup, is your new server for just a
-        few friends or a larger community
+        Choose a starter layout for the channels you want.
       </p>
+      <div id="serverTemplateList" class="server-template-list" aria-label="Server templates">
+        <button type="button" class="server-template-option active" data-template-id="friends"
+          aria-pressed="true" onclick="selectServerTemplate('friends')">
+          <strong>Friends</strong>
+          <span>General chat, voice, and a stage.</span>
+        </button>
+        <button type="button" class="server-template-option" data-template-id="community"
+          aria-pressed="false" onclick="selectServerTemplate('community')">
+          <strong>Community</strong>
+          <span>Rules, announcements, intros, events.</span>
+        </button>
+        <button type="button" class="server-template-option" data-template-id="gaming"
+          aria-pressed="false" onclick="selectServerTemplate('gaming')">
+          <strong>Gaming</strong>
+          <span>Squads, clips, LFG, voice lobbies.</span>
+        </button>
+        <button type="button" class="server-template-option" data-template-id="study"
+          aria-pressed="false" onclick="selectServerTemplate('study')">
+          <strong>Study Group</strong>
+          <span>Homework help, resources, study rooms.</span>
+        </button>
+      </div>
       <button class="createServer" onclick="OpenCreationModal()">
-        For me and my friends
+        Continue
       </button>
       <p class="backSecondModal" onclick="BackToFirstModal()">Back</p>
     </div>
@@ -412,6 +444,7 @@
       <p class="modalCreationSubhead">
         Give your new server a personality with a name
       </p>
+      <p id="selectedServerTemplateName" class="selected-template-copy">Friends template</p>
       <form onsubmit="CreateServer(event)" class="form">
         <label for="serverNameInput" class="serverName">SERVER NAME</label>
         <input type="text" id="serverNameInput" class="serverInput" />
@@ -505,6 +538,7 @@
           <div class="settings-item" data-target="privacy">Privacy & Safety</div>
           <div class="settings-item" data-target="family">Family Center</div>
           <div class="settings-item" data-target="authorized-apps">Authorized Apps</div>
+          <div class="settings-item" data-target="developer-portal">Developer Portal</div>
           <div class="settings-item" data-target="devices">Devices</div>
           <div class="settings-item" data-target="connections">Connections</div>
           <div class="settings-item" data-target="clips">Clips</div>
@@ -664,6 +698,15 @@
               <button class="settings-btn-danger button-auto-width" id="disableTwoFactorBtn">Disable</button>
               <button class="settings-btn-primary button-auto-width" id="regenerateBackupCodesBtn">Backup Codes</button>
             </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Data Export</h3>
+          <p class="account-removal-text">Download a JSON copy of your account profile, settings, sessions, relationships, conversations, reports, and app authorizations.</p>
+          <div class="account-export-actions">
+            <button type="button" class="settings-btn-primary button-auto-width" id="downloadDataExportBtn">Download JSON</button>
+            <button type="button" class="settings-btn-primary button-auto-width" id="copyDataExportSummaryBtn">Copy Summary</button>
           </div>
 
           <div class="settings-separator"></div>
@@ -887,21 +930,25 @@
           <h2 class="settings-page-title">Authorized Apps</h2>
           <p class="form-desc extracted-inline-51">Apps you've authorized to access your account.</p>
 
-          <div class="apps-card">
-            <div class="app-item">
-              <div class="app-info">
-                <div class="app-name">Spotify</div>
-                <div class="app-desc">Added 2 months ago</div>
-              </div>
-              <button class="settings-btn-danger">Deauthorize</button>
-            </div>
-            <div class="app-item">
-              <div class="app-info">
-                <div class="app-name">Battle.net</div>
-                <div class="app-desc">Added 1 year ago</div>
-              </div>
-              <button class="settings-btn-danger">Deauthorize</button>
-            </div>
+          <div class="settings-inline-actions">
+            <button type="button" class="settings-btn-primary button-auto-width" id="refreshAuthorizedAppsBtn">Refresh</button>
+          </div>
+          <div class="apps-card" id="authorizedAppsList">
+            <div class="empty-state-card padded">Loading authorized apps...</div>
+          </div>
+        </div>
+
+        <div id="view-developer-portal" class="settings-view extracted-inline-2">
+          <h2 class="settings-page-title">Developer Portal</h2>
+          <p class="form-desc extracted-inline-51">Create OAuth apps, manage redirect URLs, and rotate client secrets.</p>
+
+          <div class="settings-inline-actions">
+            <button type="button" class="settings-btn-primary button-auto-width" id="createDeveloperAppBtn">New Application</button>
+            <button type="button" class="settings-btn-primary button-auto-width" id="refreshDeveloperAppsBtn">Refresh</button>
+          </div>
+          <div id="developerPortalStatus" class="developer-portal-status" role="status"></div>
+          <div class="apps-card developer-apps-card" id="developerAppsList">
+            <div class="empty-state-card padded">Loading applications...</div>
           </div>
         </div>
 
