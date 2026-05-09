@@ -9,6 +9,7 @@ const homeDefaultAvatarBackground = `url("${homeDefaultAvatarUrl}")`;
 const homeRingtoneUrl = homeAppPaths.assetUrl('assets/audio/ringtone.mp3');
 const homeLoginPageUrl = homeAppPaths.pageUrl('LogIn.html');
 const homeApiBase = homeAppPaths.apiBase || 'http://localhost:5018';
+const homeCdnBase = String(homeAppPaths.cdnBase || window.MYDISCORD_CONFIG?.cdnBase || '').replace(/\/+$/, '');
 const homeWsBase = homeApiBase.replace(/^http/i, 'ws');
 
 const displayStateClasses = ['is-hidden', 'is-block', 'is-flex', 'is-grid', 'is-inline-flex'];
@@ -19,6 +20,11 @@ const activityStatusMaxLength = 120;
 const defaultCustomStatusText = 'Click to add custom status';
 const profileBadgeMaxCount = 6;
 const messagePageSize = 50;
+const messageVirtualOverscanPx = 640;
+const messageVirtualAutoLoadThresholdPx = 96;
+const messageVirtualDefaultItemHeight = 92;
+const messageVirtualLoaderHeight = 52;
+const mediaUrlCacheMaxEntries = 500;
 const presenceStatusLabels = {
   online: 'Online',
   idle: 'Idle',
@@ -44,6 +50,8 @@ const profileBadgeCatalog = [
 ];
 const homeRuntimeCssRules = new Map();
 const profileSummaryCache = new Map();
+const virtualMessageLists = new WeakMap();
+const mediaUrlCache = new Map();
 let homeRuntimeCssElement = null;
 
 function getElement(target) {
@@ -126,7 +134,8 @@ function setAvatarFallback(element) {
 
 function applyDynamicProfileBanner(color, imageUrl = '') {
   const nextColor = normalizeHexColor(color, '#0c0c0c');
-  const backgroundImage = imageUrl ? `url("${cssString(imageUrl)}")` : 'none';
+  const resolvedImageUrl = resolveMediaUrl(imageUrl);
+  const backgroundImage = resolvedImageUrl ? `url("${cssString(resolvedImageUrl)}")` : 'none';
 
   document
     .querySelectorAll('.banner-color, .preview-banner, .profile-popout-header')
@@ -154,6 +163,7 @@ let currentServerRoles = [];
 let currentServerChannels = [];
 let currentServerCategories = [];
 let currentServerMembers = [];
+let currentServerAutoModRules = [];
 let currentServerSlashCommands = [];
 let currentServerSlashCommandServerId = null;
 let currentServerIconUrl = '';
@@ -495,6 +505,20 @@ function normalizeProfileBadges(values = []) {
   });
 
   return normalizedBadges;
+}
+
+function normalizeAccountUsernameList(values = []) {
+  const rawValues = Array.isArray(values) ? values : [];
+  const normalized = [];
+
+  rawValues.forEach((value) => {
+    const username = String(value || '').trim();
+    if (username && !normalized.some((item) => item.toLowerCase() === username.toLowerCase())) {
+      normalized.push(username);
+    }
+  });
+
+  return normalized;
 }
 
 function getProfileBadges(profile = {}) {
@@ -1150,20 +1174,340 @@ function createLoadOlderMessagesButton({ disabled = false, onClick }) {
   return wrapper;
 }
 
-function renderPaginatedMessages(container, scope, state, onLoadOlder) {
-  if (!container) return;
-  container.innerHTML = '';
-
-  if (state.hasMore || state.isLoadingOlder) {
-    container.appendChild(createLoadOlderMessagesButton({
-      disabled: state.isLoadingOlder,
-      onClick: onLoadOlder,
-    }));
+function getMessageVirtualItemKey(scope, item, index) {
+  if (item.type === 'loader') {
+    return `${scope}:loader`;
   }
 
-  state.messages.forEach((message) => {
-    container.appendChild(renderCompactMessage(message, scope));
+  const messageId = getMessageId(item.message);
+  return `${scope}:message:${messageId || index}`;
+}
+
+function getMessageVirtualItems(scope, state, onLoadOlder) {
+  const items = [];
+  if (state.hasMore || state.isLoadingOlder) {
+    items.push({
+      type: 'loader',
+      key: `${scope}:loader`,
+      disabled: state.isLoadingOlder,
+      onClick: onLoadOlder,
+    });
+  }
+
+  state.messages.forEach((message, index) => {
+    const item = { type: 'message', message };
+    item.key = getMessageVirtualItemKey(scope, item, index);
+    items.push(item);
   });
+
+  return items;
+}
+
+function ensureVirtualMessageList(container) {
+  let virtual = virtualMessageLists.get(container);
+  if (virtual && container.contains(virtual.shell)) {
+    return virtual;
+  }
+
+  const shell = document.createElement('div');
+  shell.className = 'virtual-message-list';
+
+  const topSpacer = document.createElement('div');
+  topSpacer.className = 'virtual-message-spacer';
+
+  const windowEl = document.createElement('div');
+  windowEl.className = 'virtual-message-window';
+
+  const bottomSpacer = document.createElement('div');
+  bottomSpacer.className = 'virtual-message-spacer';
+
+  shell.appendChild(topSpacer);
+  shell.appendChild(windowEl);
+  shell.appendChild(bottomSpacer);
+
+  container.classList.add('virtual-message-scroll');
+  container.replaceChildren(shell);
+
+  virtual = {
+    shell,
+    topSpacer,
+    windowEl,
+    bottomSpacer,
+    items: [],
+    heightCache: new Map(),
+    renderFrame: 0,
+    measureFrame: 0,
+    scope: '',
+    state: null,
+    onLoadOlder: null,
+  };
+
+  container.addEventListener('scroll', () => {
+    scheduleVirtualMessageRender(container);
+    maybeLoadOlderFromVirtualScroll(container);
+  }, { passive: true });
+
+  virtualMessageLists.set(container, virtual);
+  return virtual;
+}
+
+function resetVirtualMessageList(container) {
+  if (!container) return;
+  const virtual = virtualMessageLists.get(container);
+  if (virtual?.renderFrame) {
+    cancelAnimationFrame(virtual.renderFrame);
+  }
+  if (virtual?.measureFrame) {
+    cancelAnimationFrame(virtual.measureFrame);
+  }
+  virtualMessageLists.delete(container);
+  container.classList.remove('virtual-message-scroll');
+  container.replaceChildren();
+}
+
+function getVirtualItemHeight(virtual, item) {
+  return virtual.heightCache.get(item.key) ||
+    (item.type === 'loader' ? messageVirtualLoaderHeight : messageVirtualDefaultItemHeight);
+}
+
+function getVirtualLayout(items, virtual) {
+  let totalHeight = 0;
+  const offsets = items.map((item) => {
+    const offset = totalHeight;
+    totalHeight += getVirtualItemHeight(virtual, item);
+    return offset;
+  });
+
+  return { offsets, totalHeight };
+}
+
+function getVirtualRange(container, virtual, offsets, totalHeight) {
+  if (!virtual.items.length) {
+    return { startIndex: 0, endIndex: 0, topHeight: 0, bottomHeight: 0 };
+  }
+
+  const viewportHeight = container.clientHeight || 800;
+  const startBoundary = Math.max(0, container.scrollTop - messageVirtualOverscanPx);
+  const endBoundary = container.scrollTop + viewportHeight + messageVirtualOverscanPx;
+  let startIndex = 0;
+
+  while (
+    startIndex < virtual.items.length &&
+    offsets[startIndex] + getVirtualItemHeight(virtual, virtual.items[startIndex]) < startBoundary
+  ) {
+    startIndex += 1;
+  }
+
+  let endIndex = startIndex;
+  while (endIndex < virtual.items.length && offsets[endIndex] <= endBoundary) {
+    endIndex += 1;
+  }
+
+  endIndex = Math.min(virtual.items.length, Math.max(endIndex, startIndex + 1));
+  const topHeight = offsets[startIndex] || 0;
+  const renderedHeight = virtual.items
+    .slice(startIndex, endIndex)
+    .reduce((total, item) => total + getVirtualItemHeight(virtual, item), 0);
+  const bottomHeight = Math.max(0, totalHeight - topHeight - renderedHeight);
+
+  return { startIndex, endIndex, topHeight, bottomHeight };
+}
+
+function renderVirtualMessageItem(item, scope, state) {
+  if (item.type === 'loader') {
+    return createLoadOlderMessagesButton({
+      disabled: item.disabled,
+      onClick: item.onClick,
+    });
+  }
+
+  const element = renderCompactMessage(item.message, scope);
+  const deliveryState = item.message?.deliveryState || item.message?.DeliveryState || '';
+  if (deliveryState === 'failed' && typeof item.message.retryHandler === 'function') {
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'message-retry-btn';
+    retry.textContent = 'Retry';
+    retry.addEventListener('click', item.message.retryHandler);
+    element.appendChild(retry);
+  }
+
+  if (state?.messages?.includes(item.message)) {
+    element.dataset.virtualized = 'true';
+  }
+
+  return element;
+}
+
+function scheduleVirtualMessageRender(container) {
+  const virtual = virtualMessageLists.get(container);
+  if (!virtual || virtual.renderFrame) return;
+
+  virtual.renderFrame = requestAnimationFrame(() => {
+    virtual.renderFrame = 0;
+    renderVirtualMessageWindow(container);
+  });
+}
+
+function scheduleVirtualMessageMeasurement(container) {
+  const virtual = virtualMessageLists.get(container);
+  if (!virtual || virtual.measureFrame) return;
+
+  virtual.measureFrame = requestAnimationFrame(() => {
+    virtual.measureFrame = 0;
+    measureVirtualMessageWindow(container);
+  });
+}
+
+function getMeasuredElementHeight(element) {
+  const style = window.getComputedStyle(element);
+  const marginTop = parseFloat(style.marginTop) || 0;
+  const marginBottom = parseFloat(style.marginBottom) || 0;
+  return element.getBoundingClientRect().height + marginTop + marginBottom;
+}
+
+function measureVirtualMessageWindow(container) {
+  const virtual = virtualMessageLists.get(container);
+  if (!virtual) return;
+
+  let changed = false;
+  virtual.windowEl.querySelectorAll('[data-virtual-item-key]').forEach((element) => {
+    const key = element.dataset.virtualItemKey;
+    const nextHeight = Math.ceil(getMeasuredElementHeight(element));
+    if (!key || nextHeight <= 0) return;
+
+    const previousHeight = virtual.heightCache.get(key);
+    if (!previousHeight || Math.abs(previousHeight - nextHeight) > 1) {
+      virtual.heightCache.set(key, nextHeight);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    scheduleVirtualMessageRender(container);
+  }
+}
+
+function attachVirtualMediaMeasurementHandlers(container, element) {
+  element.querySelectorAll('img, video, audio').forEach((media) => {
+    const eventName = media.tagName === 'IMG' ? 'load' : 'loadedmetadata';
+    media.addEventListener(eventName, () => scheduleVirtualMessageMeasurement(container), { once: true });
+    media.addEventListener('error', () => scheduleVirtualMessageMeasurement(container), { once: true });
+  });
+}
+
+function renderVirtualMessageWindow(container) {
+  const virtual = virtualMessageLists.get(container);
+  if (!virtual) return;
+
+  const { offsets, totalHeight } = getVirtualLayout(virtual.items, virtual);
+  const { startIndex, endIndex, topHeight, bottomHeight } =
+    getVirtualRange(container, virtual, offsets, totalHeight);
+  const fragment = document.createDocumentFragment();
+
+  virtual.items.slice(startIndex, endIndex).forEach((item) => {
+    const element = renderVirtualMessageItem(item, virtual.scope, virtual.state);
+    element.dataset.virtualItemKey = item.key;
+    attachVirtualMediaMeasurementHandlers(container, element);
+    fragment.appendChild(element);
+  });
+
+  virtual.topSpacer.style.height = `${Math.round(topHeight)}px`;
+  virtual.bottomSpacer.style.height = `${Math.round(bottomHeight)}px`;
+  virtual.windowEl.replaceChildren(fragment);
+  scheduleVirtualMessageMeasurement(container);
+}
+
+function maybeLoadOlderFromVirtualScroll(container) {
+  const virtual = virtualMessageLists.get(container);
+  const state = virtual?.state;
+  if (!virtual?.onLoadOlder || !state?.hasMore || state.isLoadingOlder || !state.messages.length) {
+    return;
+  }
+
+  if (container.scrollTop <= messageVirtualAutoLoadThresholdPx) {
+    virtual.onLoadOlder();
+  }
+}
+
+function renderPaginatedMessages(container, scope, state, onLoadOlder) {
+  if (!container) return;
+  const virtual = ensureVirtualMessageList(container);
+  virtual.scope = scope;
+  virtual.state = state;
+  virtual.onLoadOlder = onLoadOlder;
+  virtual.items = getMessageVirtualItems(scope, state, onLoadOlder);
+
+  const activeKeys = new Set(virtual.items.map((item) => item.key));
+  Array.from(virtual.heightCache.keys()).forEach((key) => {
+    if (!activeKeys.has(key)) {
+      virtual.heightCache.delete(key);
+    }
+  });
+
+  renderVirtualMessageWindow(container);
+}
+
+function scrollMessageListToBottom(container) {
+  if (!container) return;
+
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+    renderVirtualMessageWindow(container);
+
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+      renderVirtualMessageWindow(container);
+    });
+  });
+}
+
+function removeMessageFromPaginationState(scope, conversationId, messageId) {
+  const state = getMessagePaginationState(scope, conversationId);
+  const normalizedMessageId = String(messageId || '');
+  state.messages = state.messages.filter((message) => String(getMessageId(message)) !== normalizedMessageId);
+  return state;
+}
+
+function getMessageContainerForScope(scope) {
+  if (scope === 'server') {
+    return chatMessages || document.querySelector('.chatMessages');
+  }
+
+  if (scope === 'dm' || scope === 'group') {
+    return document.querySelector('.messagesDisplay');
+  }
+
+  return null;
+}
+
+function getLoadOlderHandlerForScope(scope, conversationId) {
+  if (scope === 'server') {
+    return () => fetchServerMessages({ appendOlder: true });
+  }
+
+  if (scope === 'dm') {
+    return () => GetPrivateMessage({ appendOlder: true });
+  }
+
+  if (scope === 'group') {
+    return () => GetGroupMessages(conversationId, { appendOlder: true });
+  }
+
+  return null;
+}
+
+function renderMessageStateForScope(scope, conversationId, { stickToBottom = false } = {}) {
+  const container = getMessageContainerForScope(scope);
+  if (!container) return null;
+
+  const state = getMessagePaginationState(scope, conversationId);
+  renderPaginatedMessages(container, scope, state, getLoadOlderHandlerForScope(scope, conversationId));
+  if (stickToBottom) {
+    scrollMessageListToBottom(container);
+  }
+
+  return state;
 }
 
 function buildReplyPreviewFromMessage(message = {}) {
@@ -1735,7 +2079,7 @@ function createServerIconElement(serverName = '', iconUrl = '', className = 'ser
   icon.className = className;
   if (iconUrl) {
     const image = document.createElement('img');
-    image.src = iconUrl;
+    image.src = resolveMediaUrl(iconUrl);
     image.alt = '';
     image.loading = 'lazy';
     icon.appendChild(image);
@@ -1753,7 +2097,7 @@ function renderCurrentServerHeader(role = currentServerRole) {
   const banner = document.createElement('span');
   banner.className = 'current-server-banner';
   if (currentServerBannerUrl) {
-    banner.style.backgroundImage = `linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(43, 45, 49, 0.7)), url("${cssString(currentServerBannerUrl)}")`;
+    banner.style.backgroundImage = `linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(43, 45, 49, 0.7)), url("${cssString(resolveMediaUrl(currentServerBannerUrl))}")`;
   }
 
   const body = document.createElement('span');
@@ -1797,7 +2141,7 @@ async function openServer(server, fallbackRole = 'user') {
 
   renderCurrentServerHeader(role);
 
-  chatMessages.innerHTML = '';
+  resetVirtualMessageList(chatMessages);
 
   watchVoiceServer(server.serverID).catch((err) => {
     console.error('Voice roster watch failed:', err);
@@ -1951,10 +2295,58 @@ GetServer();
 function resolveMediaUrl(url = '') {
   const value = String(url || '').trim();
   if (!value) return '';
-  if (value.startsWith('/uploads/')) {
-    return `${homeApiBase}${value}`;
+
+  if (/^(data|blob|file):/i.test(value)) {
+    return value;
   }
+
+  if (mediaUrlCache.has(value)) {
+    return mediaUrlCache.get(value);
+  }
+
+  let resolvedUrl = value;
+  try {
+    const parsed = new URL(value, homeApiBase);
+    const isUpload = parsed.pathname.startsWith('/uploads/');
+    if (isUpload) {
+      const uploadPath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      const base = homeCdnBase || parsed.origin || homeApiBase;
+      resolvedUrl = `${base}${uploadPath}`;
+    }
+  } catch {
+    if (value.startsWith('/uploads/')) {
+      resolvedUrl = `${homeCdnBase || homeApiBase}${value}`;
+    }
+  }
+
+  mediaUrlCache.set(value, resolvedUrl);
+  if (mediaUrlCache.size > mediaUrlCacheMaxEntries) {
+    mediaUrlCache.delete(mediaUrlCache.keys().next().value);
+  }
+
+  return resolvedUrl;
+}
+
+function getUploadUrlFromResponse(data = {}) {
+  const rawUrl = data.url || data.Url || data.path || data.Path || data.cdnUrl || data.CdnUrl || '';
+  const value = String(rawUrl || '').trim();
+  if (!value) return '';
+
+  try {
+    const parsed = new URL(value, homeApiBase);
+    if (parsed.pathname.startsWith('/uploads/')) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    return value;
+  }
+
   return value;
+}
+
+function getUploadDisplayUrl(data = {}) {
+  const uploadUrl = getUploadUrlFromResponse(data);
+  return resolveMediaUrl(uploadUrl || data.cdnUrl || data.CdnUrl || '');
 }
 
 function isAllowedExpressionImageUrl(url = '') {
@@ -2880,6 +3272,10 @@ function renderCompactMessage(message, scope = 'server') {
   messageEl.dataset.messageId = messageId;
   messageEl.dataset.messageScope = scope;
   messageEl.classList.toggle('is-pinned', getMessageIsPinned(message));
+  const deliveryState = message.deliveryState || message.DeliveryState || '';
+  if (deliveryState) {
+    messageEl.classList.add(`message-${deliveryState}`);
+  }
   cacheMessageForScope(scope, message);
 
   const header = document.createElement('div');
@@ -3171,6 +3567,32 @@ function jumpToMessage(messageId, scope = getActiveMessageScope()) {
   const selector = `.compact-message[data-message-scope="${scope}"][data-message-id="${escapeCssIdentifier(messageId)}"]`;
   const target = document.querySelector(selector);
   if (!target) {
+    const container = getMessageContainerForScope(scope);
+    const virtual = container ? virtualMessageLists.get(container) : null;
+    const virtualIndex = virtual?.items.findIndex((item) =>
+      item.type === 'message' && String(getMessageId(item.message)) === String(messageId)
+    ) ?? -1;
+
+    if (container && virtual && virtualIndex >= 0) {
+      const { offsets } = getVirtualLayout(virtual.items, virtual);
+      const item = virtual.items[virtualIndex];
+      const itemHeight = getVirtualItemHeight(virtual, item);
+      container.scrollTop = Math.max(
+        0,
+        offsets[virtualIndex] - ((container.clientHeight || 0) / 2) + (itemHeight / 2)
+      );
+      renderVirtualMessageWindow(container);
+
+      requestAnimationFrame(() => {
+        const renderedTarget = document.querySelector(selector);
+        if (!renderedTarget) return;
+        renderedTarget.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        renderedTarget.classList.add('message-jump-highlight');
+        window.setTimeout(() => renderedTarget.classList.remove('message-jump-highlight'), 1400);
+      });
+      return;
+    }
+
     showAppMessage('That message is not loaded in this view.', 'info');
     return;
   }
@@ -4405,7 +4827,7 @@ async function fetchServerMessages({ appendOlder = false } = {}) {
     if (appendOlder) {
       chatMessages.scrollTop = chatMessages.scrollHeight - previousScrollHeight + previousScrollTop;
     } else if (shouldStickBottom) {
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+      scrollMessageListToBottom(chatMessages);
     }
 
     await markSelectedChannelRead(nextState.messages);
@@ -4461,17 +4883,18 @@ async function ServerChat(event) {
     ReplyToMessageId: replyDraft?.messageId || null,
   };
 
-  const pendingMessage = renderCompactMessage({
+  const pendingDraft = {
     ...formDataObject,
     messagesUserSender: JWTusername,
     userText: messageText,
     date: formDataObject.Date,
     replyToMessageId: replyDraft?.messageId || null,
     replyPreview: replyDraft?.preview || null,
-    });
-    pendingMessage.classList.add('message-pending');
-    chatMessages.appendChild(pendingMessage);
-    if (input) input.value = '';
+    deliveryState: 'pending',
+  };
+  upsertMessageIntoPaginationState('server', selectedChannelID, pendingDraft);
+  renderMessageStateForScope('server', selectedChannelID, { stickToBottom: true });
+  if (input) input.value = '';
 
   try {
     await axios.post(
@@ -4479,66 +4902,94 @@ async function ServerChat(event) {
       formDataObject
     );
 
-    pendingMessage.classList.remove('message-pending');
-    pendingMessage.classList.add('message-delivered');
+    pendingDraft.deliveryState = 'delivered';
+    renderMessageStateForScope('server', selectedChannelID);
     if (replyDraft && pendingReplyDraft === replyDraft) {
       clearReplyDraft();
     }
     await fetchServerMessages();
   } catch (e) {
     console.error('msg send failed:', e);
-    pendingMessage.classList.remove('message-pending');
-    pendingMessage.classList.add('message-failed');
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.className = 'message-retry-btn';
-    retry.textContent = 'Retry';
-    retry.addEventListener('click', () => {
+    pendingDraft.deliveryState = 'failed';
+    pendingDraft.retryHandler = () => {
+      removeMessageFromPaginationState('server', selectedChannelID, messageId);
+      renderMessageStateForScope('server', selectedChannelID);
       form.querySelector('.chatInput').value = messageText;
-      pendingMessage.remove();
       ServerChat({ preventDefault() {}, target: form });
-    });
-    pendingMessage.appendChild(retry);
+    };
+    renderMessageStateForScope('server', selectedChannelID, { stickToBottom: true });
     showAppMessage(getApiErrorMessage(e, 'Message failed to send.'), 'error');
   }
 }
 
 async function runOptimisticMessageSend({
   container,
+  scope = null,
+  conversationId = null,
   draft,
   send,
   rollbackInput,
   refresh,
   failureMessage = 'Message failed to send.',
 }) {
-  const pendingMessage = renderCompactMessage(draft);
-  pendingMessage.classList.add('message-pending');
-  container.appendChild(pendingMessage);
-  container.scrollTop = container.scrollHeight;
+  const pendingDraft = {
+    ...draft,
+    deliveryState: 'pending',
+  };
+  if (!getMessageId(pendingDraft)) {
+    pendingDraft.id = generateUUID();
+  }
+
+  let pendingMessage = null;
+  if (scope && conversationId) {
+    upsertMessageIntoPaginationState(scope, conversationId, pendingDraft);
+    renderMessageStateForScope(scope, conversationId, { stickToBottom: true });
+  } else {
+    pendingMessage = renderCompactMessage(pendingDraft);
+    container.appendChild(pendingMessage);
+    container.scrollTop = container.scrollHeight;
+  }
 
   try {
     const result = await send();
-    pendingMessage.classList.remove('message-pending');
-    pendingMessage.classList.add('message-delivered');
+    pendingDraft.deliveryState = 'delivered';
+    if (scope && conversationId) {
+      renderMessageStateForScope(scope, conversationId);
+    } else if (pendingMessage) {
+      pendingMessage.classList.remove('message-pending');
+      pendingMessage.classList.add('message-delivered');
+    }
     if (typeof refresh === 'function') {
+      if (scope && conversationId) {
+        removeMessageFromPaginationState(scope, conversationId, getMessageId(pendingDraft));
+      }
       await refresh(result);
     }
     return result;
   } catch (error) {
-    pendingMessage.classList.remove('message-pending');
-    pendingMessage.classList.add('message-failed');
-    if (typeof rollbackInput === 'function') {
-      rollbackInput();
-    }
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.className = 'message-retry-btn';
-    retry.textContent = 'Retry';
-    retry.addEventListener('click', () => {
-      pendingMessage.remove();
+    pendingDraft.deliveryState = 'failed';
+    pendingDraft.retryHandler = () => {
+      if (scope && conversationId) {
+        removeMessageFromPaginationState(scope, conversationId, getMessageId(pendingDraft));
+        renderMessageStateForScope(scope, conversationId);
+      } else {
+        pendingMessage?.remove();
+      }
       rollbackInput?.();
-    });
-    pendingMessage.appendChild(retry);
+    };
+
+    if (scope && conversationId) {
+      renderMessageStateForScope(scope, conversationId, { stickToBottom: true });
+    } else if (pendingMessage) {
+      pendingMessage.classList.remove('message-pending');
+      pendingMessage.classList.add('message-failed');
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'message-retry-btn';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', pendingDraft.retryHandler);
+      pendingMessage.appendChild(retry);
+    }
     showAppMessage(getApiErrorMessage(error, failureMessage), 'error');
     throw error;
   }
@@ -4969,9 +5420,7 @@ function handleDirectSocketMessage(event) {
 
   const messagesDisplay = document.querySelector('.messagesDisplay');
   upsertMessageIntoPaginationState('dm', currentFriend, message);
-  const messageElement = renderCompactMessage(message, 'dm');
-  messagesDisplay.appendChild(messageElement);
-  messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+  renderMessageStateForScope('dm', currentFriend, { stickToBottom: true });
   currentChatHistory.push({
     privateMessageID: message.PrivateMessageID || message.privateMessageID,
     messagesUserSender: sender,
@@ -5001,9 +5450,7 @@ async function handleGroupSocketMessage(event) {
       conversationName: currentGroupName,
     });
     upsertMessageIntoPaginationState('group', groupId, message);
-    const messageElement = renderCompactMessage(message, 'group');
-    messagesDisplay.appendChild(messageElement);
-    messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+    renderMessageStateForScope('group', groupId, { stickToBottom: true });
     currentChatHistory.push({
       id: message.Id || message.id,
       messagesUserSender: getMessageSender(message),
@@ -5113,6 +5560,8 @@ async function PrivateMessage(event) {
     if (input) input.value = '';
     const result = await runOptimisticMessageSend({
       container: messagesDisplay,
+      scope: 'group',
+      conversationId: currentGroupId,
       draft: {
         sender: JWTusername,
         content,
@@ -5152,6 +5601,8 @@ async function PrivateMessage(event) {
 
     const result = await runOptimisticMessageSend({
       container: messagesDisplay,
+      scope: 'dm',
+      conversationId: currentFriend,
       draft: {
         privateMessageID: messageId,
         messagesUserSender: JWTusername,
@@ -5245,7 +5696,7 @@ async function GetPrivateMessage({ appendOlder = false } = {}) {
     if (appendOlder) {
       messagesDisplay.scrollTop = messagesDisplay.scrollHeight - previousScrollHeight + previousScrollTop;
     } else if (shouldStickBottom || !nextState.olderPagesLoaded) {
-      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+      scrollMessageListToBottom(messagesDisplay);
     }
 
     if (
@@ -5496,7 +5947,7 @@ function renderPublicServerListings(servers = []) {
     const row = document.createElement('div');
     row.className = 'publicServerListing';
     if (serverBannerUrl) {
-      row.style.backgroundImage = `linear-gradient(90deg, rgba(35, 36, 40, 0.92), rgba(35, 36, 40, 0.78)), url("${cssString(serverBannerUrl)}")`;
+      row.style.backgroundImage = `linear-gradient(90deg, rgba(35, 36, 40, 0.92), rgba(35, 36, 40, 0.78)), url("${cssString(resolveMediaUrl(serverBannerUrl))}")`;
     }
 
     const icon = document.createElement('div');
@@ -6879,7 +7330,7 @@ async function GetGroupMessages(groupId, { appendOlder = false } = {}) {
     if (appendOlder) {
       messagesDisplay.scrollTop = messagesDisplay.scrollHeight - previousScrollHeight + previousScrollTop;
     } else if (shouldStickBottom || !nextState.olderPagesLoaded) {
-      messagesDisplay.scrollTop = messagesDisplay.scrollHeight;
+      scrollMessageListToBottom(messagesDisplay);
     }
 
     if (
@@ -9235,6 +9686,7 @@ function renderServerManagementControls(container) {
     ['Listing', updatePublicListingFromPrompt],
     ['Welcome', updateServerWelcomeFromPrompt],
     ['Rules', updateServerVerificationFromPrompt],
+    ['AutoMod', openAutoModRulesDialog],
     ['Reports', openServerReportsDialog],
     ['Audit', openAuditLogsDialog],
     ['Leave', leaveSelectedServer],
@@ -9343,7 +9795,7 @@ function openServerAppearanceDialog() {
     const iconUrl = iconInput.value.trim();
     const bannerUrl = bannerInput.value.trim();
     previewBanner.style.backgroundImage = bannerUrl
-      ? `linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(35, 36, 40, 0.62)), url("${cssString(bannerUrl)}")`
+      ? `linear-gradient(180deg, rgba(0, 0, 0, 0.08), rgba(35, 36, 40, 0.62)), url("${cssString(resolveMediaUrl(bannerUrl))}")`
       : '';
     previewIcon.innerHTML = '';
     previewIcon.appendChild(createServerIconElement(currentServerName, iconUrl, 'server-appearance-preview-icon-inner'));
@@ -9571,6 +10023,10 @@ function getServerWelcomeStorageKey(serverId = selectedServerID) {
   return `mydiscord.serverWelcome.${JWTusername || 'guest'}.${serverId || 'unknown'}`;
 }
 
+function getServerWelcomeProgressKey(serverId = selectedServerID) {
+  return `mydiscord.serverWelcomeProgress.${JWTusername || 'guest'}.${serverId || 'unknown'}`;
+}
+
 function hasLocallyCompletedServerWelcome(serverId = selectedServerID) {
   try {
     return localStorage.getItem(getServerWelcomeStorageKey(serverId)) === 'done';
@@ -9582,9 +10038,30 @@ function hasLocallyCompletedServerWelcome(serverId = selectedServerID) {
 function markServerWelcomeCompleteLocally(serverId = selectedServerID) {
   try {
     localStorage.setItem(getServerWelcomeStorageKey(serverId), 'done');
+    localStorage.removeItem(getServerWelcomeProgressKey(serverId));
   } catch {
     // Local storage can be unavailable in hardened webviews; server completion still applies.
   }
+}
+
+function readServerWelcomeProgress(serverId = selectedServerID) {
+  try {
+    const raw = localStorage.getItem(getServerWelcomeProgressKey(serverId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((index) => Number.isInteger(index)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeServerWelcomeProgress(indexes = [], serverId = selectedServerID) {
+  const normalized = Array.from(new Set(indexes.filter((index) => Number.isInteger(index))));
+  try {
+    localStorage.setItem(getServerWelcomeProgressKey(serverId), JSON.stringify(normalized));
+  } catch {
+    // Progress is a convenience layer; the server completion flag remains canonical.
+  }
+  return normalized;
 }
 
 function shouldShowServerWelcomeScreen() {
@@ -9680,7 +10157,7 @@ function openServerWelcomeScreen({ preview = false } = {}) {
   const header = document.createElement('div');
   header.className = 'server-welcome-header';
   if (currentServerBannerUrl) {
-    header.style.backgroundImage = `linear-gradient(90deg, rgba(35, 36, 40, 0.88), rgba(35, 36, 40, 0.68)), url("${cssString(currentServerBannerUrl)}")`;
+    header.style.backgroundImage = `linear-gradient(90deg, rgba(35, 36, 40, 0.88), rgba(35, 36, 40, 0.68)), url("${cssString(resolveMediaUrl(currentServerBannerUrl))}")`;
   }
 
   const icon = document.createElement('div');
@@ -9700,10 +10177,7 @@ function openServerWelcomeScreen({ preview = false } = {}) {
   closeButton.type = 'button';
   closeButton.className = 'server-welcome-close';
   closeButton.textContent = 'x';
-  closeButton.addEventListener('click', async () => {
-    if (!preview) {
-      await completeSelectedServerOnboarding();
-    }
+  closeButton.addEventListener('click', () => {
     closeServerWelcomeScreen();
   });
 
@@ -9722,12 +10196,21 @@ function openServerWelcomeScreen({ preview = false } = {}) {
   const backButton = document.createElement('button');
   backButton.type = 'button';
   backButton.className = 'account-action-cancel';
-  backButton.textContent = 'Back';
   const nextButton = document.createElement('button');
   nextButton.type = 'button';
   nextButton.className = 'account-action-submit';
 
   let activeScreen = 0;
+  let completedSteps = readServerWelcomeProgress()
+    .filter((index) => index >= 0 && index < currentServerWelcomeChecklist.length);
+
+  const toggleWelcomeStep = (index) => {
+    completedSteps = completedSteps.includes(index)
+      ? completedSteps.filter((item) => item !== index)
+      : [...completedSteps, index];
+    writeServerWelcomeProgress(completedSteps);
+    renderScreen();
+  };
 
   const renderScreen = () => {
     tabs.innerHTML = '';
@@ -9757,13 +10240,21 @@ function openServerWelcomeScreen({ preview = false } = {}) {
       body.appendChild(message);
       body.appendChild(meta);
     } else {
+      const progress = document.createElement('div');
+      progress.className = 'server-welcome-progress';
+      progress.textContent = `${completedSteps.length}/${currentServerWelcomeChecklist.length} steps checked`;
+      body.appendChild(progress);
+
       const checklist = document.createElement('div');
       checklist.className = 'server-welcome-checklist';
       currentServerWelcomeChecklist.forEach((item, index) => {
-        const row = document.createElement('div');
+        const row = document.createElement('button');
+        row.type = 'button';
         row.className = 'server-welcome-check-item';
+        row.classList.toggle('complete', completedSteps.includes(index));
+        row.addEventListener('click', () => toggleWelcomeStep(index));
         const marker = document.createElement('span');
-        marker.textContent = String(index + 1);
+        marker.textContent = completedSteps.includes(index) ? 'OK' : String(index + 1);
         const text = document.createElement('p');
         text.textContent = item;
         row.appendChild(marker);
@@ -9787,11 +10278,25 @@ function openServerWelcomeScreen({ preview = false } = {}) {
       }
     }
 
-    backButton.disabled = activeScreen === 0;
-    nextButton.textContent = activeScreen === 0 ? 'Next' : preview ? 'Close' : 'Finish';
+    backButton.disabled = false;
+    backButton.textContent = activeScreen === 0 ? 'Later' : 'Back';
+    const allStepsChecked = currentServerWelcomeChecklist.length === 0 ||
+      completedSteps.length >= currentServerWelcomeChecklist.length;
+    nextButton.disabled = activeScreen === 1 && !preview && !allStepsChecked;
+    nextButton.textContent = activeScreen === 0
+      ? 'Next'
+      : preview
+        ? 'Close'
+        : allStepsChecked
+          ? 'Finish'
+          : `Finish (${completedSteps.length}/${currentServerWelcomeChecklist.length})`;
   };
 
   backButton.addEventListener('click', () => {
+    if (activeScreen === 0) {
+      closeServerWelcomeScreen();
+      return;
+    }
     activeScreen = Math.max(0, activeScreen - 1);
     renderScreen();
   });
@@ -9820,9 +10325,6 @@ function openServerWelcomeScreen({ preview = false } = {}) {
 
   overlay.addEventListener('click', async (event) => {
     if (event.target === overlay) {
-      if (!preview) {
-        await completeSelectedServerOnboarding();
-      }
       closeServerWelcomeScreen();
     }
   });
@@ -9937,6 +10439,257 @@ async function updateServerVerificationFromPrompt() {
     showAppMessage('Server rules updated.', 'success');
   } catch (error) {
     showAppMessage(getApiErrorMessage(error, 'Could not update server rules.'), 'error');
+  }
+}
+
+const AUTOMOD_TRIGGER_OPTIONS = [
+  { value: 'keyword', label: 'Keyword' },
+  { value: 'invite_link', label: 'Invite link' },
+  { value: 'mention_spam', label: 'Mention spam' },
+  { value: 'link', label: 'Link' },
+];
+
+function getAutoModField(rule = {}, key, fallback = '') {
+  const pascalKey = key.charAt(0).toUpperCase() + key.slice(1);
+  return rule[key] ?? rule[pascalKey] ?? fallback;
+}
+
+function getAutoModRuleId(rule = {}) {
+  return String(getAutoModField(rule, 'id', '') || '');
+}
+
+function formatAutoModTrigger(rule = {}) {
+  const triggerType = getAutoModField(rule, 'triggerType', 'keyword');
+  const triggerValue = getAutoModField(rule, 'triggerValue', '');
+  if (triggerType === 'mention_spam') {
+    return `Mention spam > ${triggerValue || '5'}`;
+  }
+  if (triggerType === 'invite_link' || triggerType === 'link') {
+    return formatRoleName(triggerType);
+  }
+  return triggerValue ? `Keyword: ${triggerValue}` : 'Keyword';
+}
+
+function formatAutoModAction(rule = {}) {
+  const actionType = getAutoModField(rule, 'actionType', 'block_message');
+  return actionType === 'flag' ? 'Flag' : 'Block message';
+}
+
+function renderAutoModRules(list, status, reload) {
+  list.innerHTML = '';
+  if (!currentServerAutoModRules.length) {
+    const empty = document.createElement('div');
+    empty.className = 'automod-empty';
+    empty.textContent = 'No AutoMod rules yet.';
+    list.appendChild(empty);
+    return;
+  }
+
+  currentServerAutoModRules.forEach((rule) => {
+    const row = document.createElement('div');
+    row.className = 'automod-rule-row';
+    row.classList.toggle('disabled', getAutoModField(rule, 'isEnabled', true) === false);
+
+    const marker = document.createElement('span');
+    marker.className = 'automod-rule-marker';
+    marker.textContent = getAutoModField(rule, 'isEnabled', true) === false ? 'Off' : 'On';
+
+    const copy = document.createElement('div');
+    copy.className = 'automod-rule-copy';
+    const name = document.createElement('strong');
+    name.textContent = getAutoModField(rule, 'name', 'AutoMod rule');
+    const meta = document.createElement('span');
+    meta.textContent = `${formatAutoModTrigger(rule)} | ${formatAutoModAction(rule)} | ${getAutoModField(rule, 'timesTriggered', 0)} hits`;
+    copy.appendChild(name);
+    copy.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'automod-rule-actions';
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'server-tool-btn';
+    editButton.textContent = 'Edit';
+    editButton.addEventListener('click', () => openAutoModRuleEditor(rule, reload));
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'settings-btn-danger settings-btn-compact';
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', () => deleteAutoModRule(rule, reload, status));
+    actions.appendChild(editButton);
+    actions.appendChild(deleteButton);
+
+    row.appendChild(marker);
+    row.appendChild(copy);
+    row.appendChild(actions);
+    list.appendChild(row);
+  });
+}
+
+async function openAutoModRulesDialog() {
+  if (!selectedServerID) return;
+
+  closeAccountActionDialog();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog automod-dialog';
+
+  const header = document.createElement('div');
+  header.className = 'automod-dialog-header';
+  const titleBlock = document.createElement('div');
+  const heading = document.createElement('h3');
+  heading.textContent = 'AutoMod';
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = currentServerName || 'Server moderation';
+  titleBlock.appendChild(heading);
+  titleBlock.appendChild(copy);
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'account-action-submit';
+  addButton.textContent = '+ Rule';
+  header.appendChild(titleBlock);
+  header.appendChild(addButton);
+
+  const status = document.createElement('div');
+  status.className = 'role-manager-status';
+  status.setAttribute('role', 'status');
+
+  const list = document.createElement('div');
+  list.className = 'automod-rule-list';
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'account-action-cancel';
+  closeButton.textContent = 'Close';
+  actions.appendChild(closeButton);
+
+  const reload = async () => {
+    status.textContent = 'Loading rules...';
+    try {
+      const res = await axios.get(
+        `${homeApiBase}/api/Server/GetAutoModRules?serverId=${encodeURIComponent(selectedServerID)}`
+      );
+      currentServerAutoModRules = Array.isArray(res.data) ? res.data : [];
+      status.textContent = `${currentServerAutoModRules.length} rules`;
+      status.dataset.variant = '';
+      renderAutoModRules(list, status, reload);
+    } catch (error) {
+      status.textContent = getApiErrorMessage(error, 'Could not load AutoMod rules.');
+      status.dataset.variant = 'error';
+    }
+  };
+
+  addButton.addEventListener('click', () => openAutoModRuleEditor(null, reload));
+  closeButton.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+
+  dialog.appendChild(header);
+  dialog.appendChild(status);
+  dialog.appendChild(list);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  await reload();
+}
+
+async function openAutoModRuleEditor(rule = null, reload = null) {
+  const isEdit = Boolean(rule);
+  const values = await openSimpleFormDialog({
+    title: isEdit ? 'Edit AutoMod Rule' : 'New AutoMod Rule',
+    description: 'Keyword rules use comma or line-separated terms. Mention spam rules use a numeric threshold.',
+    fields: [
+      {
+        name: 'name',
+        label: 'Rule name',
+        value: isEdit ? getAutoModField(rule, 'name', '') : '',
+        maxLength: 80,
+      },
+      {
+        name: 'triggerType',
+        label: 'Trigger',
+        value: isEdit ? getAutoModField(rule, 'triggerType', 'keyword') : 'keyword',
+        options: AUTOMOD_TRIGGER_OPTIONS,
+      },
+      {
+        name: 'triggerValue',
+        label: 'Trigger value',
+        type: 'textarea',
+        rows: 4,
+        value: isEdit ? getAutoModField(rule, 'triggerValue', '') : '',
+        maxLength: 1000,
+        required: false,
+      },
+      {
+        name: 'actionType',
+        label: 'Action',
+        value: isEdit ? getAutoModField(rule, 'actionType', 'block_message') : 'block_message',
+        options: [
+          { value: 'block_message', label: 'Block message' },
+          { value: 'flag', label: 'Flag in audit log' },
+        ],
+      },
+      {
+        name: 'isEnabled',
+        label: 'Status',
+        value: isEdit && getAutoModField(rule, 'isEnabled', true) === false ? 'false' : 'true',
+        options: [
+          { value: 'true', label: 'Enabled' },
+          { value: 'false', label: 'Disabled' },
+        ],
+      },
+    ],
+    confirmText: isEdit ? 'Save' : 'Create',
+    preserveExisting: true,
+  });
+
+  if (!values) return;
+
+  const payload = {
+    ruleId: isEdit ? getAutoModRuleId(rule) : null,
+    serverId: selectedServerID,
+    name: values.name,
+    triggerType: values.triggerType,
+    triggerValue: values.triggerValue,
+    actionType: values.actionType,
+    isEnabled: values.isEnabled === 'true',
+  };
+
+  try {
+    const endpoint = isEdit ? 'UpdateAutoModRule' : 'CreateAutoModRule';
+    await axios.post(`${homeApiBase}/api/Server/${endpoint}`, payload);
+    showAppMessage(isEdit ? 'AutoMod rule saved.' : 'AutoMod rule created.', 'success');
+    if (reload) await reload();
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not save AutoMod rule.'), 'error');
+  }
+}
+
+async function deleteAutoModRule(rule, reload, status) {
+  if (!await askConfirm(
+    'Delete AutoMod Rule',
+    `Delete ${getAutoModField(rule, 'name', 'this rule')}?`,
+    { danger: true, confirmText: 'Delete', preserveExisting: true }
+  )) return;
+
+  try {
+    await axios.post(`${homeApiBase}/api/Server/DeleteAutoModRule`, {
+      serverId: selectedServerID,
+      ruleId: getAutoModRuleId(rule),
+    });
+    showAppMessage('AutoMod rule deleted.', 'success');
+    if (reload) await reload();
+  } catch (error) {
+    if (status) {
+      status.textContent = getApiErrorMessage(error, 'Could not delete AutoMod rule.');
+      status.dataset.variant = 'error';
+    }
+    showAppMessage(getApiErrorMessage(error, 'Could not delete AutoMod rule.'), 'error');
   }
 }
 
@@ -11731,7 +12484,57 @@ function getActiveReportScope(targetType = 'user') {
   return 'account';
 }
 
-function buildReportPayload({ targetType, scopeType, message, targetUsername, reason, description }) {
+function getBlockedUsers(state = readSettingsState()) {
+  return normalizeAccountUsernameList(state.blockedUsers || []);
+}
+
+function isUserBlocked(username, state = readSettingsState()) {
+  const target = String(username || '').trim();
+  if (!target) return false;
+  return getBlockedUsers(state).some((item) => item.toLowerCase() === target.toLowerCase());
+}
+
+function setBlockedUsers(blockedUsers = []) {
+  const nextBlockedUsers = normalizeAccountUsernameList(blockedUsers);
+  writeSettingsState((state) => ({
+    ...state,
+    blockedUsers: nextBlockedUsers,
+  }));
+  return nextBlockedUsers;
+}
+
+async function blockAccountUser(targetUsername, { silent = false } = {}) {
+  const username = String(targetUsername || '').trim();
+  if (!username || username === JWTusername) return [];
+
+  const response = await axios.post(`${homeApiBase}/api/Account/BlockUser`, {
+    targetUsername: username,
+  });
+  const blockedUsers = setBlockedUsers(response.data?.blockedUsers || [...getBlockedUsers(), username]);
+  if (!silent) {
+    showAppMessage(`${username} blocked.`, 'success');
+  }
+  return blockedUsers;
+}
+
+async function unblockAccountUser(targetUsername, { silent = false } = {}) {
+  const username = String(targetUsername || '').trim();
+  if (!username) return [];
+
+  const response = await axios.post(`${homeApiBase}/api/Account/UnblockUser`, {
+    targetUsername: username,
+  });
+  const blockedUsers = setBlockedUsers(
+    response.data?.blockedUsers ||
+    getBlockedUsers().filter((item) => item.toLowerCase() !== username.toLowerCase())
+  );
+  if (!silent) {
+    showAppMessage(`${username} unblocked.`, 'success');
+  }
+  return blockedUsers;
+}
+
+function buildReportPayload({ targetType, scopeType, message, targetUsername, reason, description, blockTarget = false }) {
   const normalizedScope = scopeType || getActiveReportScope(targetType);
   const payload = {
     scopeType: normalizedScope,
@@ -11739,6 +12542,7 @@ function buildReportPayload({ targetType, scopeType, message, targetUsername, re
     targetUsername,
     reason,
     description,
+    blockTarget: Boolean(blockTarget),
   };
 
   if (normalizedScope === 'server' && selectedServerID) {
@@ -11764,6 +12568,8 @@ async function openReportDialog({ targetType, scopeType = 'account', message = n
   const targetLabel = isMessageReport
     ? `message from ${targetUsername || 'this user'}`
     : `user ${targetUsername}`;
+  const canBlockTarget = Boolean(targetUsername && targetUsername !== JWTusername);
+  const alreadyBlocked = canBlockTarget && isUserBlocked(targetUsername);
 
   const result = await openSimpleFormDialog({
     title: isMessageReport ? 'Report Message' : 'Report User',
@@ -11782,6 +12588,15 @@ async function openReportDialog({ targetType, scopeType = 'account', message = n
         rows: 4,
         required: false,
       },
+      ...(canBlockTarget ? [{
+        name: 'blockTarget',
+        label: alreadyBlocked ? 'Block status' : 'Also block this user',
+        value: alreadyBlocked ? 'true' : 'false',
+        options: [
+          { value: 'false', label: 'No, just report' },
+          { value: 'true', label: alreadyBlocked ? 'Already blocked' : 'Block and report' },
+        ],
+      }] : []),
     ],
     confirmText: 'Submit Report',
     danger: true,
@@ -11796,10 +12611,14 @@ async function openReportDialog({ targetType, scopeType = 'account', message = n
     targetUsername,
     reason: result.reason,
     description: result.description?.trim() || null,
+    blockTarget: result.blockTarget === 'true',
   });
 
   try {
     await axios.post(`${homeApiBase}/api/Reports/SubmitReport`, payload);
+    if (payload.blockTarget && targetUsername) {
+      setBlockedUsers([...getBlockedUsers(), targetUsername]);
+    }
     showAppMessage('Report submitted.', 'success');
   } catch (error) {
     showAppMessage(getApiErrorMessage(error, 'Could not submit report.'), 'error');
@@ -11815,12 +12634,18 @@ function formatReportStatus(status = '') {
   return formatAuditAction(status || 'open');
 }
 
+function getReportValue(report = {}, key, fallback = '') {
+  const pascalKey = key.charAt(0).toUpperCase() + key.slice(1);
+  return report[key] ?? report[pascalKey] ?? fallback;
+}
+
 function getReportTargetLabel(report = {}) {
-  if (report.targetType === 'message') {
-    return `Message from @${report.targetUsername || 'unknown'}`;
+  const targetUsername = getReportValue(report, 'targetUsername', 'unknown');
+  if (getReportValue(report, 'targetType') === 'message') {
+    return `Message from @${targetUsername || 'unknown'}`;
   }
 
-  return `@${report.targetUsername || 'unknown'}`;
+  return `@${targetUsername || 'unknown'}`;
 }
 
 function renderReportRow(report = {}, onStatusChange) {
@@ -11829,33 +12654,36 @@ function renderReportRow(report = {}, onStatusChange) {
 
   const marker = document.createElement('div');
   marker.className = 'audit-log-marker';
-  marker.textContent = String(report.status || 'open').slice(0, 1).toUpperCase();
+  marker.textContent = String(getReportValue(report, 'status', 'open')).slice(0, 1).toUpperCase();
 
   const content = document.createElement('div');
   content.className = 'audit-log-content';
 
   const title = document.createElement('div');
   title.className = 'audit-log-title';
-  title.textContent = `${getReportTargetLabel(report)} - ${formatReportReason(report.reason)}`;
+  title.textContent = `${getReportTargetLabel(report)} - ${formatReportReason(getReportValue(report, 'reason'))}`;
 
   const meta = document.createElement('div');
   meta.className = 'audit-log-meta';
-  meta.textContent = `${formatReportStatus(report.status)} by ${report.reportedByUsername || 'Unknown'} - ${formatAuditTimestamp(report.createdAt)}`;
+  const blockSignal = getReportValue(report, 'reporterBlockedTarget', false) ? ' - reporter blocked target' : '';
+  meta.textContent = `${formatReportStatus(getReportValue(report, 'status'))} by ${getReportValue(report, 'reportedByUsername', 'Unknown')} - ${formatAuditTimestamp(getReportValue(report, 'createdAt'))}${blockSignal}`;
 
   content.appendChild(title);
   content.appendChild(meta);
 
-  if (report.messagePreview) {
+  const messagePreview = getReportValue(report, 'messagePreview', '');
+  if (messagePreview) {
     const preview = document.createElement('div');
     preview.className = 'audit-log-details';
-    preview.textContent = report.messagePreview;
+    preview.textContent = messagePreview;
     content.appendChild(preview);
   }
 
-  if (report.description) {
+  const description = getReportValue(report, 'description', '');
+  if (description) {
     const details = document.createElement('div');
     details.className = 'audit-log-details';
-    details.textContent = report.description;
+    details.textContent = description;
     content.appendChild(details);
   }
 
@@ -11870,11 +12698,112 @@ function renderReportRow(report = {}, onStatusChange) {
     button.type = 'button';
     button.className = 'server-tool-btn';
     button.textContent = label;
-    button.disabled = report.status === status;
+    button.disabled = getReportValue(report, 'status') === status;
     button.addEventListener('click', () => onStatusChange(report, status));
     actions.appendChild(button);
   });
   content.appendChild(actions);
+
+  row.appendChild(marker);
+  row.appendChild(content);
+  return row;
+}
+
+function getQueueValue(item = {}, key, fallback = '') {
+  const pascalKey = key.charAt(0).toUpperCase() + key.slice(1);
+  return item[key] ?? item[pascalKey] ?? fallback;
+}
+
+function getQueueArray(item = {}, key) {
+  const value = getQueueValue(item, key, []);
+  return Array.isArray(value) ? value : [];
+}
+
+function renderModerationQueueRow(item = {}, { onQueueStatusChange, onReportStatusChange, onModerateTarget }) {
+  const row = document.createElement('div');
+  row.className = 'audit-log-row moderation-queue-row';
+
+  const reportCount = Number(getQueueValue(item, 'reportCount', 0)) || 0;
+  const openCount = Number(getQueueValue(item, 'openReportCount', 0)) || 0;
+  const blockSignalCount = Number(getQueueValue(item, 'blockSignalCount', 0)) || 0;
+  const targetUsername = getQueueValue(item, 'targetUsername', 'unknown');
+
+  const marker = document.createElement('div');
+  marker.className = 'audit-log-marker moderation-queue-marker';
+  marker.textContent = String(reportCount);
+
+  const content = document.createElement('div');
+  content.className = 'audit-log-content';
+
+  const title = document.createElement('div');
+  title.className = 'audit-log-title';
+  title.textContent = `@${targetUsername}`;
+
+  const meta = document.createElement('div');
+  meta.className = 'audit-log-meta';
+  const memberState = getQueueValue(item, 'isBanned', false)
+    ? 'banned'
+    : getQueueValue(item, 'isTimedOut', false)
+      ? 'timed out'
+      : getQueueValue(item, 'isMuted', false)
+        ? 'muted'
+        : getQueueValue(item, 'isMember', false)
+          ? (getQueueValue(item, 'role', 'member') || 'member')
+          : 'not a member';
+  meta.textContent = `${openCount} open of ${reportCount} reports - ${blockSignalCount} block signals - ${memberState} - latest ${formatAuditTimestamp(getQueueValue(item, 'lastReportedAt'))}`;
+
+  content.appendChild(title);
+  content.appendChild(meta);
+
+  const reasons = getQueueArray(item, 'reasons');
+  const reporters = getQueueArray(item, 'reporters');
+  const details = document.createElement('div');
+  details.className = 'audit-log-details moderation-queue-details';
+  details.textContent = [
+    reasons.length ? `Reasons: ${reasons.map(formatReportReason).join(', ')}` : '',
+    reporters.length ? `Reporters: ${reporters.join(', ')}` : '',
+  ].filter(Boolean).join(' | ');
+  if (details.textContent) {
+    content.appendChild(details);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'report-row-actions moderation-queue-actions';
+  [
+    ['Review all', 'reviewed'],
+    ['Resolve all', 'resolved'],
+    ['Dismiss all', 'dismissed'],
+  ].forEach(([label, status]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'server-tool-btn';
+    button.textContent = label;
+    button.addEventListener('click', () => onQueueStatusChange(item, status));
+    actions.appendChild(button);
+  });
+
+  [
+    ['Timeout', 'timeout'],
+    [getQueueValue(item, 'isMuted', false) ? 'Unmute' : 'Mute', getQueueValue(item, 'isMuted', false) ? 'unmute' : 'mute'],
+    ['Ban', 'ban'],
+  ].forEach(([label, action]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = action === 'ban' ? 'settings-btn-danger settings-btn-compact' : 'server-tool-btn';
+    button.textContent = label;
+    button.disabled = action === 'ban' && getQueueValue(item, 'isBanned', false);
+    button.addEventListener('click', () => onModerateTarget(action, targetUsername));
+    actions.appendChild(button);
+  });
+  content.appendChild(actions);
+
+  const reports = getQueueArray(item, 'reports');
+  if (reports.length) {
+    const sample = document.createElement('div');
+    sample.className = 'moderation-queue-report-list';
+    reports.forEach((report) => sample.appendChild(renderReportRow(report, onReportStatusChange)));
+    content.appendChild(sample);
+  }
 
   row.appendChild(marker);
   row.appendChild(content);
@@ -11894,7 +12823,7 @@ function openServerReportsDialog() {
   dialog.className = 'account-action-dialog audit-log-dialog report-dialog';
 
   const heading = document.createElement('h3');
-  heading.textContent = 'Reports';
+  heading.textContent = 'Moderation Queue';
   const copy = document.createElement('p');
   copy.className = 'account-action-copy';
   copy.textContent = currentServerName || 'Server reports';
@@ -11916,7 +12845,7 @@ function openServerReportsDialog() {
 
   const list = document.createElement('div');
   list.className = 'audit-log-list report-list';
-  list.textContent = 'Loading reports...';
+  list.textContent = 'Loading queue...';
 
   const actions = document.createElement('div');
   actions.className = 'account-action-buttons';
@@ -11962,41 +12891,94 @@ function openServerReportsDialog() {
     try {
       await axios.post(`${homeApiBase}/api/Reports/UpdateReportStatus`, {
         serverId: selectedServerID,
-        reportId: report.id,
+        reportId: getReportValue(report, 'id'),
         status,
         resolutionNote: note || null,
       });
-      await loadReports();
+      await loadQueue();
       showAppMessage('Report updated.', 'success');
     } catch (error) {
       showAppMessage(getApiErrorMessage(error, 'Could not update report.'), 'error');
     }
   };
 
-  const loadReports = async () => {
-    list.textContent = 'Loading reports...';
+  const updateQueueStatus = async (item, status) => {
+    let note = '';
+    if (status !== 'reviewed') {
+      const result = await openSimpleFormDialog({
+        title: `${formatReportStatus(status)} Queue`,
+        fields: [
+          {
+            name: 'note',
+            label: 'Resolution note (optional)',
+            type: 'textarea',
+            maxLength: 1000,
+            rows: 3,
+            required: false,
+          },
+        ],
+        confirmText: formatReportStatus(status),
+        preserveExisting: true,
+      });
+      if (!result) return;
+      note = result.note?.trim() || '';
+    }
+
+    try {
+      await axios.post(`${homeApiBase}/api/Reports/UpdateReportQueueStatus`, {
+        serverId: selectedServerID,
+        targetUsername: getQueueValue(item, 'targetUsername'),
+        status,
+        resolutionNote: note || null,
+      });
+      await loadQueue();
+      showAppMessage('Queue updated.', 'success');
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not update queue.'), 'error');
+    }
+  };
+
+  const moderateQueueTarget = async (action, targetUsername) => {
+    if (action === 'timeout') {
+      await timeoutServerMember(targetUsername);
+    } else if (action === 'mute') {
+      await muteServerMember(targetUsername);
+    } else if (action === 'unmute') {
+      await unmuteServerMember(targetUsername);
+    } else if (action === 'ban') {
+      await moderateServerMember('BanMember', targetUsername);
+    }
+    await loadQueue();
+  };
+
+  const loadQueue = async () => {
+    list.textContent = 'Loading queue...';
     try {
       const res = await axios.get(
-        `${homeApiBase}/api/Reports/GetServerReports?serverId=${encodeURIComponent(selectedServerID)}&status=${encodeURIComponent(statusFilter.value)}&take=100`
+        `${homeApiBase}/api/Reports/GetServerModerationQueue?serverId=${encodeURIComponent(selectedServerID)}&status=${encodeURIComponent(statusFilter.value)}&take=50`
       );
-      const reports = Array.isArray(res.data) ? res.data : [];
+      const queueItems = Array.isArray(res.data) ? res.data : [];
       list.innerHTML = '';
-      if (!reports.length) {
+      if (!queueItems.length) {
         const empty = document.createElement('div');
         empty.className = 'empty-state-card padded';
-        empty.textContent = 'No reports found.';
+        empty.textContent = 'No moderation queue items found.';
         list.appendChild(empty);
         return;
       }
 
-      reports.forEach((report) => list.appendChild(renderReportRow(report, updateStatus)));
+      queueItems.forEach((item) => list.appendChild(renderModerationQueueRow(item, {
+        onQueueStatusChange: updateQueueStatus,
+        onReportStatusChange: updateStatus,
+        onModerateTarget: moderateQueueTarget,
+      })));
     } catch (error) {
-      list.textContent = getApiErrorMessage(error, 'Could not load reports.');
+      list.textContent = getApiErrorMessage(error, 'Could not load moderation queue.');
     }
   };
 
-  statusFilter.addEventListener('change', loadReports);
-  refreshButton.addEventListener('click', loadReports);
+  statusFilter.addEventListener('change', loadQueue);
+  refreshButton.addEventListener('click', loadQueue);
 
   dialog.appendChild(heading);
   dialog.appendChild(copy);
@@ -12005,7 +12987,7 @@ function openServerReportsDialog() {
   dialog.appendChild(actions);
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
-  loadReports();
+  loadQueue();
 }
 
 async function leaveSelectedServer() {
@@ -12196,7 +13178,7 @@ async function fetchServerMembers() {
           badges: memberBadges,
         });
         if (memberPictureUrl) {
-          avatar.style.backgroundImage = `url("${cssString(memberPictureUrl)}")`;
+          avatar.style.backgroundImage = `url("${cssString(resolveMediaUrl(memberPictureUrl))}")`;
         }
         if (!isBotMember) {
           avatar.onclick = (e) => openProfilePopout(member.username, e.pageX, e.pageY);
@@ -12825,7 +13807,7 @@ async function FetchAndRenderFriendsMain() {
       avatar.className = 'friend-item-avatar';
       setAvatarFallback(avatar);
       if (profile.profilePictureUrl) {
-        avatar.style.backgroundImage = `url("${cssString(profile.profilePictureUrl)}")`;
+        avatar.style.backgroundImage = `url("${cssString(resolveMediaUrl(profile.profilePictureUrl))}")`;
       }
       avatar.onclick = (e) => openProfilePopout(friendName, e.pageX, e.pageY);
       const statusDot = document.createElement('span');
@@ -13019,10 +14001,11 @@ async function handleDMFileUpload(input) {
       });
 
       if (res.data && res.data.url) {
-        const fileUrl = homeApiBase + res.data.url;
+        const fileUrl = getUploadUrlFromResponse(res.data);
+        const displayFileUrl = getUploadDisplayUrl(res.data);
         console.log('File uploaded:', fileUrl);
 
-        const messageText = `[Image](${fileUrl})`;
+        const messageText = `[Image](${displayFileUrl})`;
         const replyDraft = getActiveReplyDraft('dm');
 
         const messageObject = {
@@ -13137,10 +14120,11 @@ async function submitUploadModal() {
     });
 
     if (res.data && res.data.url) {
-      const fileUrl = homeApiBase + res.data.url;
+      const fileUrl = getUploadUrlFromResponse(res.data);
+      const displayFileUrl = getUploadDisplayUrl(res.data);
       console.log('File uploaded:', fileUrl);
 
-      const messageText = `[Image](${fileUrl})`;
+      const messageText = `[Image](${displayFileUrl})`;
 
       if (currentGroupId) {
         const replyDraft = getActiveReplyDraft('group');
@@ -13319,7 +14303,7 @@ async function uploadExpressionImage(file) {
   const response = await axios.post(`${homeApiBase}/api/Upload/UploadImage`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
-  return response.data?.url || '';
+  return getUploadUrlFromResponse(response.data);
 }
 
 async function saveCustomExpression(kind, { name, imageUrl }) {
@@ -13571,25 +14555,22 @@ async function sendStickerMessage(sticker) {
       AttachmentContentType: attachmentContentType || null,
       ReplyToMessageId: replyDraft?.messageId || null,
     };
-    const pendingMessage = renderCompactMessage({
-      ...payload,
-      messagesUserSender: JWTusername,
-      date: now,
-      replyPreview: replyDraft?.preview || null,
-    }, 'server');
-    pendingMessage.classList.add('message-pending');
-    chatMessages.appendChild(pendingMessage);
-
-    try {
-      await apiClient.post(`${homeApiBase}/api/ServerMessages/ServerMessages`, payload);
-      if (replyDraft && pendingReplyDraft === replyDraft) {
-        clearReplyDraft();
-      }
-      await fetchServerMessages();
-    } catch (error) {
-      pendingMessage.classList.remove('message-pending');
-      pendingMessage.classList.add('message-failed');
-      showAppMessage(getApiErrorMessage(error, 'Sticker failed to send.'), 'error');
+    const result = await runOptimisticMessageSend({
+      container: chatMessages,
+      scope: 'server',
+      conversationId: selectedChannelID,
+      draft: {
+        ...payload,
+        messagesUserSender: JWTusername,
+        date: now,
+        replyPreview: replyDraft?.preview || null,
+      },
+      send: () => apiClient.post(`${homeApiBase}/api/ServerMessages/ServerMessages`, payload),
+      refresh: () => fetchServerMessages(),
+      failureMessage: 'Sticker failed to send.',
+    }).catch(() => {});
+    if (result && replyDraft && pendingReplyDraft === replyDraft) {
+      clearReplyDraft();
     }
     return;
   }
@@ -13598,6 +14579,8 @@ async function sendStickerMessage(sticker) {
   if (scope === 'group') {
     const result = await runOptimisticMessageSend({
       container: messagesDisplay,
+      scope: 'group',
+      conversationId: currentGroupId,
       draft: {
         sender: JWTusername,
         content,
@@ -13627,6 +14610,8 @@ async function sendStickerMessage(sticker) {
     const messageId = generateUUID();
     const result = await runOptimisticMessageSend({
       container: messagesDisplay,
+      scope: 'dm',
+      conversationId: currentFriend,
       draft: {
         privateMessageID: messageId,
         messagesUserSender: JWTusername,
@@ -14847,14 +15832,29 @@ window.openProfilePopout = async function (username, x, y) {
     hideElement(popoutActivity);
   }
   renderUserBadges(popoutBadges, []);
+  let actionRow = document.getElementById('profilePopoutActions');
+  if (!actionRow) {
+    actionRow = document.createElement('div');
+    actionRow.id = 'profilePopoutActions';
+    actionRow.className = 'profile-popout-actions';
+    document.querySelector('#profilePopout .profile-popout-body')?.appendChild(actionRow);
+  }
   let reportButton = document.getElementById('profileReportBtn');
   if (!reportButton) {
     reportButton = document.createElement('button');
     reportButton.id = 'profileReportBtn';
     reportButton.type = 'button';
     reportButton.className = 'profile-popout-report-btn';
-    document.querySelector('#profilePopout .profile-popout-body')?.appendChild(reportButton);
   }
+  actionRow.appendChild(reportButton);
+  let blockButton = document.getElementById('profileBlockBtn');
+  if (!blockButton) {
+    blockButton = document.createElement('button');
+    blockButton.id = 'profileBlockBtn';
+    blockButton.type = 'button';
+    blockButton.className = 'profile-popout-block-btn';
+  }
+  actionRow.appendChild(blockButton);
   reportButton.textContent = 'Report User';
   reportButton.hidden = username === JWTusername;
   reportButton.onclick = () => {
@@ -14864,6 +15864,29 @@ window.openProfilePopout = async function (username, x, y) {
       scopeType: getActiveReportScope('user'),
       targetUsername: username,
     });
+  };
+  const refreshBlockButton = () => {
+    const blocked = isUserBlocked(username);
+    blockButton.textContent = blocked ? 'Unblock User' : 'Block User';
+    blockButton.classList.toggle('blocked', blocked);
+  };
+  blockButton.hidden = username === JWTusername;
+  refreshBlockButton();
+  blockButton.onclick = async () => {
+    try {
+      if (isUserBlocked(username)) {
+        await unblockAccountUser(username);
+      } else if (await askConfirm('Block User', `Block ${username}? They will not be able to DM you.`, {
+        danger: true,
+        confirmText: 'Block',
+        preserveExisting: true,
+      })) {
+        await blockAccountUser(username);
+      }
+      refreshBlockButton();
+    } catch (error) {
+      showAppMessage(getApiErrorMessage(error, 'Could not update block.'), 'error');
+    }
   };
 
   try {
@@ -14897,7 +15920,7 @@ window.openProfilePopout = async function (username, x, y) {
       }
 
       if (profile.profilePictureUrl) {
-        document.getElementById('popoutAvatar').src = profile.profilePictureUrl;
+        document.getElementById('popoutAvatar').src = resolveMediaUrl(profile.profilePictureUrl);
       }
     }
   } catch (err) {
@@ -15002,6 +16025,7 @@ function createDefaultSettingsState() {
       allowFriendRequestsServerMembers: true,
       showActivity: true,
     },
+    blockedUsers: [],
     voiceChanger: {
       enabled: false,
       preset: 'normal',
@@ -15152,6 +16176,7 @@ function readSettingsState() {
         parsedState.privacy && typeof parsedState.privacy === 'object'
           ? { ...fallbackState.privacy, ...parsedState.privacy }
           : fallbackState.privacy,
+      blockedUsers: normalizeAccountUsernameList(parsedState.blockedUsers),
       voiceChanger:
         parsedState.voiceChanger && typeof parsedState.voiceChanger === 'object'
           ? { ...fallbackState.voiceChanger, ...parsedState.voiceChanger }
@@ -15478,11 +16503,12 @@ async function uploadImageFile(file) {
     },
   });
 
-  if (!res.data?.url) {
+  const uploadUrl = getUploadUrlFromResponse(res.data);
+  if (!uploadUrl) {
     throw new Error('Upload did not return a file URL.');
   }
 
-  return homeApiBase + res.data.url;
+  return uploadUrl;
 }
 
 function writeSettingsState(updater) {
@@ -15532,6 +16558,7 @@ async function persistAccountSettings(state = readSettingsState()) {
   delete settingsPayload.privacy;
   delete settingsPayload.accountStanding;
   delete settingsPayload.activityStatus;
+  delete settingsPayload.blockedUsers;
 
   await axios.post(`${homeApiBase}/api/Account/UpdateAccountSettings`, {
     settings: settingsPayload,
@@ -15605,6 +16632,7 @@ function applyAccountSettingsResponse(data) {
     profileBadges: normalizeProfileBadges(
       data.profileBadges ?? data.badges ?? serverState.profileBadges ?? fallback.profileBadges
     ),
+    blockedUsers: normalizeAccountUsernameList(data.blockedUsers ?? serverState.blockedUsers ?? []),
     profileBannerColor:
       data.profileBannerColor || serverState.profileBannerColor || fallback.profileBannerColor,
     profileBannerUrl: data.profileBannerUrl || serverState.profileBannerUrl || '',
@@ -15894,6 +16922,7 @@ function updateProfileVisuals(
   profileBadges = null
 ) {
   const nextAvatarUrl = profilePictureUrl || homeDefaultAvatarUrl;
+  const nextAvatarDisplayUrl = resolveMediaUrl(nextAvatarUrl) || homeDefaultAvatarUrl;
   const settingsState = readSettingsState();
   const nextBannerColor = profileBannerColor || settingsState.profileBannerColor || '#0c0c0c';
   const nextBannerUrl = profileBannerUrl === null ? settingsState.profileBannerUrl || '' : profileBannerUrl;
@@ -15912,7 +16941,7 @@ function updateProfileVisuals(
         img.onerror = null;
         img.src = homeDefaultAvatarUrl;
       };
-      img.src = nextAvatarUrl;
+      img.src = nextAvatarDisplayUrl;
     });
 
   const aboutMe = document.getElementById('popoutDescription');
@@ -16892,13 +17921,18 @@ async function askText(title, label, value = '') {
   return result?.value?.trim() || '';
 }
 
-async function askConfirm(title, description, { danger = false, confirmText = 'Confirm' } = {}) {
+async function askConfirm(
+  title,
+  description,
+  { danger = false, confirmText = 'Confirm', preserveExisting = false } = {}
+) {
   const result = await openSimpleFormDialog({
     title,
     description,
     fields: [],
     danger,
     confirmText,
+    preserveExisting,
   });
   return result !== null;
 }
@@ -18030,7 +19064,7 @@ function createAppIconElement(item = {}, className = 'developer-app-icon') {
   const iconUrl = getIntegrationField(item, 'iconUrl', getIntegrationField(item, 'applicationIconUrl', ''));
   if (iconUrl) {
     const img = document.createElement('img');
-    img.src = iconUrl;
+    img.src = resolveMediaUrl(iconUrl);
     img.alt = '';
     icon.appendChild(img);
   } else {
