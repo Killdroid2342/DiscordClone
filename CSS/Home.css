@@ -3291,10 +3291,16 @@
   word-wrap: break-word;
 }
 
-.profile-popout-report-btn {
-  width: 100%;
-  min-height: 30px;
+.profile-popout-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   margin-top: 12px;
+}
+
+.profile-popout-report-btn,
+.profile-popout-block-btn {
+  min-height: 30px;
   border: 1px solid rgba(237, 66, 69, 0.35);
   border-radius: 5px;
   background: rgba(237, 66, 69, 0.1);
@@ -3304,8 +3310,28 @@
   font-weight: 800;
 }
 
+.profile-popout-block-btn {
+  border-color: rgba(148, 155, 164, 0.38);
+  background: rgba(148, 155, 164, 0.1);
+  color: var(--text-main);
+}
+
+.profile-popout-block-btn.blocked {
+  border-color: rgba(35, 165, 89, 0.38);
+  background: rgba(35, 165, 89, 0.12);
+  color: #9de8b5;
+}
+
 .profile-popout-report-btn:hover {
   background: rgba(237, 66, 69, 0.2);
+}
+
+.profile-popout-block-btn:hover {
+  background: rgba(148, 155, 164, 0.18);
+}
+
+.profile-popout-block-btn.blocked:hover {
+  background: rgba(35, 165, 89, 0.2);
 }
 
 body.app-reduced-motion *,
@@ -3766,6 +3792,26 @@ button:disabled {
   flex: 1;
   overflow-y: auto;
   padding: 12px 16px;
+}
+
+.virtual-message-scroll {
+  overflow-y: auto;
+  contain: content;
+}
+
+.virtual-message-list,
+.virtual-message-window {
+  min-height: 0;
+}
+
+.virtual-message-list {
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+.virtual-message-spacer {
+  flex: 0 0 auto;
+  pointer-events: none;
 }
 
 .chatMessages p {
@@ -5385,6 +5431,92 @@ button:disabled {
   width: min(100%, 700px);
 }
 
+.automod-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: 86vh;
+  overflow: auto;
+}
+
+.automod-dialog-header,
+.automod-rule-row,
+.automod-rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.automod-dialog-header {
+  justify-content: space-between;
+}
+
+.automod-rule-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.automod-rule-row {
+  align-items: flex-start;
+  justify-content: space-between;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+}
+
+.automod-rule-row.disabled {
+  opacity: 0.62;
+}
+
+.automod-rule-marker {
+  display: grid;
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(35, 165, 89, 0.18);
+  color: #7ee0a1;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.automod-rule-row.disabled .automod-rule-marker {
+  background: rgba(148, 155, 164, 0.14);
+  color: var(--text-muted);
+}
+
+.automod-rule-copy {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.automod-rule-copy strong,
+.automod-rule-copy span {
+  overflow-wrap: anywhere;
+}
+
+.automod-rule-copy strong {
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.automod-rule-copy span,
+.automod-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.automod-rule-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .audit-log-dialog {
   width: min(860px, calc(100vw - 32px));
 }
@@ -5609,6 +5741,34 @@ button:disabled {
 .report-row-actions .server-tool-btn:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+.moderation-queue-row {
+  align-items: flex-start;
+}
+
+.moderation-queue-marker {
+  min-width: 34px;
+}
+
+.moderation-queue-details {
+  margin-top: 6px;
+}
+
+.moderation-queue-report-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-subtle);
+}
+
+.moderation-queue-report-list .audit-log-row {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.moderation-queue-actions .settings-btn-compact {
+  min-height: 26px;
 }
 
 .voice-permission-rows {
@@ -6162,6 +6322,12 @@ button:disabled {
   gap: 10px;
 }
 
+.server-welcome-progress {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .server-welcome-check-item {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
@@ -6171,6 +6337,14 @@ button:disabled {
   border-radius: 8px;
   background: var(--surface-raised);
   padding: 11px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.server-welcome-check-item:hover,
+.server-welcome-check-item.complete {
+  border-color: rgba(35, 165, 89, 0.48);
+  background: rgba(35, 165, 89, 0.12);
 }
 
 .server-welcome-check-item span {
@@ -6183,6 +6357,10 @@ button:disabled {
   color: #fff;
   font-size: 13px;
   font-weight: 900;
+}
+
+.server-welcome-check-item.complete span {
+  background: #3ba55d;
 }
 
 .server-welcome-check-item p {
