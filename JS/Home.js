@@ -437,6 +437,116 @@ function showAppMessage(message, variant = 'info', duration = 2600) {
   }, duration);
 }
 
+function createEmptyState({
+  icon = '',
+  title = '',
+  description = '',
+  actionLabel = '',
+  onAction = null,
+  compact = false,
+  className = '',
+  kind = '',
+} = {}) {
+  const empty = document.createElement('div');
+  empty.className = ['empty-state-card', compact ? 'compact' : '', className].filter(Boolean).join(' ');
+  empty.dataset.emptyState = 'true';
+  if (kind) {
+    empty.dataset.emptyStateKind = kind;
+  }
+
+  if (icon) {
+    const symbol = document.createElement('div');
+    symbol.className = 'empty-state-symbol';
+    symbol.textContent = icon;
+    empty.appendChild(symbol);
+  }
+
+  if (title) {
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    empty.appendChild(heading);
+  }
+
+  if (description) {
+    const copy = document.createElement('p');
+    copy.textContent = description;
+    empty.appendChild(copy);
+  }
+
+  if (actionLabel && typeof onAction === 'function') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'settings-btn-primary empty-state-action';
+    button.textContent = actionLabel;
+    button.addEventListener('click', onAction);
+    empty.appendChild(button);
+  }
+
+  return empty;
+}
+
+function setEmptyState(target, options) {
+  const container = getElement(target);
+  if (!container) return null;
+  const empty = createEmptyState(options);
+  container.replaceChildren(empty);
+  return empty;
+}
+
+function removeEmptyStates(container, kind = '') {
+  if (!container) return;
+  const selector = kind
+    ? `[data-empty-state-kind="${kind}"]`
+    : '[data-empty-state="true"]';
+  container.querySelectorAll(selector).forEach((item) => item.remove());
+}
+
+function refreshConversationListEmptyState() {
+  if (!mainFriendsDiv) return;
+  removeEmptyStates(mainFriendsDiv, 'conversation-list');
+  const hasConversations = mainFriendsDiv.querySelector('.conversation-list-item');
+  if (hasConversations) {
+    applyConversationSearchFilter();
+    return;
+  }
+
+  mainFriendsDiv.appendChild(createEmptyState({
+    icon: 'DM',
+    title: 'No conversations yet',
+    description: 'Add a friend or create a group DM to start chatting.',
+    actionLabel: 'Add Friend',
+    onAction: showAddFriends,
+    compact: true,
+    className: 'conversation-empty-state',
+    kind: 'conversation-list',
+  }));
+  applyConversationSearchFilter();
+}
+
+function getMessageEmptyStateCopy(scope) {
+  if (scope === 'server') {
+    return {
+      icon: '#',
+      title: 'No messages in this channel',
+      description: 'Send the first message and get the channel moving.',
+    };
+  }
+
+  if (scope === 'group') {
+    return {
+      icon: 'GC',
+      title: 'No group messages yet',
+      description: 'Start the group chat with a quick hello.',
+    };
+  }
+
+  return {
+    icon: 'DM',
+    title: 'No messages yet',
+    description: 'This is the beginning of your direct message history.',
+  };
+}
+
 function normalizePresenceStatus(status = 'online') {
   const normalized = String(status || 'online').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(presenceStatusLabels, normalized)
@@ -1432,6 +1542,15 @@ function maybeLoadOlderFromVirtualScroll(container) {
 
 function renderPaginatedMessages(container, scope, state, onLoadOlder) {
   if (!container) return;
+  if (!state?.messages?.length && !state?.hasMore && !state?.isLoadingOlder) {
+    resetVirtualMessageList(container);
+    container.replaceChildren(createEmptyState({
+      ...getMessageEmptyStateCopy(scope),
+      className: 'message-empty-state',
+    }));
+    return;
+  }
+
   const virtual = ensureVirtualMessageList(container);
   virtual.scope = scope;
   virtual.state = state;
@@ -5046,13 +5165,19 @@ function showPendingRequests() {
 }
 async function fetchPendingRequests() {
   const pendingList = document.querySelector('.pendingList');
-  pendingList.innerHTML = 'Loading...';
+  if (!pendingList) return;
+  pendingList.textContent = 'Loading...';
   try {
     const res = await axios.get(`${homeApiBase}/api/Account/GetFriendRequests`);
     pendingList.innerHTML = '';
 
     if (!Array.isArray(res.data) || res.data.length === 0) {
-      pendingList.innerHTML = '<p class="no-requests">No pending requests.</p>';
+      setEmptyState(pendingList, {
+        icon: 'OK',
+        title: 'No pending requests',
+        description: 'Incoming friend requests will appear here.',
+        compact: true,
+      });
       return;
     }
 
@@ -5110,7 +5235,13 @@ async function fetchPendingRequests() {
     });
   } catch (err) {
     console.error('Error fetching requests:', err);
-    pendingList.innerHTML = '<p class="error-state">Error loading requests.</p>';
+    setEmptyState(pendingList, {
+      icon: '!',
+      title: 'Requests could not load',
+      description: 'Check your connection and try again.',
+      compact: true,
+      className: 'error-state',
+    });
   }
 }
 async function acceptRequest(friendUsername) {
@@ -5186,84 +5317,90 @@ async function RemoveFriends(event) {
   }
 }
 async function GetFriends() {
+  if (!mainFriendsDiv) return;
   mainFriendsDiv.innerHTML = '';
   try {
     let res = await axios.get(
       `${homeApiBase}/api/Account/GetFriends`
     );
-    if (res.data === 'No Friends Added!' || (Array.isArray(res.data) && res.data.length === 0)) {
-      let noFriendsTag = document.createElement('p');
-      noFriendsTag.textContent = 'No Friends Added!';
-      mainFriendsDiv.appendChild(noFriendsTag);
-    } else {
-      let friends = res.data;
+
+    const friends = Array.isArray(res.data) ? [...new Set(res.data)] : [];
+    if (friends.length > 0) {
       const friendProfiles = await fetchFriendProfileSummaries();
       console.log('GetFriends response:', friends);
-      if (Array.isArray(friends)) {
-        friends.forEach((friend) => {
-          const profile = friendProfiles.get(String(friend).toLowerCase()) || getCachedProfileSummary(friend) || {
-            username: friend,
-            presenceStatus: 'online',
-            customStatus: '',
-            activityStatus: '',
-            lastActiveAt: null,
-          };
-          const friendsTag = document.createElement('button');
-          friendsTag.type = 'button';
-          friendsTag.className = 'testaddeduser conversation-list-item';
-          friendsTag.dataset.dmUsername = friend;
 
-          const copy = document.createElement('span');
-          copy.className = 'conversation-copy';
-          const label = document.createElement('span');
-          label.className = 'conversation-label';
-          label.textContent = friend;
-          const status = document.createElement('span');
-          status.className = 'conversation-status';
-          status.textContent = getStatusSummary(profile);
-          const profileBadges = document.createElement('span');
-          profileBadges.className = 'user-badges conversation-profile-badges';
-          renderUserBadges(profileBadges, getProfileBadges(profile), { compact: true });
-          copy.appendChild(label);
-          copy.appendChild(profileBadges);
-          copy.appendChild(status);
+      friends.forEach((friend) => {
+        const profile = friendProfiles.get(String(friend).toLowerCase()) || getCachedProfileSummary(friend) || {
+          username: friend,
+          presenceStatus: 'online',
+          customStatus: '',
+          activityStatus: '',
+          lastActiveAt: null,
+        };
+        const friendsTag = document.createElement('button');
+        friendsTag.type = 'button';
+        friendsTag.className = 'testaddeduser conversation-list-item';
+        friendsTag.dataset.dmUsername = friend;
 
-          const badge = document.createElement('span');
-          badge.className = 'conversation-badge is-hidden';
-          badge.setAttribute('aria-hidden', 'true');
+        const copy = document.createElement('span');
+        copy.className = 'conversation-copy';
+        const label = document.createElement('span');
+        label.className = 'conversation-label';
+        label.textContent = friend;
+        const status = document.createElement('span');
+        status.className = 'conversation-status';
+        status.textContent = getStatusSummary(profile);
+        const profileBadges = document.createElement('span');
+        profileBadges.className = 'user-badges conversation-profile-badges';
+        renderUserBadges(profileBadges, getProfileBadges(profile), { compact: true });
+        copy.appendChild(label);
+        copy.appendChild(profileBadges);
+        copy.appendChild(status);
 
-          friendsTag.appendChild(copy);
-          friendsTag.appendChild(badge);
-          friendsTag.addEventListener('click', async () => {
-            console.log("Friend clicked:", friend);
-            clearContent();
+        const badge = document.createElement('span');
+        badge.className = 'conversation-badge is-hidden';
+        badge.setAttribute('aria-hidden', 'true');
+
+        friendsTag.appendChild(copy);
+        friendsTag.appendChild(badge);
+        friendsTag.addEventListener('click', async () => {
+          console.log("Friend clicked:", friend);
+          clearContent();
 
 
-            hideAllElements('.pendingRequestsDiv');
-            console.log("Pending requests forced hidden");
+          hideAllElements('.pendingRequestsDiv');
+          console.log("Pending requests forced hidden");
 
-            currentFriend = friend;
-            currentGroupId = null;
-            currentGroupName = '';
-            setUnreadBadgeEntry('dm', friend, 0, 0);
-            applyConversationUnreadBadge(friendsTag, 0, 0);
-            InitWebSocket();
-            await GetPrivateMessage();
-            hideElement('.nav');
+          currentFriend = friend;
+          currentGroupId = null;
+          currentGroupName = '';
+          setUnreadBadgeEntry('dm', friend, 0, 0);
+          applyConversationUnreadBadge(friendsTag, 0, 0);
+          InitWebSocket();
+          await GetPrivateMessage();
+          hideElement('.nav');
 
-            const privateMsg = document.querySelector('.privateMessage');
-            if (privateMsg) showElement(privateMsg, 'flex');
-            directMessageUser.innerText = currentFriend;
-          });
-          mainFriendsDiv.appendChild(friendsTag);
+          const privateMsg = document.querySelector('.privateMessage');
+          if (privateMsg) showElement(privateMsg, 'flex');
+          directMessageUser.innerText = currentFriend;
         });
-      }
+        mainFriendsDiv.appendChild(friendsTag);
+      });
 
-      await GetGroups();
       await refreshDmUnreadBadges();
     }
+
+    await GetGroups();
+    refreshConversationListEmptyState();
   } catch (e) {
     console.log('private msg handling broke:', e);
+    setEmptyState(mainFriendsDiv, {
+      icon: '!',
+      title: 'Conversations could not load',
+      description: 'Make sure the API is running and try again.',
+      compact: true,
+      className: 'error-state',
+    });
   }
 }
 const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -5794,7 +5931,8 @@ function handleSearchInput(e) {
 
 function closeSearchResults() {
   hideElement('#searchResultsSidebar');
-  document.getElementById('dmSearchInput').value = '';
+  const dmSearchInput = document.getElementById('dmSearchInput');
+  if (dmSearchInput) dmSearchInput.value = '';
 }
 GetFriends();
 refreshAllUnreadBadges();
@@ -5932,10 +6070,13 @@ function renderPublicServerListings(servers = []) {
 
   list.innerHTML = '';
   if (!servers.length) {
-    const empty = document.createElement('div');
-    empty.className = 'publicServerEmpty';
-    empty.textContent = 'No public servers found.';
-    list.appendChild(empty);
+    setEmptyState(list, {
+      icon: 'SRV',
+      title: 'No public servers found',
+      description: 'Try a different search, category, or tag.',
+      compact: true,
+      className: 'publicServerEmpty',
+    });
     return;
   }
 
@@ -6022,11 +6163,13 @@ async function fetchPublicServerListings() {
     renderPublicServerListings(Array.isArray(data) ? data : []);
   } catch (error) {
     console.error('couldnt load public servers:', error);
-    list.innerHTML = '';
-    const failed = document.createElement('div');
-    failed.className = 'publicServerEmpty';
-    failed.textContent = getApiErrorMessage(error, 'Could not load public servers.');
-    list.appendChild(failed);
+    setEmptyState(list, {
+      icon: '!',
+      title: 'Public servers could not load',
+      description: getApiErrorMessage(error, 'Could not load public servers.'),
+      compact: true,
+      className: 'publicServerEmpty error-state',
+    });
   }
 }
 
@@ -6761,7 +6904,8 @@ function enableAudioPlayback() {
 async function openCreateDMModal() {
   showElement('#createDMModal', 'flex');
   const list = document.getElementById('dmFriendsList');
-  list.innerHTML = 'Loading...';
+  if (!list) return;
+  list.textContent = 'Loading...';
 
   try {
     let res = await axios.get(
@@ -6770,18 +6914,34 @@ async function openCreateDMModal() {
     list.innerHTML = '';
 
     if (!Array.isArray(res.data) || res.data.length === 0) {
-      list.innerHTML = '<p class="search-empty-state">No friends found.</p>';
+      setEmptyState(list, {
+        icon: 'DM',
+        title: 'No friends to message',
+        description: 'Add a friend first, then start a DM or group chat.',
+        actionLabel: 'Add Friend',
+        onAction: () => {
+          closeCreateDMModal();
+          showAddFriends();
+        },
+        compact: true,
+      });
       return;
     }
 
     res.data.forEach(friend => {
       const div = document.createElement('div');
       div.className = 'dmFriendItem';
-      div.innerHTML = `
-              <input type="checkbox" class="dmFriendInput" value="${friend}">
-              <div class="server-member-avatar default-avatar-bg"></div>
-              <span>${friend}</span>
-          `;
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'dmFriendInput';
+      checkbox.value = friend;
+      const avatar = document.createElement('div');
+      avatar.className = 'server-member-avatar default-avatar-bg';
+      const label = document.createElement('span');
+      label.textContent = friend;
+      div.appendChild(checkbox);
+      div.appendChild(avatar);
+      div.appendChild(label);
       div.onclick = (e) => {
         if (e.target.type !== 'checkbox') {
           const cb = div.querySelector('input');
@@ -6793,7 +6953,13 @@ async function openCreateDMModal() {
     });
   } catch (e) {
     console.error(e);
-    list.innerHTML = '<p class="error-state">Failed to load friends.</p>';
+    setEmptyState(list, {
+      icon: '!',
+      title: 'Friends could not load',
+      description: 'Check your connection and try again.',
+      compact: true,
+      className: 'error-state',
+    });
   }
 }
 
@@ -6866,7 +7032,7 @@ async function GetGroups() {
     const res = await axios.get(`${homeApiBase}/api/GroupChat/GetGroups`);
     const groups = res.data;
 
-
+    removeEmptyStates(mainFriendsDiv, 'conversation-list');
     document.querySelectorAll('.group-chat-item').forEach(e => e.remove());
 
     if (Array.isArray(groups)) {
@@ -6895,8 +7061,10 @@ async function GetGroups() {
       });
       await refreshGroupUnreadBadges();
     }
+    refreshConversationListEmptyState();
   } catch (e) {
     console.error("Failed to load groups", e);
+    refreshConversationListEmptyState();
   }
 }
 
@@ -13777,7 +13945,16 @@ async function FetchAndRenderFriendsMain() {
     if (countEl) countEl.textContent = friends.length;
 
     if (friends.length === 0) {
-      if (listEl) listEl.innerHTML = '<p class="search-empty-state">No friends found.</p>';
+      if (listEl) {
+        setEmptyState(listEl, {
+          icon: 'FR',
+          title: 'No friends yet',
+          description: 'Send a friend request to start building your list.',
+          actionLabel: 'Add Friend',
+          onAction: showAddFriends,
+          compact: true,
+        });
+      }
       return;
     }
 
@@ -13858,6 +14035,13 @@ async function FetchAndRenderFriendsMain() {
 
   } catch (err) {
     console.error('Failed to render friends main:', err);
+    setEmptyState('.friendsListMain', {
+      icon: '!',
+      title: 'Friends could not load',
+      description: 'Make sure the API is running and try again.',
+      compact: true,
+      className: 'error-state',
+    });
   }
 }
 
@@ -17664,8 +17848,208 @@ function getDefaultSettingsKeybinds() {
   return [
     { action: 'Push to Talk (Normal)', keys: ['CTRL', 'V'] },
     { action: 'Toggle Mute', keys: ['CTRL', 'SHIFT', 'M'] },
+    { action: 'Toggle Deafen', keys: ['CTRL', 'SHIFT', 'D'] },
+    { action: 'Open Settings', keys: ['CTRL', ','] },
+    { action: 'Find Conversation', keys: ['CTRL', 'K'] },
+    { action: 'Search Messages', keys: ['CTRL', 'F'] },
+    { action: 'Add Friend', keys: ['CTRL', 'SHIFT', 'A'] },
+    { action: 'Create Server', keys: ['CTRL', 'SHIFT', 'N'] },
   ];
 }
+
+function getShortcutEventKeys(event) {
+  const keys = new Set();
+  if (event.ctrlKey) keys.add('CTRL');
+  if (event.metaKey) keys.add('META');
+  if (event.altKey) keys.add('ALT');
+  if (event.shiftKey) keys.add('SHIFT');
+
+  const primaryKey = normalizeShortcutKey(event);
+  if (primaryKey && !['CTRL', 'CONTROL', 'SHIFT', 'ALT', 'META'].includes(primaryKey)) {
+    keys.add(primaryKey);
+  }
+
+  return keys;
+}
+
+function normalizeShortcutKeys(keys = []) {
+  return keys
+    .map((key) => String(key || '').trim().toUpperCase())
+    .map((key) => (key === 'CONTROL' ? 'CTRL' : key))
+    .filter(Boolean);
+}
+
+function shortcutMatchesEvent(keys, event) {
+  const shortcutKeys = normalizeShortcutKeys(keys);
+  const eventKeys = getShortcutEventKeys(event);
+  if (shortcutKeys.length !== eventKeys.size) {
+    return false;
+  }
+
+  return shortcutKeys.every((key) => eventKeys.has(key));
+}
+
+function getConfiguredKeybinds() {
+  return readSettingsState().keybinds || getDefaultSettingsKeybinds();
+}
+
+function isEditableShortcutTarget(target) {
+  return Boolean(
+    target?.closest?.('input, textarea, select, [contenteditable="true"]')
+  );
+}
+
+function focusConversationSearch() {
+  const input = document.querySelector('.secondColumn .textInput');
+  if (!input) return;
+  showElement('.secondColumn', 'flex');
+  input.focus();
+  input.select?.();
+}
+
+function focusActiveMessageSearch() {
+  const activeSearchInput =
+    isElementVisible('#serverDetails')
+      ? document.getElementById('serverSearchInput')
+      : document.getElementById('dmSearchInput');
+
+  if (activeSearchInput) {
+    activeSearchInput.focus();
+    activeSearchInput.select?.();
+    return;
+  }
+
+  focusConversationSearch();
+}
+
+function executeKeyboardShortcut(action) {
+  const normalizedAction = String(action || '').trim().toLowerCase();
+
+  if (normalizedAction.includes('push to talk')) return false;
+  if (normalizedAction === 'toggle mute') {
+    Mute();
+    return true;
+  }
+  if (normalizedAction === 'toggle deafen') {
+    Deafen();
+    return true;
+  }
+  if (normalizedAction === 'open settings') {
+    openSettingsModal();
+    return true;
+  }
+  if (normalizedAction === 'find conversation') {
+    focusConversationSearch();
+    return true;
+  }
+  if (normalizedAction === 'search messages') {
+    focusActiveMessageSearch();
+    return true;
+  }
+  if (normalizedAction === 'add friend') {
+    showElement('.secondColumn', 'flex');
+    showElement('.lastSection', 'flex');
+    hideElement('#serverDetails');
+    showAddFriends();
+    document.querySelector('.friendsInput')?.focus();
+    return true;
+  }
+  if (normalizedAction === 'create server') {
+    openModal();
+    return true;
+  }
+
+  return false;
+}
+
+function closeTopmostOverlay() {
+  const closers = [
+    { selector: '#settingsModal', close: closeSettingsModal },
+    { selector: '#messageForwardDialog', close: closeForwardDialog },
+    { selector: '#createDMModal', close: closeCreateDMModal },
+    { selector: '.outerJoinModal', close: closeJoinModal },
+    { selector: '.outerSecondModal', close: closeSecondModal },
+    { selector: '.outerCreationModal', close: CloseCreationModal },
+    { selector: '.outerModal', close: closeModal },
+    { selector: '#searchResultsSidebar', close: closeSearchResults },
+  ];
+
+  const active = closers.find(({ selector }) => isElementVisible(selector));
+  if (!active) return false;
+  active.close();
+  return true;
+}
+
+function handleGlobalKeyboardShortcuts(event) {
+  if (event.defaultPrevented) return;
+
+  if (event.key === 'Escape' && closeTopmostOverlay()) {
+    event.preventDefault();
+    return;
+  }
+
+  if (event.repeat) return;
+
+  const isCommandShortcut = event.ctrlKey || event.metaKey || event.altKey;
+  if (!isCommandShortcut && isEditableShortcutTarget(event.target)) {
+    return;
+  }
+
+  const matchedKeybind = getConfiguredKeybinds().find((keybind) =>
+    shortcutMatchesEvent(keybind.keys, event) && executeKeyboardShortcut(keybind.action)
+  );
+
+  if (matchedKeybind) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
+
+function setupConversationSearch() {
+  const input = document.querySelector('.secondColumn .textInput');
+  if (!input || input.dataset.conversationSearchReady === 'true') {
+    return;
+  }
+
+  input.dataset.conversationSearchReady = 'true';
+  input.addEventListener('input', applyConversationSearchFilter);
+}
+
+function applyConversationSearchFilter() {
+  const input = document.querySelector('.secondColumn .textInput');
+  if (!input) return;
+
+  const query = input.value.trim().toLowerCase();
+  const conversations = Array.from(document.querySelectorAll('.conversation-list-item'));
+  let visibleCount = 0;
+
+  if (conversations.length === 0) {
+    mainFriendsDiv?.querySelector('[data-empty-state-kind="conversation-search"]')?.remove();
+    return;
+  }
+
+  conversations.forEach((item) => {
+    const isMatch = !query || item.textContent.toLowerCase().includes(query);
+    item.classList.toggle('is-filtered-out', !isMatch);
+    if (isMatch) visibleCount += 1;
+  });
+
+  const empty = mainFriendsDiv?.querySelector('[data-empty-state-kind="conversation-search"]');
+  if (empty) empty.remove();
+
+  if (query && mainFriendsDiv && visibleCount === 0) {
+    mainFriendsDiv.appendChild(createEmptyState({
+      icon: 'SRCH',
+      title: 'No conversations found',
+      description: 'Try a different name, group, or server.',
+      compact: true,
+      className: 'conversation-empty-state',
+      kind: 'conversation-search',
+    }));
+  }
+}
+
+document.addEventListener('keydown', handleGlobalKeyboardShortcuts);
 
 function saveSettingsKeybinds(keybinds) {
   writeSettingsState((state) => ({
@@ -19397,6 +19781,7 @@ function refreshSettingsModal() {
 
 document.addEventListener('DOMContentLoaded', () => {
   refreshIceServersConfig();
+  setupConversationSearch();
   setupEmojiPicker();
   setupSlashCommandInputs();
   setupMessageSearch();
