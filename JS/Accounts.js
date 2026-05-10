@@ -32,6 +32,20 @@ function showStatusMessage(message, duration = 2200) {
   }, duration);
 }
 
+function getAccountNetworkErrorMessage() {
+  const apiUrl = new URL(accountsApiBase, window.location.href);
+  const isFrontendOnApiPort =
+    window.location.hostname === apiUrl.hostname &&
+    window.location.port === apiUrl.port &&
+    apiUrl.port === '5018';
+
+  if (isFrontendOnApiPort) {
+    return 'Port 5018 is reserved for the API. Run the frontend on another port, for example: npx http-server -p 8080.';
+  }
+
+  return `The server could not be reached. Make sure the API is running at ${accountsApiBase}.`;
+}
+
 function setButtonState(form, isLoading, label) {
   const submitButton = form.querySelector('input[type="submit"]');
   if (!submitButton) return;
@@ -159,7 +173,7 @@ async function LogInForm(event) {
   } catch (e) {
     const message =
       e?.response?.data?.message ||
-      'The server could not be reached. Make sure the API is running on port 5018.';
+      getAccountNetworkErrorMessage();
     showStatusMessage(message);
   } finally {
     setButtonState(form, false, pendingTwoFactorChallenge ? 'Verify' : 'Log In');
@@ -214,7 +228,7 @@ async function RegisterForm(event) {
   } catch (e) {
     const message =
       e?.response?.data?.message ||
-      'The server could not be reached. Make sure the API is running on port 5018.';
+      getAccountNetworkErrorMessage();
     showStatusMessage(message);
   } finally {
     setButtonState(form, false, 'Continue');
