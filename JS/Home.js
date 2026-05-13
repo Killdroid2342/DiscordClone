@@ -16227,6 +16227,288 @@ const LIGHT_THEME = {
   text: '#1e1f22',
   accent: '#5865f2',
 };
+const DEFAULT_APP_LANGUAGE = 'en-US';
+const DEFAULT_DATA_CONTROLS = Object.freeze({
+  useActivityForPersonalization: true,
+  shareDiagnostics: false,
+  localSearchHistory: true,
+  localMediaCache: true,
+});
+const DATA_PRIVACY_CONTROL_KEYS = Object.freeze({
+  privacyUseActivityForPersonalization: 'useActivityForPersonalization',
+  privacyShareDiagnostics: 'shareDiagnostics',
+  privacyLocalSearchHistory: 'localSearchHistory',
+  privacyLocalMediaCache: 'localMediaCache',
+});
+const PORTABLE_APP_SETTINGS_KEYS = Object.freeze([
+  'profileView',
+  'themeMode',
+  'customTheme',
+  'messageDisplay',
+  'inputMode',
+  'fontSize',
+  'zoomLevel',
+  'saturation',
+  'toggles',
+  'checkboxes',
+  'radios',
+  'sliders',
+  'selects',
+  'keybinds',
+  'voiceChanger',
+  'connectedAccounts',
+  'removedItems',
+  'language',
+  'dataControls',
+]);
+const SUPPORTED_LOCALES = Object.freeze({
+  'en-US': {
+    label: 'English (US)',
+    lang: 'en-US',
+    text: {},
+  },
+  'en-GB': {
+    label: 'English (UK)',
+    lang: 'en-GB',
+    text: {
+      'Use activity for personalization': 'Use activity for personalisation',
+      'Let MyDiscord tailor suggestions and reminders from your activity status.':
+        'Let MyDiscord tailor suggestions and reminders from your activity status.',
+    },
+  },
+  de: {
+    label: 'Deutsch',
+    lang: 'de',
+    text: {
+      Settings: 'Einstellungen',
+      'Search settings': 'Einstellungen suchen',
+      'User Settings': 'Benutzereinstellungen',
+      'App Settings': 'App-Einstellungen',
+      'Activity Settings': 'Aktivitaetseinstellungen',
+      'My Account': 'Mein Konto',
+      Profiles: 'Profile',
+      'Privacy & Safety': 'Datenschutz & Sicherheit',
+      'Family Center': 'Familiencenter',
+      'Authorized Apps': 'Autorisierte Apps',
+      'Developer Portal': 'Entwicklerportal',
+      Devices: 'Geraete',
+      Connections: 'Verbindungen',
+      Clips: 'Clips',
+      Appearance: 'Darstellung',
+      Accessibility: 'Barrierefreiheit',
+      'Voice & Video': 'Sprache & Video',
+      Chat: 'Chat',
+      Notifications: 'Benachrichtigungen',
+      Keybinds: 'Tastenkombinationen',
+      Language: 'Sprache',
+      'Streamer Mode': 'Streamer-Modus',
+      Advanced: 'Erweitert',
+      'Activity Privacy': 'Aktivitaetsdatenschutz',
+      'Registered Games': 'Registrierte Spiele',
+      'Log Out': 'Abmelden',
+      'Select Language': 'Sprache auswaehlen',
+      'Data Export': 'Datenexport',
+      'Download JSON': 'JSON herunterladen',
+      'Copy Summary': 'Zusammenfassung kopieren',
+      'Data & Privacy Controls': 'Daten- und Datenschutzkontrollen',
+      'Choose how local app data and optional diagnostics are used.':
+        'Lege fest, wie lokale App-Daten und optionale Diagnosen verwendet werden.',
+      'Use activity for personalization': 'Aktivitaet zur Personalisierung verwenden',
+      'Let MyDiscord tailor suggestions and reminders from your activity status.':
+        'MyDiscord darf Vorschlaege und Erinnerungen anhand deines Aktivitaetsstatus anpassen.',
+      'Share crash and error diagnostics': 'Absturz- und Fehlerdiagnosen teilen',
+      'Include technical reports that help improve app stability.':
+        'Technische Berichte einschliessen, die die App-Stabilitaet verbessern.',
+      'Keep local search and onboarding history': 'Lokalen Such- und Onboarding-Verlauf behalten',
+      'Store convenience data on this device for faster repeat visits.':
+        'Komfortdaten auf diesem Geraet fuer schnellere Wiederbesuche speichern.',
+      'Cache media previews locally': 'Medienvorschauen lokal zwischenspeichern',
+      'Keep temporary profile and media metadata on this device.':
+        'Temporaere Profil- und Medienmetadaten auf diesem Geraet behalten.',
+      'Download Data': 'Daten herunterladen',
+      'Clear Local Data': 'Lokale Daten loeschen',
+      'App Settings Backup': 'App-Einstellungen sichern',
+      'Export your local app preferences or import a settings JSON file on this device.':
+        'Exportiere lokale App-Einstellungen oder importiere eine JSON-Datei auf diesem Geraet.',
+      'Export Settings': 'Einstellungen exportieren',
+      'Import Settings': 'Einstellungen importieren',
+      'Reset Settings': 'Einstellungen zuruecksetzen',
+      'Settings backup is ready.': 'Einstellungssicherung ist bereit.',
+      'App Updates': 'App-Updates',
+      Diagnostics: 'Diagnose',
+    },
+  },
+  fr: {
+    label: 'Francais',
+    lang: 'fr',
+    text: {
+      Settings: 'Parametres',
+      'Search settings': 'Rechercher dans les parametres',
+      'User Settings': 'Parametres utilisateur',
+      'App Settings': 'Parametres de l app',
+      'Activity Settings': 'Parametres d activite',
+      'My Account': 'Mon compte',
+      Profiles: 'Profils',
+      'Privacy & Safety': 'Confidentialite et securite',
+      'Family Center': 'Centre familial',
+      'Authorized Apps': 'Applications autorisees',
+      'Developer Portal': 'Portail developpeur',
+      Devices: 'Appareils',
+      Connections: 'Connexions',
+      Clips: 'Clips',
+      Appearance: 'Apparence',
+      Accessibility: 'Accessibilite',
+      'Voice & Video': 'Voix et video',
+      Chat: 'Discussion',
+      Notifications: 'Notifications',
+      Keybinds: 'Raccourcis',
+      Language: 'Langue',
+      'Streamer Mode': 'Mode streamer',
+      Advanced: 'Avance',
+      'Activity Privacy': 'Confidentialite de l activite',
+      'Registered Games': 'Jeux enregistres',
+      'Log Out': 'Deconnexion',
+      'Select Language': 'Choisir la langue',
+      'Data Export': 'Export des donnees',
+      'Download JSON': 'Telecharger JSON',
+      'Copy Summary': 'Copier le resume',
+      'Data & Privacy Controls': 'Controles donnees et confidentialite',
+      'Choose how local app data and optional diagnostics are used.':
+        'Choisis comment les donnees locales et les diagnostics optionnels sont utilises.',
+      'Use activity for personalization': 'Utiliser l activite pour personnaliser',
+      'Let MyDiscord tailor suggestions and reminders from your activity status.':
+        'Autoriser MyDiscord a adapter les suggestions et rappels a partir de ton activite.',
+      'Share crash and error diagnostics': 'Partager les diagnostics de plantage et d erreur',
+      'Include technical reports that help improve app stability.':
+        'Inclure des rapports techniques pour ameliorer la stabilite de l app.',
+      'Keep local search and onboarding history': 'Conserver l historique local',
+      'Store convenience data on this device for faster repeat visits.':
+        'Stocker des donnees pratiques sur cet appareil pour les prochaines visites.',
+      'Cache media previews locally': 'Mettre en cache les apercus media',
+      'Keep temporary profile and media metadata on this device.':
+        'Conserver les metadonnees temporaires de profils et medias sur cet appareil.',
+      'Download Data': 'Telecharger les donnees',
+      'Clear Local Data': 'Effacer les donnees locales',
+      'App Settings Backup': 'Sauvegarde des parametres',
+      'Export your local app preferences or import a settings JSON file on this device.':
+        'Exporte tes preferences locales ou importe un fichier JSON de parametres sur cet appareil.',
+      'Export Settings': 'Exporter',
+      'Import Settings': 'Importer',
+      'Reset Settings': 'Reinitialiser',
+      'Settings backup is ready.': 'La sauvegarde des parametres est prete.',
+      'App Updates': 'Mises a jour',
+      Diagnostics: 'Diagnostics',
+    },
+  },
+  es: {
+    label: 'Espanol',
+    lang: 'es',
+    text: {
+      Settings: 'Ajustes',
+      'Search settings': 'Buscar ajustes',
+      'User Settings': 'Ajustes de usuario',
+      'App Settings': 'Ajustes de la app',
+      'Activity Settings': 'Ajustes de actividad',
+      'My Account': 'Mi cuenta',
+      Profiles: 'Perfiles',
+      'Privacy & Safety': 'Privacidad y seguridad',
+      'Family Center': 'Centro familiar',
+      'Authorized Apps': 'Apps autorizadas',
+      'Developer Portal': 'Portal de desarrollador',
+      Devices: 'Dispositivos',
+      Connections: 'Conexiones',
+      Clips: 'Clips',
+      Appearance: 'Apariencia',
+      Accessibility: 'Accesibilidad',
+      'Voice & Video': 'Voz y video',
+      Chat: 'Chat',
+      Notifications: 'Notificaciones',
+      Keybinds: 'Atajos',
+      Language: 'Idioma',
+      'Streamer Mode': 'Modo streamer',
+      Advanced: 'Avanzado',
+      'Activity Privacy': 'Privacidad de actividad',
+      'Registered Games': 'Juegos registrados',
+      'Log Out': 'Cerrar sesion',
+      'Select Language': 'Seleccionar idioma',
+      'Data Export': 'Exportar datos',
+      'Download JSON': 'Descargar JSON',
+      'Copy Summary': 'Copiar resumen',
+      'Data & Privacy Controls': 'Controles de datos y privacidad',
+      'Choose how local app data and optional diagnostics are used.':
+        'Elige como se usan los datos locales y los diagnosticos opcionales.',
+      'Use activity for personalization': 'Usar actividad para personalizacion',
+      'Let MyDiscord tailor suggestions and reminders from your activity status.':
+        'Permite que MyDiscord adapte sugerencias y recordatorios con tu estado de actividad.',
+      'Share crash and error diagnostics': 'Compartir diagnosticos de fallos y errores',
+      'Include technical reports that help improve app stability.':
+        'Incluye informes tecnicos para mejorar la estabilidad de la app.',
+      'Keep local search and onboarding history': 'Guardar busqueda local e historial inicial',
+      'Store convenience data on this device for faster repeat visits.':
+        'Guarda datos de comodidad en este dispositivo para visitas futuras.',
+      'Cache media previews locally': 'Guardar vistas previas multimedia localmente',
+      'Keep temporary profile and media metadata on this device.':
+        'Guarda metadatos temporales de perfiles y multimedia en este dispositivo.',
+      'Download Data': 'Descargar datos',
+      'Clear Local Data': 'Borrar datos locales',
+      'App Settings Backup': 'Copia de ajustes',
+      'Export your local app preferences or import a settings JSON file on this device.':
+        'Exporta tus preferencias locales o importa un archivo JSON de ajustes en este dispositivo.',
+      'Export Settings': 'Exportar ajustes',
+      'Import Settings': 'Importar ajustes',
+      'Reset Settings': 'Restablecer ajustes',
+      'Settings backup is ready.': 'La copia de ajustes esta lista.',
+      'App Updates': 'Actualizaciones',
+      Diagnostics: 'Diagnosticos',
+    },
+  },
+  it: {
+    label: 'Italiano',
+    lang: 'it',
+    text: {
+      Settings: 'Impostazioni',
+      'Search settings': 'Cerca impostazioni',
+      'User Settings': 'Impostazioni utente',
+      'App Settings': 'Impostazioni app',
+      'My Account': 'Il mio account',
+      'Privacy & Safety': 'Privacy e sicurezza',
+      Language: 'Lingua',
+      Advanced: 'Avanzate',
+      'Select Language': 'Seleziona lingua',
+      'Data & Privacy Controls': 'Controlli dati e privacy',
+      'Download Data': 'Scarica dati',
+      'Clear Local Data': 'Cancella dati locali',
+      'App Settings Backup': 'Backup impostazioni app',
+      'Export Settings': 'Esporta impostazioni',
+      'Import Settings': 'Importa impostazioni',
+      'Reset Settings': 'Reimposta impostazioni',
+      'Settings backup is ready.': 'Backup impostazioni pronto.',
+    },
+  },
+  'pt-BR': {
+    label: 'Portugues (BR)',
+    lang: 'pt-BR',
+    text: {
+      Settings: 'Configuracoes',
+      'Search settings': 'Buscar configuracoes',
+      'User Settings': 'Configuracoes do usuario',
+      'App Settings': 'Configuracoes do app',
+      'My Account': 'Minha conta',
+      'Privacy & Safety': 'Privacidade e seguranca',
+      Language: 'Idioma',
+      Advanced: 'Avancado',
+      'Select Language': 'Selecionar idioma',
+      'Data & Privacy Controls': 'Controles de dados e privacidade',
+      'Download Data': 'Baixar dados',
+      'Clear Local Data': 'Limpar dados locais',
+      'App Settings Backup': 'Backup das configuracoes',
+      'Export Settings': 'Exportar configuracoes',
+      'Import Settings': 'Importar configuracoes',
+      'Reset Settings': 'Redefinir configuracoes',
+      'Settings backup is ready.': 'Backup das configuracoes pronto.',
+    },
+  },
+});
 
 let settingsInteractivityInitialized = false;
 let settingsSystemThemeListenerInitialized = false;
@@ -16237,6 +16519,151 @@ let accountSettingsServerState = null;
 let voicePreviewStream = null;
 let voicePreviewAudio = null;
 let voicePreviewContext = null;
+
+function normalizeAppLanguage(language, fallback = DEFAULT_APP_LANGUAGE) {
+  const rawValue = String(language || '').trim();
+  if (SUPPORTED_LOCALES[rawValue]) {
+    return rawValue;
+  }
+
+  const normalized = rawValue.replace('_', '-').toLowerCase();
+  if (normalized === 'en-gb') {
+    return 'en-GB';
+  }
+
+  if (normalized === 'pt' || normalized === 'pt-br') {
+    return 'pt-BR';
+  }
+
+  const baseLanguage = normalized.split('-')[0];
+  if (SUPPORTED_LOCALES[baseLanguage]) {
+    return baseLanguage;
+  }
+
+  return SUPPORTED_LOCALES[fallback] ? fallback : DEFAULT_APP_LANGUAGE;
+}
+
+function getDefaultAppLanguage() {
+  if (typeof navigator === 'undefined') {
+    return DEFAULT_APP_LANGUAGE;
+  }
+
+  return normalizeAppLanguage(
+    navigator.languages?.[0] || navigator.language || DEFAULT_APP_LANGUAGE
+  );
+}
+
+function normalizeDataControls(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(
+    Object.entries(DEFAULT_DATA_CONTROLS).map(([key, fallback]) => [
+      key,
+      typeof source[key] === 'boolean' ? source[key] : fallback,
+    ])
+  );
+}
+
+function getDataPrivacyControlKey(settingKey) {
+  return DATA_PRIVACY_CONTROL_KEYS[settingKey] || null;
+}
+
+function getLocalizedSettingsText(locale, source) {
+  const normalizedLocale = normalizeAppLanguage(locale);
+  const bundle = SUPPORTED_LOCALES[normalizedLocale] || SUPPORTED_LOCALES[DEFAULT_APP_LANGUAGE];
+  return bundle.text?.[source] || source;
+}
+
+function populateLanguageSelect(locale = readSettingsState().language) {
+  const select =
+    document.getElementById('languageSelect') ||
+    document.querySelector('#view-language select.settings-select');
+  if (!select) {
+    return null;
+  }
+
+  const activeLocale = normalizeAppLanguage(locale);
+  select.id = 'languageSelect';
+  select.dataset.settingsSelect = 'language';
+  select.setAttribute('aria-label', getLocalizedSettingsText(activeLocale, 'Select Language'));
+
+  if (select.dataset.languageOptionsReady !== 'true') {
+    select.innerHTML = '';
+    Object.entries(SUPPORTED_LOCALES).forEach(([value, config]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = config.label;
+      select.appendChild(option);
+    });
+    select.dataset.languageOptionsReady = 'true';
+  }
+
+  select.value = activeLocale;
+  return select;
+}
+
+function applyLocalization(locale = readSettingsState().language) {
+  const activeLocale = normalizeAppLanguage(locale);
+  document.documentElement.lang = SUPPORTED_LOCALES[activeLocale]?.lang || DEFAULT_APP_LANGUAGE;
+  populateLanguageSelect(activeLocale);
+
+  const settingsModal = document.getElementById('settingsModal');
+  if (!settingsModal) {
+    return;
+  }
+
+  settingsModal.querySelectorAll('[placeholder]').forEach((element) => {
+    if (!element.dataset.l10nPlaceholderSource) {
+      element.dataset.l10nPlaceholderSource = element.getAttribute('placeholder') || '';
+    }
+    const source = element.dataset.l10nPlaceholderSource;
+    element.setAttribute('placeholder', getLocalizedSettingsText(activeLocale, source));
+  });
+
+  const staticTextSelector = [
+    'h2.settings-page-title',
+    'h2.sr-only',
+    'h3.settings-section-header',
+    '.settings-group-title',
+    '.settings-item',
+    '.settings-tab',
+    '.form-label',
+    '.form-desc',
+    '.toggle-label',
+    '.toggle-desc',
+    '.checkbox-label',
+    '.radio-title',
+    '.radio-desc',
+    '.app-maintenance-label',
+    'button',
+    '.close-label',
+  ].join(',');
+
+  settingsModal
+    .querySelectorAll(staticTextSelector)
+    .forEach((element) => {
+      if (element.closest('#languageSelect') || element.children.length > 0) {
+        return;
+      }
+
+      const source = element.dataset.l10nSource || element.textContent.trim();
+      if (!source) {
+        return;
+      }
+
+      if (!element.dataset.l10nSource) {
+        element.dataset.l10nSource = source;
+      }
+
+      element.textContent = getLocalizedSettingsText(activeLocale, source);
+    });
+
+  const activeNavItem = document.querySelector('.settings-item.active[data-target]');
+  const dialogTitle = document.getElementById('settingsDialogTitle');
+  if (dialogTitle && activeNavItem) {
+    const source = activeNavItem.dataset.l10nSource || activeNavItem.textContent.trim();
+    dialogTitle.textContent = getLocalizedSettingsText(activeLocale, source);
+  }
+}
 
 function createDefaultSettingsState() {
   return {
@@ -16255,6 +16682,8 @@ function createDefaultSettingsState() {
     sliders: {},
     selects: {},
     keybinds: null,
+    language: getDefaultAppLanguage(),
+    dataControls: { ...DEFAULT_DATA_CONTROLS },
     profileBannerColor: '#0c0c0c',
     profileBannerUrl: '',
     presenceStatus: 'online',
@@ -16402,6 +16831,11 @@ function readSettingsState() {
           ? parsedState.selects
           : {},
       keybinds: Array.isArray(parsedState.keybinds) ? parsedState.keybinds : null,
+      language: normalizeAppLanguage(
+        parsedState.language ?? parsedState.selects?.language,
+        fallbackState.language
+      ),
+      dataControls: normalizeDataControls(parsedState.dataControls),
       profileBannerColor:
         typeof parsedState.profileBannerColor === 'string'
           ? parsedState.profileBannerColor
@@ -16900,6 +17334,8 @@ function applyAccountSettingsResponse(data) {
     profileBadges: normalizeProfileBadges(
       data.profileBadges ?? data.badges ?? serverState.profileBadges ?? fallback.profileBadges
     ),
+    language: normalizeAppLanguage(serverState.language, fallback.language),
+    dataControls: normalizeDataControls(serverState.dataControls),
     blockedUsers: normalizeAccountUsernameList(data.blockedUsers ?? serverState.blockedUsers ?? []),
     profileBannerColor:
       data.profileBannerColor || serverState.profileBannerColor || fallback.profileBannerColor,
@@ -17750,6 +18186,17 @@ function handleToggleStateChange(settingKey, isActive) {
     applyReducedMotion(isActive);
   }
 
+  const dataControlKey = getDataPrivacyControlKey(settingKey);
+  if (dataControlKey) {
+    writeSettingsState((state) => ({
+      ...state,
+      dataControls: {
+        ...normalizeDataControls(state.dataControls),
+        [dataControlKey]: isActive,
+      },
+    }));
+  }
+
   if (settingKey === 'privacyShowActivity') {
     writeSettingsState((state) => ({
       ...state,
@@ -17864,6 +18311,19 @@ function handleSelectStateChange(select, index) {
       presenceStatus: select.value,
     }));
     syncPresenceStatus(select.value);
+  }
+
+  if (settingKey === 'language') {
+    const language = normalizeAppLanguage(select.value);
+    writeSettingsState((state) => ({
+      ...state,
+      language,
+      selects: {
+        ...state.selects,
+        [settingKey]: language,
+      },
+    }));
+    applyLocalization(language);
   }
 
   if (settingKey === 'voiceChangerPreset') {
@@ -18115,6 +18575,8 @@ function applyPersistedSettingsState() {
   const fontSize = normalizeSettingsNumber(state.fontSize, 16, 12, 24);
   const zoomLevel = normalizeSettingsNumber(state.zoomLevel, 100, 50, 150);
   const saturation = normalizeSettingsNumber(state.saturation, 100, 0, 100);
+  const language = normalizeAppLanguage(state.language);
+  const dataControls = normalizeDataControls(state.dataControls);
 
   if (themeMode === 'custom' && customTheme) {
     syncThemeInputs(customTheme.backgroundColor, customTheme.textColor, customTheme.accentColor);
@@ -18156,6 +18618,8 @@ function applyPersistedSettingsState() {
     const storedValue =
       settingKey === 'presenceStatus'
         ? state.presenceStatus
+        : settingKey === 'language'
+          ? language
         : settingKey === 'voiceChangerPreset'
           ? state.voiceChanger.preset
           : state.selects[settingKey];
@@ -18180,6 +18644,8 @@ function applyPersistedSettingsState() {
     const forcedToggleValue =
       settingKey === 'privacyShowActivity'
         ? state.privacy.showActivity
+        : getDataPrivacyControlKey(settingKey)
+          ? dataControls[getDataPrivacyControlKey(settingKey)]
         : settingKey === 'voiceChangerEnabled'
           ? state.voiceChanger.enabled
           : settingKey === 'voiceChangerPerCallEnabled'
@@ -18258,6 +18724,7 @@ function applyPersistedSettingsState() {
   });
 
   applyProfileTab(state.profileView || 'user-profile');
+  applyLocalization(language);
 }
 
 function getDefaultSettingsKeybinds() {
@@ -19321,6 +19788,281 @@ async function copyUserDataExportSummary() {
   }
 }
 
+function isPlainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function cloneJsonValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return undefined;
+  }
+}
+
+function pickPlainObject(value, fallback = {}) {
+  return isPlainObject(value) ? cloneJsonValue(value) || fallback : fallback;
+}
+
+function normalizeImportedKeybinds(value) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value
+    .map((keybind) => ({
+      action: String(keybind?.action || '').trim(),
+      keys: normalizeShortcutKeys(Array.isArray(keybind?.keys) ? keybind.keys : []),
+    }))
+    .filter((keybind) => keybind.action && keybind.keys.length);
+}
+
+function normalizeImportedAppSettings(source = {}) {
+  if (!isPlainObject(source)) {
+    throw new Error('Settings import must contain a JSON object.');
+  }
+
+  const fallback = createDefaultSettingsState();
+  const imported = {};
+  const themeModes = new Set(['dark', 'light', 'sync-with-computer', 'custom']);
+  const messageDisplays = new Set(['cozy', 'compact']);
+  const inputModes = new Set(['voice-activity', 'push-to-talk']);
+
+  if (typeof source.profileView === 'string') imported.profileView = source.profileView;
+  if (themeModes.has(source.themeMode)) imported.themeMode = source.themeMode;
+  if (source.customTheme !== undefined) {
+    imported.customTheme = normalizeCustomTheme(source.customTheme, null);
+  }
+  if (messageDisplays.has(source.messageDisplay)) imported.messageDisplay = source.messageDisplay;
+  if (inputModes.has(source.inputMode)) imported.inputMode = source.inputMode;
+  if (source.fontSize !== undefined) {
+    imported.fontSize = normalizeSettingsNumber(source.fontSize, fallback.fontSize, 12, 24);
+  }
+  if (source.zoomLevel !== undefined) {
+    imported.zoomLevel = normalizeSettingsNumber(source.zoomLevel, fallback.zoomLevel, 50, 150);
+  }
+  if (source.saturation !== undefined) {
+    imported.saturation = normalizeSettingsNumber(source.saturation, fallback.saturation, 0, 100);
+  }
+
+  ['toggles', 'checkboxes', 'radios', 'sliders', 'selects', 'connectedAccounts', 'removedItems']
+    .forEach((key) => {
+      if (isPlainObject(source[key])) {
+        imported[key] = pickPlainObject(source[key], {});
+      }
+    });
+
+  const keybinds = normalizeImportedKeybinds(source.keybinds);
+  if (keybinds) {
+    imported.keybinds = keybinds;
+  }
+
+  if (isPlainObject(source.voiceChanger)) {
+    imported.voiceChanger = {
+      ...fallback.voiceChanger,
+      ...pickPlainObject(source.voiceChanger, {}),
+    };
+  }
+
+  if (source.language !== undefined) {
+    imported.language = normalizeAppLanguage(source.language);
+  } else if (source.selects?.language) {
+    imported.language = normalizeAppLanguage(source.selects.language);
+  }
+
+  if (isPlainObject(source.dataControls)) {
+    imported.dataControls = normalizeDataControls(source.dataControls);
+  }
+
+  return imported;
+}
+
+function getAppSettingsSourceFromImportPayload(payload = {}) {
+  if (!isPlainObject(payload)) {
+    throw new Error('Import file must be a JSON object.');
+  }
+
+  if (payload.exportType === 'mydiscord-app-settings' && isPlainObject(payload.settings)) {
+    return {
+      ...payload.settings,
+      voiceChanger: payload.voiceChangerSettings || payload.settings.voiceChanger,
+    };
+  }
+
+  if (isPlainObject(payload.account?.settings)) {
+    return {
+      ...payload.account.settings,
+      voiceChanger: payload.account.voiceChangerSettings || payload.account.settings.voiceChanger,
+    };
+  }
+
+  if (isPlainObject(payload.settings)) {
+    return payload.settings;
+  }
+
+  return payload;
+}
+
+function syncDataControlToggles(state) {
+  const dataControls = normalizeDataControls(state.dataControls);
+  const toggles = { ...(state.toggles || {}) };
+  Object.entries(DATA_PRIVACY_CONTROL_KEYS).forEach(([settingKey, dataControlKey]) => {
+    toggles[settingKey] = Boolean(dataControls[dataControlKey]);
+  });
+  return { ...state, dataControls, toggles };
+}
+
+function getServerManagedSettingsSlice(state) {
+  return {
+    contact: state.contact,
+    verification: state.verification,
+    twoFactor: state.twoFactor,
+    privacy: state.privacy,
+    accountStanding: state.accountStanding,
+    blockedUsers: state.blockedUsers,
+    presenceStatus: state.presenceStatus,
+    customStatus: state.customStatus,
+    activityStatus: state.activityStatus,
+    profileBannerColor: state.profileBannerColor,
+    profileBannerUrl: state.profileBannerUrl,
+    profileBadges: state.profileBadges,
+  };
+}
+
+function applyImportedAppSettings(importedSettings) {
+  const currentState = readSettingsState();
+  const nextState = syncDataControlToggles({
+    ...currentState,
+    ...importedSettings,
+    ...getServerManagedSettingsSlice(currentState),
+  });
+
+  writeSettingsState(nextState);
+  applyPersistedSettingsState();
+  renderSettingsKeybinds();
+  applyRemovedSettingsItems();
+  updateSettingsIdentityFields();
+  return nextState;
+}
+
+function buildPortableAppSettings(state = readSettingsState()) {
+  const portable = {};
+  PORTABLE_APP_SETTINGS_KEYS.forEach((key) => {
+    const value = cloneJsonValue(state[key]);
+    if (value !== undefined) {
+      portable[key] = value;
+    }
+  });
+
+  portable.language = normalizeAppLanguage(portable.language);
+  portable.dataControls = normalizeDataControls(portable.dataControls);
+  portable.toggles = syncDataControlToggles(portable).toggles;
+  return portable;
+}
+
+function setAppSettingsBackupStatus(message) {
+  const status = document.getElementById('appSettingsBackupStatus');
+  if (status) {
+    status.textContent = message;
+  }
+}
+
+function exportAppSettings() {
+  const payload = {
+    exportType: 'mydiscord-app-settings',
+    exportVersion: 1,
+    exportedAt: new Date().toISOString(),
+    application: 'MyDiscord',
+    settings: buildPortableAppSettings(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json',
+  });
+  const safeUsername = String(JWTusername || 'mydiscord').replace(/[^A-Za-z0-9_.-]/g, '_');
+  downloadBlob(blob, `${safeUsername}-app-settings-${Date.now()}.json`);
+  setAppSettingsBackupStatus('Settings exported.');
+  showAppMessage('App settings exported.', 'success');
+}
+
+async function importAppSettingsFromFile(file) {
+  if (!file) {
+    return;
+  }
+
+  const text = await file.text();
+  const payload = JSON.parse(text);
+  const importedSettings = normalizeImportedAppSettings(
+    getAppSettingsSourceFromImportPayload(payload)
+  );
+  applyImportedAppSettings(importedSettings);
+  setAppSettingsBackupStatus('Settings imported.');
+  showAppMessage('App settings imported.', 'success');
+}
+
+async function resetAppSettings() {
+  if (!await askConfirm(
+    'Reset App Settings',
+    'Reset local appearance, accessibility, voice, notification, keybind, language, and privacy-control preferences?',
+    { danger: true, confirmText: 'Reset' }
+  )) {
+    return;
+  }
+
+  const currentState = readSettingsState();
+  const nextState = syncDataControlToggles({
+    ...createDefaultSettingsState(),
+    ...getServerManagedSettingsSlice(currentState),
+  });
+  writeSettingsState(nextState);
+  applyPersistedSettingsState();
+  renderSettingsKeybinds();
+  applyRemovedSettingsItems();
+  updateSettingsIdentityFields();
+  setAppSettingsBackupStatus('Settings reset.');
+  showAppMessage('App settings reset.', 'success');
+}
+
+function clearLocalPrivacyCaches() {
+  profileSummaryCache.clear();
+  mediaUrlCache.clear();
+  peerVolumeLevels.clear();
+  Object.values(renderedMessageCache).forEach((cache) => cache.clear?.());
+
+  try {
+    const keysToRemove = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (
+        key === PEER_VOLUME_STORAGE_KEY ||
+        key === 'discordClone_turnServers' ||
+        key?.startsWith('mydiscord.serverWelcome.')
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+  } catch (error) {
+    console.warn('Could not clear local privacy data:', error);
+  }
+}
+
+async function clearLocalPrivacyData() {
+  if (!await askConfirm(
+    'Clear Local Data',
+    'Clear local search, onboarding, peer volume, TURN server, profile, and media caches on this device?',
+    { danger: true, confirmText: 'Clear' }
+  )) {
+    return;
+  }
+
+  clearLocalPrivacyCaches();
+  showAppMessage('Local privacy data cleared.', 'success');
+}
+
 function formatAppUpdatePhase(phase = '') {
   const labels = {
     disabled: 'Disabled',
@@ -19592,6 +20334,32 @@ function setupSettingsActionButtons() {
   document.getElementById('regenerateBackupCodesBtn')?.addEventListener('click', regenerateBackupCodes);
   document.getElementById('downloadDataExportBtn')?.addEventListener('click', downloadUserDataExport);
   document.getElementById('copyDataExportSummaryBtn')?.addEventListener('click', copyUserDataExportSummary);
+  document.getElementById('openDataExportSettingsBtn')?.addEventListener('click', downloadUserDataExport);
+  document.getElementById('clearLocalPrivacyDataBtn')?.addEventListener('click', clearLocalPrivacyData);
+  document.getElementById('exportAppSettingsBtn')?.addEventListener('click', exportAppSettings);
+  document.getElementById('importAppSettingsBtn')?.addEventListener('click', () => {
+    document.getElementById('appSettingsImportInput')?.click();
+  });
+  document.getElementById('resetAppSettingsBtn')?.addEventListener('click', resetAppSettings);
+  document.getElementById('appSettingsImportInput')?.addEventListener('change', async (event) => {
+    const input = event.currentTarget;
+    const file = input?.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      setAppSettingsBackupStatus('Importing settings...');
+      await importAppSettingsFromFile(file);
+    } catch (error) {
+      setAppSettingsBackupStatus('Settings import failed.');
+      showAppMessage(getApiErrorMessage(error, 'Could not import app settings.'), 'error');
+    } finally {
+      if (input) {
+        input.value = '';
+      }
+    }
+  });
 
   document.querySelectorAll('.reveal-link').forEach((link) => {
     link.addEventListener('click', () => {
@@ -20511,6 +21279,7 @@ function setupSettingsInteractivity() {
   }
 
   settingsInteractivityInitialized = true;
+  populateLanguageSelect(readSettingsState().language);
   setupSettingsAccessibility();
 
   document.querySelectorAll('.settings-item[data-target]').forEach((item) => {
