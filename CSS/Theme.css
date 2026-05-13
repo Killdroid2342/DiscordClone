@@ -1,0 +1,243 @@
+@font-face {
+  font-family: 'MainFont';
+  src: url('../assets/fonts/headFont.woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'headMessage';
+  src: url('../assets/fonts/headMessage.woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'headerFont';
+  src: url('../assets/fonts/headFont.woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'formLabels';
+  src: url('../assets/fonts/labelInputs.woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'formButton';
+  src: url('../assets/fonts/labelInputs.woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'belowFormButton';
+  src: url('../assets/fonts/belowFormButton.woff2');
+  font-display: swap;
+}
+
+:root {
+  --font-body: 'MainFont', 'Segoe UI', Arial, sans-serif;
+  --font-heading: 'headerFont', var(--font-body);
+  --font-label: 'formLabels', var(--font-body);
+  --font-control: 'formButton', var(--font-body);
+  --font-note: 'belowFormButton', var(--font-body);
+  --font-mono: Consolas, 'Courier New', monospace;
+
+  --main-bg: #313338;
+  --second-bg: #2b2d31;
+  --surface-raised: #383a40;
+  --surface-hover: #3f4147;
+  --surface-active: #40444b;
+  --surface-muted: #35373c;
+  --surface-panel: #2f3136;
+  --surface-panel-muted: #292b2f;
+  --surface-contrast: #4b5363;
+  --surface-floating: #232428;
+  --surface-deep: #1e1f22;
+  --surface-sunken: #111214;
+  --input-bg: #1e1f22;
+  --input-strong: #3a3d45;
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-inverse: rgba(0, 0, 0, 0.28);
+
+  --text-main: #dbdee1;
+  --text-muted: #b5bac1;
+  --text-soft: #949ba4;
+  --text-disabled: #72767d;
+  --text-inverse: #111214;
+  --text-bright: #ffffff;
+  --text-link: #00a8fb;
+  --text-link-hover: #0dc1f5;
+
+  --brand-primary: #5865f2;
+  --brand-hover: #4752c4;
+  --brand-soft: rgba(88, 101, 242, 0.14);
+  --brand-soft-strong: rgba(88, 101, 242, 0.22);
+  --brand-border: rgba(88, 101, 242, 0.4);
+  --brand-border-strong: rgba(88, 101, 242, 0.55);
+  --brand-text-soft: #d8ddff;
+  --brand-text: #ffffff;
+  --focus-ring: #9aa4ff;
+
+  --status-positive: #23a559;
+  --status-positive-hover: #3ba55d;
+  --status-positive-soft: rgba(35, 165, 89, 0.14);
+  --status-positive-text: #b9f3d1;
+  --status-warning: #f0b232;
+  --status-warning-strong: #faa61a;
+  --status-warning-soft: rgba(240, 178, 50, 0.14);
+  --status-warning-text: #ffe2a8;
+  --status-danger: #ed4245;
+  --status-danger-hover: #da373c;
+  --status-danger-active: #a12828;
+  --status-danger-soft: rgba(237, 66, 69, 0.14);
+  --status-danger-text: #ffb4b4;
+  --status-neutral: #80848e;
+  --role-default: #3498db;
+
+  --surface-tint-subtle: rgba(255, 255, 255, 0.03);
+  --surface-tint: rgba(255, 255, 255, 0.04);
+  --surface-tint-strong: rgba(255, 255, 255, 0.1);
+  --surface-tint-border: rgba(255, 255, 255, 0.18);
+  --overlay-backdrop-soft: rgba(0, 0, 0, 0.45);
+  --overlay-backdrop: rgba(0, 0, 0, 0.52);
+  --overlay-backdrop-strong: rgba(0, 0, 0, 0.62);
+  --overlay-backdrop-muted: rgba(0, 0, 0, 0.16);
+  --overlay-backdrop-heavy: rgba(0, 0, 0, 0.9);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.16);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 18px 54px rgba(0, 0, 0, 0.42);
+  --theme-shadow: rgba(0, 0, 0, 0.35);
+
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-round: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --duration-fast: 0.15s;
+  --duration-normal: 0.2s;
+  --ease-standard: ease;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--main-bg);
+  color: var(--text-main);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--brand-primary) 60%, transparent);
+  color: var(--brand-text);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--surface-floating) 80%, var(--text-soft));
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--surface-active) 70%, var(--text-muted));
+  background-clip: padding-box;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[role='switch']:focus-visible,
+[role='checkbox']:focus-visible,
+[role='radio']:focus-visible,
+[role='tab']:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 35%, transparent);
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
