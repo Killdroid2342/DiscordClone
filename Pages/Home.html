@@ -1622,6 +1622,49 @@
 
           <div class="settings-separator"></div>
 
+          <h3 class="settings-section-header">App Updates</h3>
+          <div class="app-maintenance-panel" id="appUpdatePanel">
+            <div class="app-maintenance-row">
+              <div>
+                <div class="app-maintenance-label">Current Version</div>
+                <div class="app-maintenance-value" id="appUpdateVersion">Unknown</div>
+              </div>
+              <div class="app-maintenance-status" id="appUpdatePhase">Not checked</div>
+            </div>
+            <div class="app-maintenance-message" id="appUpdateStatusText">Update status unavailable.</div>
+            <div class="app-update-progress" id="appUpdateProgress" aria-hidden="true">
+              <div class="app-update-progress-bar" id="appUpdateProgressBar"></div>
+            </div>
+            <div class="settings-inline-actions app-maintenance-actions">
+              <button type="button" class="settings-btn-primary button-auto-width" id="checkForUpdatesBtn">Check</button>
+              <button type="button" class="settings-btn-primary button-auto-width" id="downloadUpdateBtn" disabled>Download</button>
+              <button type="button" class="settings-btn-primary button-auto-width" id="installUpdateBtn" disabled>Restart</button>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">Diagnostics</h3>
+          <div class="app-maintenance-panel" id="appDiagnosticsPanel">
+            <div class="app-maintenance-row">
+              <div>
+                <div class="app-maintenance-label">Crash Reporter</div>
+                <div class="app-maintenance-value" id="crashReporterStatus">Unknown</div>
+              </div>
+              <div>
+                <div class="app-maintenance-label">Error Reports</div>
+                <div class="app-maintenance-value" id="errorReporterStatus">Unknown</div>
+              </div>
+            </div>
+            <div class="app-maintenance-message" id="diagnosticsStatusText">Diagnostics status unavailable.</div>
+            <div class="settings-inline-actions app-maintenance-actions">
+              <button type="button" class="settings-btn-primary button-auto-width" id="refreshDiagnosticsBtn">Refresh</button>
+              <button type="button" class="settings-btn-primary button-auto-width" id="sendTestErrorReportBtn">Test Report</button>
+            </div>
+          </div>
+
+          <div class="settings-separator"></div>
+
           <div class="toggle-item">
             <div class="toggle-info">
               <div class="toggle-label">Show Game Activity</div>
