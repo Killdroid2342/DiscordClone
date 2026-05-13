@@ -12,6 +12,13 @@
   --text-soft: #949ba4;
   --text-inverse: #111214;
   --theme-shadow: rgba(0, 0, 0, 0.35);
+  --brand-primary: #5865f2;
+  --brand-hover: #4752c4;
+  --brand-text: #ffffff;
+  --focus-ring: #9aa4ff;
+  --status-positive: #23a559;
+  --status-warning: #f0b232;
+  --status-danger: #ed4245;
   --message-group-margin-top: 17px;
   --message-group-padding: 2px 16px;
   --message-avatar-size: 40px;
@@ -31,6 +38,41 @@
   font-family: MainFont;
   box-sizing: border-box;
 
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[role='switch']:focus-visible,
+[role='checkbox']:focus-visible,
+[role='radio']:focus-visible,
+[role='tab']:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 35%, transparent);
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
 }
 
 .allservers {
@@ -61,7 +103,7 @@
 
 .servers:hover {
   border-radius: 16px;
-  background-color: #5865f2;
+  background-color: var(--brand-primary);
 }
 
 .sections {
@@ -2051,8 +2093,8 @@
 }
 
 .edit-profile-btn {
-  background-color: #5865f2;
-  color: white;
+  background-color: var(--brand-primary);
+  color: var(--brand-text);
   border: none;
   padding: 8px 16px;
   border-radius: 4px;
@@ -2062,7 +2104,7 @@
 }
 
 .edit-profile-btn:hover {
-  background-color: #4752c4;
+  background-color: var(--brand-hover);
 }
 
 .account-details-card {
@@ -2146,18 +2188,18 @@
 }
 
 .account-standing-label {
-  color: #23a559;
+  color: var(--status-positive);
   font-size: 20px;
   font-weight: 900;
 }
 
 .account-standing-label[data-standing='limited'] {
-  color: #f0b232;
+  color: var(--status-warning);
 }
 
 .account-standing-label[data-standing='at-risk'],
 .account-standing-label[data-standing='suspended'] {
-  color: #ed4245;
+  color: var(--status-danger);
 }
 
 .account-trust-score {
@@ -2178,16 +2220,16 @@
   width: 60%;
   height: 100%;
   border-radius: inherit;
-  background: #23a559;
+  background: var(--status-positive);
 }
 
 .account-trust-meter-fill[data-standing='limited'] {
-  background: #f0b232;
+  background: var(--status-warning);
 }
 
 .account-trust-meter-fill[data-standing='at-risk'],
 .account-trust-meter-fill[data-standing='suspended'] {
-  background: #ed4245;
+  background: var(--status-danger);
 }
 
 .account-standing-summary {
@@ -2220,8 +2262,8 @@
 }
 
 .change-password-btn {
-  background-color: #5865f2;
-  color: white;
+  background-color: var(--brand-primary);
+  color: var(--brand-text);
   border: none;
   padding: 10px 16px;
   border-radius: 4px;
@@ -2231,7 +2273,7 @@
 }
 
 .change-password-btn:hover {
-  background-color: #4752c4;
+  background-color: var(--brand-hover);
 }
 
 .authenticator-section p {
@@ -2271,7 +2313,7 @@
 }
 
 .disable-account-btn {
-  background-color: #ed4245;
+  background-color: var(--status-danger);
   color: white;
   border: none;
   padding: 10px 16px;
@@ -2288,8 +2330,8 @@
 
 .delete-account-btn {
   background-color: transparent;
-  color: #ed4245;
-  border: 1px solid #ed4245;
+  color: var(--status-danger);
+  border: 1px solid var(--status-danger);
   padding: 10px 16px;
   border-radius: 4px;
   font-size: 14px;
@@ -2588,6 +2630,199 @@
   font-family: monospace;
 }
 
+.theme-editor {
+  display: grid;
+  gap: 16px;
+}
+
+.theme-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.theme-preset {
+  display: grid;
+  gap: 8px;
+  min-height: 68px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--second-bg);
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 10px;
+  text-align: left;
+}
+
+.theme-preset:hover,
+.theme-preset:focus-visible,
+.theme-preset.active {
+  border-color: var(--brand-primary);
+  background: var(--surface-raised);
+}
+
+.theme-preset.active {
+  box-shadow: inset 0 0 0 1px var(--brand-primary);
+}
+
+.theme-preset-swatches {
+  display: flex;
+  gap: 5px;
+}
+
+.theme-preset-swatches span {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+
+.theme-editor-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.theme-color-controls {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.theme-color-field {
+  display: grid;
+  gap: 8px;
+}
+
+.theme-color-input-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.theme-color-input-row input[type='color'] {
+  width: 48px;
+  height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--input-bg);
+  cursor: pointer;
+  padding: 3px;
+}
+
+.theme-hex-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text-main);
+  font-family: Consolas, monospace;
+  font-size: 14px;
+  min-height: 40px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+.theme-preview {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  min-height: 210px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--theme-preview-bg, var(--main-bg));
+  box-shadow: 0 8px 24px var(--theme-shadow);
+}
+
+.theme-preview-sidebar {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+  background: var(--theme-preview-sidebar, var(--second-bg));
+  padding-top: 14px;
+}
+
+.theme-preview-sidebar div {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--theme-preview-surface, var(--surface-raised));
+}
+
+.theme-preview-sidebar div:first-child {
+  border-radius: 10px;
+  background: var(--theme-preview-accent, var(--brand-primary));
+}
+
+.theme-preview-chat {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  color: var(--theme-preview-text, var(--text-main));
+  padding: 16px;
+}
+
+.theme-preview-title {
+  color: var(--theme-preview-text, var(--text-main));
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.theme-preview-message {
+  border-radius: 6px;
+  background: var(--theme-preview-surface, var(--surface-raised));
+  color: var(--theme-preview-muted, var(--text-muted));
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 10px;
+}
+
+.theme-preview-message.strong {
+  color: var(--theme-preview-text, var(--text-main));
+}
+
+.theme-preview-button {
+  justify-self: start;
+  border: 0;
+  border-radius: 4px;
+  background: var(--theme-preview-accent, var(--brand-primary));
+  color: var(--theme-preview-accent-text, var(--brand-text));
+  cursor: pointer;
+  font-weight: 900;
+  padding: 8px 12px;
+}
+
+.theme-contrast-status {
+  min-height: 22px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--second-bg);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 10px 12px;
+}
+
+.theme-contrast-status[data-variant='pass'] {
+  border-color: color-mix(in srgb, var(--status-positive) 55%, var(--border-subtle));
+  color: var(--text-main);
+}
+
+.theme-contrast-status[data-variant='warn'] {
+  border-color: color-mix(in srgb, var(--status-warning) 60%, var(--border-subtle));
+  color: var(--text-main);
+}
+
+.theme-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .radio-group {
   display: flex;
   flex-direction: column;
@@ -2611,6 +2846,7 @@
 
 .radio-item.active {
   background-color: var(--surface-floating);
+  border-color: var(--brand-primary);
 }
 
 .radio-content {
@@ -2699,7 +2935,7 @@
 }
 
 .toggle-switch.active {
-  background-color: #3ba55c;
+  background-color: var(--status-positive);
 }
 
 .toggle-switch.active::after {
@@ -2725,8 +2961,8 @@
 }
 
 .checkbox-box.checked {
-  background-color: #5865f2;
-  border-color: #5865f2;
+  background-color: var(--brand-primary);
+  border-color: var(--brand-primary);
 }
 
 .checkbox-box.checked::after {
@@ -2741,8 +2977,8 @@
 }
 
 .settings-btn-primary {
-  background-color: #5865f2;
-  color: white;
+  background-color: var(--brand-primary);
+  color: var(--brand-text);
   border: none;
   padding: 10px 20px;
   border-radius: 4px;
@@ -2750,10 +2986,14 @@
   font-weight: bold;
 }
 
+.settings-btn-primary:hover {
+  background-color: var(--brand-hover);
+}
+
 .settings-btn-danger {
   background-color: transparent;
-  color: #ed4245;
-  border: 1px solid #ed4245;
+  color: var(--status-danger);
+  border: 1px solid var(--status-danger);
   padding: 6px 12px;
   border-radius: 4px;
   cursor: pointer;
@@ -3401,6 +3641,17 @@ body.app-reduced-motion *::after {
   animation-iteration-count: 1 !important;
   scroll-behavior: auto !important;
   transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 html,
@@ -7920,6 +8171,14 @@ body {
 
   .settings-tab {
     flex: 0 0 auto;
+  }
+
+  .theme-editor-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-preset-grid {
+    grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   }
 
   .custom-status-controls {
