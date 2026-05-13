@@ -1,45 +1,17 @@
-@font-face {
-  font-family: 'headMessage';
-  src: url('../assets/fonts/headMessage.woff2');
-}
-
-@font-face {
-  font-family: 'headerFont';
-  src: url('../assets/fonts/headFont.woff2');
-}
-
-@font-face {
-  font-family: 'formLabels';
-  src: url('../assets/fonts/labelInputs.woff2');
-}
-
-@font-face {
-  font-family: 'formButton';
-  src: url('../assets/fonts/labelInputs.woff2');
-}
-
-@font-face {
-  font-family: 'belowFormButton';
-  src: url('../assets/fonts/belowFormButton.woff2');
-}
+@import './Theme.css';
 
 :root {
-  --auth-panel: #313338;
-  --auth-panel-border: rgba(255, 255, 255, 0.08);
-  --auth-field: #1e1f22;
-  --auth-field-border: rgba(255, 255, 255, 0.08);
-  --auth-text: #f2f3f5;
-  --auth-muted: #b5bac1;
-  --auth-link: #00a8fb;
-  --auth-link-hover: #0dc1f5;
-  --auth-primary: #5865f2;
-  --auth-primary-hover: #4752c4;
+  --auth-panel: var(--main-bg);
+  --auth-panel-border: var(--border-subtle);
+  --auth-field: var(--input-bg);
+  --auth-field-border: var(--border-subtle);
+  --auth-text: var(--text-bright);
+  --auth-muted: var(--text-muted);
+  --auth-link: var(--text-link);
+  --auth-link-hover: var(--text-link-hover);
+  --auth-primary: var(--brand-primary);
+  --auth-primary-hover: var(--brand-hover);
   --auth-overlay: rgba(17, 18, 20, 0.42);
-}
-
-* {
-  box-sizing: border-box;
-  margin: 0;
 }
 
 html,
@@ -48,7 +20,7 @@ body {
 }
 
 body.auth-page {
-  background-color: #1e1f22;
+  background-color: var(--surface-deep);
   color: var(--auth-muted);
 }
 
@@ -83,7 +55,7 @@ body.auth-page {
   border-radius: 12px;
   border: 1px solid var(--auth-panel-border);
   background-color: var(--auth-panel);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-lg);
 }
 
 body.register-page .logInFormDiv {
@@ -94,7 +66,7 @@ body.register-page .logInFormDiv {
   color: var(--auth-text);
   text-align: center;
   padding: 10px 0 6px;
-  font-family: 'headerFont', sans-serif;
+  font-family: var(--font-heading);
   font-size: 24px;
   font-weight: 600;
 }
@@ -103,7 +75,7 @@ body.register-page .logInFormDiv {
   margin-bottom: 20px;
   color: var(--auth-muted);
   text-align: center;
-  font-family: 'headMessage', sans-serif;
+  font-family: 'headMessage', var(--font-body);
 }
 
 .outContent {
@@ -116,11 +88,11 @@ body.register-page .logInFormDiv {
 .twoFactorLabel {
   padding: 15px 0 8px;
   color: var(--auth-muted);
-  font-family: 'formLabels', sans-serif;
+  font-family: var(--font-label);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
 }
 
 .usernameInput,
@@ -133,9 +105,9 @@ body.register-page .logInFormDiv {
   min-height: 46px;
   padding: 12px;
   border: 1px solid var(--auth-field-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background-color: var(--auth-field);
-  color: #dbdee1;
+  color: var(--text-main);
   font-size: 16px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -147,7 +119,7 @@ body.register-page .logInFormDiv {
 .confirmPasswordInput:focus,
 .displayname:focus {
   border-color: var(--auth-primary);
-  box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--auth-primary) 18%, transparent);
   outline: none;
 }
 
@@ -155,10 +127,10 @@ body.register-page .logInFormDiv {
   margin-top: 24px;
   padding: 14px 16px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background-color: var(--auth-primary);
-  color: #ffffff;
-  font-family: 'formButton', sans-serif;
+  color: var(--brand-text);
+  font-family: var(--font-control);
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
@@ -180,7 +152,7 @@ body.register-page .logInFormDiv {
 
 .switchToRegisterInfo,
 .switchToRegister {
-  font-family: 'belowFormButton', sans-serif;
+  font-family: var(--font-note);
   font-size: 14px;
 }
 
@@ -210,8 +182,8 @@ body.register-page .logInFormDiv {
 }
 
 .labelCheckbox {
-  color: #d6d9dd;
-  font-family: 'formLabels', sans-serif;
+  color: var(--text-main);
+  font-family: var(--font-label);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -232,22 +204,22 @@ input[type='checkbox'] {
   justify-content: center;
   align-items: center;
   padding: 24px;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--overlay-backdrop-soft);
 }
 
 .innerModal {
   min-width: min(100%, 320px);
   padding: 20px 24px;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background-color: var(--auth-panel);
   border: 1px solid var(--auth-panel-border);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-lg);
 }
 
 .content {
   color: var(--auth-text);
   text-align: center;
-  font-family: 'headerFont', sans-serif;
+  font-family: var(--font-heading);
   line-height: 1.4;
 }
 
