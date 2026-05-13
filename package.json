@@ -23,11 +23,13 @@
     "@microsoft/signalr": "^10.0.0",
     "axios": "^1.15.2",
     "babel": "^6.23.0",
+    "electron-updater": "^6.8.3",
     "ws": "^8.18.3"
   },
   "build": {
     "appId": "local.discordclone",
     "productName": "MyDiscord",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "files": [
       "index.js",
       "preload.js",
@@ -44,6 +46,14 @@
     "win": {
       "target": "nsis",
       "signAndEditExecutable": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Killdroid2342",
+        "repo": "DiscordClone"
+      }
+    ],
+    "electronUpdaterCompatibility": ">=2.16"
   }
 }
