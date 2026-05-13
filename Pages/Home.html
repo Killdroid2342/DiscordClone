@@ -18,7 +18,7 @@
     class="extracted-inline-1">
     🎵 Sound Blocked! Click anywhere on this screen to enable ringtone. 🎵
   </div>
-  <div class="outerModalMessage">
+  <div class="outerModalMessage" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true">
     <div class="innerModalMessage">
       <p class="ContentMessage"></p>
     </div>
@@ -521,7 +521,7 @@
       </div>
     </div>
   </div>
-  <div id="settingsModal" class="outerModal extracted-inline-2">
+  <div id="settingsModal" class="outerModal extracted-inline-2" role="dialog" aria-modal="true" aria-labelledby="settingsDialogTitle" aria-hidden="true">
     <div class="settings-container">
       <div class="settings-sidebar custom-scroll">
         <div class="settings-sidebar-header">
@@ -571,6 +571,7 @@
       </div>
 
       <div class="settings-content custom-scroll">
+        <h2 id="settingsDialogTitle" class="sr-only">Settings</h2>
         <div class="settings-close-btn" onclick="closeSettingsModal()">
           <div class="close-circle">
             <span>x</span>
@@ -1050,29 +1051,109 @@
               </div>
               <div class="radio-circle"></div>
             </div>
+            <div class="radio-item" data-setting-value="custom">
+              <div class="radio-content">
+                <div class="radio-title">Custom</div>
+              </div>
+              <div class="radio-circle"></div>
+            </div>
           </div>
 
           <div class="settings-separator"></div>
 
-          <h3 class="settings-section-header">Custom Theme Colors</h3>
-          <p class="form-desc extracted-inline-51">Personalize your Discord experience with custom colors.
-            These override the default themes above.</p>
+          <h3 class="settings-section-header">Theme Editor</h3>
+          <p class="form-desc extracted-inline-51">Personalize your app colors and check readability before saving.</p>
 
-          <div class="form-group extracted-inline-58">
-            <div class="extracted-inline-59">
-              <label class="form-label" for="customBgColor">Background Color</label>
-              <input type="color" id="customBgColor" value="#313338"
-                class="extracted-inline-60">
+          <div class="theme-editor" aria-label="Theme editor">
+            <div class="theme-preset-grid" id="themePresetGrid" role="group" aria-label="Theme presets">
+              <button type="button" class="theme-preset active" data-theme-preset="dark">
+                <span class="theme-preset-swatches" aria-hidden="true">
+                  <span style="background:#313338"></span>
+                  <span style="background:#dbdee1"></span>
+                  <span style="background:#5865f2"></span>
+                </span>
+                <span>Dark</span>
+              </button>
+              <button type="button" class="theme-preset" data-theme-preset="light">
+                <span class="theme-preset-swatches" aria-hidden="true">
+                  <span style="background:#f2f3f5"></span>
+                  <span style="background:#1e1f22"></span>
+                  <span style="background:#5865f2"></span>
+                </span>
+                <span>Light</span>
+              </button>
+              <button type="button" class="theme-preset" data-theme-preset="midnight">
+                <span class="theme-preset-swatches" aria-hidden="true">
+                  <span style="background:#101114"></span>
+                  <span style="background:#f4f7fb"></span>
+                  <span style="background:#3cc7a0"></span>
+                </span>
+                <span>Midnight</span>
+              </button>
+              <button type="button" class="theme-preset" data-theme-preset="forest">
+                <span class="theme-preset-swatches" aria-hidden="true">
+                  <span style="background:#17231d"></span>
+                  <span style="background:#e8f4ee"></span>
+                  <span style="background:#55b87a"></span>
+                </span>
+                <span>Forest</span>
+              </button>
+              <button type="button" class="theme-preset" data-theme-preset="custom">
+                <span class="theme-preset-swatches" aria-hidden="true">
+                  <span id="customPresetBg" style="background:#313338"></span>
+                  <span id="customPresetText" style="background:#dbdee1"></span>
+                  <span id="customPresetAccent" style="background:#5865f2"></span>
+                </span>
+                <span>Custom</span>
+              </button>
             </div>
-            <div class="extracted-inline-59">
-              <label class="form-label" for="customTextColor">Text Color</label>
-              <input type="color" id="customTextColor" value="#dbdee1"
-                class="extracted-inline-60">
+
+            <div class="theme-editor-panel">
+              <div class="theme-color-controls">
+                <div class="theme-color-field">
+                  <label class="form-label" for="customBgColor">Background</label>
+                  <div class="theme-color-input-row">
+                    <input type="color" id="customBgColor" value="#313338">
+                    <input type="text" id="customBgHex" class="theme-hex-input" value="#313338" maxlength="7" spellcheck="false" aria-label="Background hex color">
+                  </div>
+                </div>
+                <div class="theme-color-field">
+                  <label class="form-label" for="customTextColor">Text</label>
+                  <div class="theme-color-input-row">
+                    <input type="color" id="customTextColor" value="#dbdee1">
+                    <input type="text" id="customTextHex" class="theme-hex-input" value="#dbdee1" maxlength="7" spellcheck="false" aria-label="Text hex color">
+                  </div>
+                </div>
+                <div class="theme-color-field">
+                  <label class="form-label" for="customAccentColor">Accent</label>
+                  <div class="theme-color-input-row">
+                    <input type="color" id="customAccentColor" value="#5865f2">
+                    <input type="text" id="customAccentHex" class="theme-hex-input" value="#5865f2" maxlength="7" spellcheck="false" aria-label="Accent hex color">
+                  </div>
+                </div>
+              </div>
+
+              <div class="theme-preview" id="themePreview" aria-label="Theme preview">
+                <div class="theme-preview-sidebar">
+                  <div></div>
+                  <div></div>
+                  <div></div>
+                </div>
+                <div class="theme-preview-chat">
+                  <div class="theme-preview-title">Theme Preview</div>
+                  <div class="theme-preview-message strong">Welcome back</div>
+                  <div class="theme-preview-message">This is how your message surface will feel.</div>
+                  <button type="button" class="theme-preview-button">Accent Button</button>
+                </div>
+              </div>
             </div>
-            <button id="saveCustomThemeBtn" class="settings-btn-primary extracted-inline-61"
-             >Save Theme</button>
-            <button id="resetCustomThemeBtn" class="settings-btn-danger extracted-inline-61"
-             >Reset to Default</button>
+
+            <div id="themeContrastStatus" class="theme-contrast-status" role="status" aria-live="polite"></div>
+
+            <div class="theme-editor-actions">
+              <button type="button" id="saveCustomThemeBtn" class="settings-btn-primary">Save Theme</button>
+              <button type="button" id="resetCustomThemeBtn" class="settings-btn-danger">Reset to Default</button>
+            </div>
           </div>
 
           <div class="settings-separator"></div>
