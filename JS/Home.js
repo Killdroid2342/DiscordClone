@@ -429,10 +429,12 @@ function showAppMessage(message, variant = 'info', duration = 2600) {
 
   messageModalContent.textContent = message;
   messageOuterModal.dataset.variant = variant;
+  messageOuterModal.setAttribute('aria-hidden', 'false');
   showElement(messageOuterModal, 'flex');
 
   window.clearTimeout(showAppMessage.timeoutId);
   showAppMessage.timeoutId = window.setTimeout(() => {
+    messageOuterModal.setAttribute('aria-hidden', 'true');
     hideElement(messageOuterModal);
   }, duration);
 }
@@ -2118,18 +2120,87 @@ function closeModal() {
 function openSettingsModal() {
   const modal = document.getElementById('settingsModal');
   if (modal) {
+    settingsModalReturnFocusElement = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    modal.setAttribute('aria-hidden', 'false');
     showElement(modal, 'flex');
     refreshSettingsModal();
+    focusSettingsModal();
   }
 }
 
 function closeSettingsModal() {
   const modal = document.getElementById('settingsModal');
-  if (modal) hideElement(modal);
+  if (modal) {
+    modal.setAttribute('aria-hidden', 'true');
+    hideElement(modal);
+  }
   const searchInput = document.getElementById('settingsSearchInput');
   if (searchInput) {
     searchInput.value = '';
     filterSettingsSidebarItems('');
+  }
+  if (settingsModalReturnFocusElement?.isConnected) {
+    settingsModalReturnFocusElement.focus();
+  }
+  settingsModalReturnFocusElement = null;
+}
+
+function getFocusableElements(container) {
+  if (!container) return [];
+  const selector = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(',');
+
+  return Array.from(container.querySelectorAll(selector)).filter((element) => {
+    const style = window.getComputedStyle(element);
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      element.getClientRects().length > 0
+    );
+  });
+}
+
+function focusSettingsModal() {
+  const modal = document.getElementById('settingsModal');
+  if (!isElementVisible(modal)) return;
+
+  window.requestAnimationFrame(() => {
+    const searchInput = document.getElementById('settingsSearchInput');
+    const activeNavItem = modal.querySelector('.settings-item.active');
+    const closeButton = modal.querySelector('.settings-close-btn');
+    const target = searchInput || activeNavItem || closeButton;
+    target?.focus?.();
+  });
+}
+
+function trapSettingsModalFocus(event) {
+  const modal = document.getElementById('settingsModal');
+  if (event.key !== 'Tab' || !isElementVisible(modal)) return;
+
+  const focusable = getFocusableElements(modal);
+  if (!focusable.length) {
+    event.preventDefault();
+    modal.focus();
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
@@ -16146,10 +16217,12 @@ const SETTINGS_STORAGE_KEY = 'discordClone_settings_v2';
 const LIGHT_THEME = {
   background: '#f2f3f5',
   text: '#1e1f22',
+  accent: '#5865f2',
 };
 
 let settingsInteractivityInitialized = false;
 let settingsSystemThemeListenerInitialized = false;
+let settingsModalReturnFocusElement = null;
 let accountSettingsLoadPromise = null;
 let accountSettingsPersistTimer = null;
 let accountSettingsServerState = null;
@@ -16162,6 +16235,7 @@ function createDefaultSettingsState() {
     selectedTab: 'my-account',
     profileView: 'user-profile',
     themeMode: 'dark',
+    customTheme: null,
     messageDisplay: 'cozy',
     inputMode: 'voice-activity',
     fontSize: 16,
@@ -16272,6 +16346,7 @@ function readSettingsState() {
         typeof parsedState.themeMode === 'string'
           ? parsedState.themeMode
           : fallbackState.themeMode,
+      customTheme: normalizeCustomTheme(parsedState.customTheme, fallbackState.customTheme),
       messageDisplay:
         typeof parsedState.messageDisplay === 'string'
           ? parsedState.messageDisplay
@@ -16801,6 +16876,7 @@ function applyAccountSettingsResponse(data) {
       ...(data.privacy || {}),
     },
     presenceStatus: data.presenceStatus || serverState.presenceStatus || fallback.presenceStatus,
+    customTheme: normalizeCustomTheme(serverState.customTheme, fallback.customTheme),
     customStatus: normalizeCustomStatus(
       data.customStatus ?? serverState.customStatus ?? fallback.customStatus
     ),
@@ -16958,6 +17034,147 @@ function getRadioItemValue(item, index = 0) {
   return slugifySettingsValue(titleText || index);
 }
 
+function getAccessibleControlLabel(element) {
+  return (
+    element?.getAttribute?.('aria-label') ||
+    element?.querySelector?.('.toggle-label, .checkbox-label, .radio-title')?.textContent?.trim() ||
+    element?.textContent?.trim() ||
+    'Control'
+  );
+}
+
+function ensureKeyboardActivation(element) {
+  if (!element || element.dataset.keyboardActivationReady === 'true') return;
+  element.dataset.keyboardActivationReady = 'true';
+  element.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.target?.matches?.('input, textarea, select, button')) return;
+    event.preventDefault();
+    element.click();
+  });
+}
+
+function updateSettingsNavigationAccessibility() {
+  document.querySelectorAll('.settings-item[data-target]').forEach((item) => {
+    const target = item.dataset.target;
+    const isActive = item.classList.contains('active');
+    item.setAttribute('role', 'button');
+    item.setAttribute('tabindex', '0');
+    item.setAttribute('aria-controls', `view-${target}`);
+    item.setAttribute('aria-current', isActive ? 'page' : 'false');
+    ensureKeyboardActivation(item);
+  });
+
+  const logoutItem = document.querySelector('.settings-item.log-out');
+  if (logoutItem) {
+    logoutItem.setAttribute('role', 'button');
+    logoutItem.setAttribute('tabindex', '0');
+    logoutItem.setAttribute('aria-label', 'Log out');
+    ensureKeyboardActivation(logoutItem);
+  }
+
+  const closeButton = document.querySelector('.settings-close-btn');
+  if (closeButton) {
+    closeButton.setAttribute('role', 'button');
+    closeButton.setAttribute('tabindex', '0');
+    closeButton.setAttribute('aria-label', 'Close settings');
+    ensureKeyboardActivation(closeButton);
+  }
+}
+
+function updateProfileTabAccessibility(activeTab = readSettingsState().profileView || 'user-profile') {
+  const profileTabBar = document.querySelector('[data-settings-tab-bar="profileView"]');
+  if (!profileTabBar) return;
+
+  profileTabBar.setAttribute('role', 'tablist');
+  profileTabBar.querySelectorAll('.settings-tab').forEach((tab) => {
+    const tabKey = tab.dataset.tab || 'user-profile';
+    const panel = document.querySelector(`[data-tab-panel="${tabKey}"]`);
+    if (panel && !panel.id) {
+      panel.id = `profile-tab-panel-${tabKey}`;
+    }
+
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('tabindex', tabKey === activeTab ? '0' : '-1');
+    tab.setAttribute('aria-selected', tabKey === activeTab ? 'true' : 'false');
+    if (panel?.id) {
+      tab.setAttribute('aria-controls', panel.id);
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', tab.id || `profile-tab-${tabKey}`);
+    }
+    if (!tab.id) {
+      tab.id = `profile-tab-${tabKey}`;
+    }
+    ensureKeyboardActivation(tab);
+  });
+}
+
+function updateRadioGroupAccessibility(group) {
+  if (!group) return;
+  group.setAttribute('role', 'radiogroup');
+  group.querySelectorAll('.radio-item').forEach((item) => {
+    const isSelected = item.classList.contains('active');
+    item.setAttribute('role', 'radio');
+    item.setAttribute('tabindex', isSelected ? '0' : '-1');
+    item.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+    ensureKeyboardActivation(item);
+  });
+}
+
+function updateToggleAccessibility(item) {
+  const toggle = item?.querySelector?.('.toggle-switch');
+  if (!item || !toggle) return;
+  const isActive = toggle.classList.contains('active');
+  item.setAttribute('role', 'switch');
+  item.setAttribute('tabindex', '0');
+  item.setAttribute('aria-checked', isActive ? 'true' : 'false');
+  item.setAttribute('aria-label', getAccessibleControlLabel(item));
+  ensureKeyboardActivation(item);
+}
+
+function updateCheckboxAccessibility(item) {
+  const checkbox = item?.querySelector?.('.checkbox-box');
+  if (!item || !checkbox) return;
+  const isChecked = checkbox.classList.contains('checked');
+  item.setAttribute('role', 'checkbox');
+  item.setAttribute('tabindex', '0');
+  item.setAttribute('aria-checked', isChecked ? 'true' : 'false');
+  item.setAttribute('aria-label', getAccessibleControlLabel(item));
+  ensureKeyboardActivation(item);
+}
+
+function setupSettingsAccessibility() {
+  updateSettingsNavigationAccessibility();
+  updateProfileTabAccessibility();
+  document.querySelectorAll('.radio-group').forEach(updateRadioGroupAccessibility);
+  document.querySelectorAll('.toggle-item').forEach(updateToggleAccessibility);
+  document.querySelectorAll('.checkbox-item').forEach(updateCheckboxAccessibility);
+  document.querySelectorAll('.settings-slider').forEach((slider, index) => {
+    if (!slider.getAttribute('aria-label')) {
+      const label =
+        slider.closest('.form-group, .settings-view')?.querySelector('.form-label, .settings-section-header')?.textContent?.trim() ||
+        getSliderSettingKey(slider, index);
+      slider.setAttribute('aria-label', label);
+    }
+  });
+  document.querySelectorAll('.settings-select').forEach((select, index) => {
+    if (!select.getAttribute('aria-label') && !select.labels?.length) {
+      const label =
+        select.closest('.form-group, .settings-view')?.querySelector('.form-label, .settings-section-header')?.textContent?.trim() ||
+        getSelectSettingKey(select, index);
+      select.setAttribute('aria-label', label);
+    }
+  });
+
+  document
+    .querySelectorAll('.navText, .plus, .friends, .device-remove, .game-overlay-toggle, .remove-game-btn, .remove-link, .close, .closeJoin, .closeSecond, .backSecondModal, .closeThird, .creationBack')
+    .forEach((element) => {
+      element.setAttribute('role', 'button');
+      element.setAttribute('tabindex', '0');
+      ensureKeyboardActivation(element);
+    });
+}
+
 function updateAccountStandingPanel(state = readSettingsState()) {
   const standing = getAccountStanding(state);
   const standingLabel = document.getElementById('accountStandingLabel');
@@ -17013,6 +17230,8 @@ function setRadioGroupSelection(group, desiredValue) {
     item.classList.toggle('active', isActive);
     item.querySelector('.radio-circle')?.classList.toggle('selected', isActive);
   });
+
+  updateRadioGroupAccessibility(group);
 
   return {
     item: selectedItem,
@@ -17190,6 +17409,8 @@ function applyProfileTab(tabKey) {
   document.querySelectorAll('[data-tab-panel]').forEach((panel) => {
     setElementVisible(panel, panel.dataset.tabPanel === targetTab, 'block');
   });
+
+  updateProfileTabAccessibility(targetTab);
 }
 
 function applyMessageDisplay(mode) {
@@ -17251,15 +17472,22 @@ function applySliderValue(slider, value, index = 0) {
   const settingKey = getSliderSettingKey(slider, index);
 
   slider.value = String(nextValue);
+  slider.setAttribute('aria-valuenow', String(nextValue));
 
   if (slider.id === 'fontScalingSlider') {
     applyMessageFontSize(nextValue);
+    slider.setAttribute('aria-valuetext', `${nextValue} pixels`);
   } else if (slider.id === 'zoomLevelSlider') {
     applyZoomLevel(nextValue);
+    slider.setAttribute('aria-valuetext', `${nextValue} percent`);
   } else if (slider.id === 'saturationSlider') {
     applySaturationLevel(nextValue);
+    slider.setAttribute('aria-valuetext', `${nextValue} percent`);
   } else if (settingKey === 'outputVolume' || slider.id === 'outputVolumeSlider') {
     applyOutputVolume(nextValue);
+    slider.setAttribute('aria-valuetext', `${nextValue} percent`);
+  } else {
+    slider.setAttribute('aria-valuetext', String(nextValue));
   }
 }
 
@@ -17273,6 +17501,10 @@ function applyReducedMotion(isEnabled) {
   document.body?.classList.toggle('app-reduced-motion', Boolean(isEnabled));
 }
 
+function isReducedMotionSetting(settingKey) {
+  return settingKey === 'reducedMotion' || settingKey.endsWith('-reduced-motion');
+}
+
 function getSystemThemeColors() {
   const prefersDark =
     typeof window.matchMedia === 'function' &&
@@ -17280,31 +17512,190 @@ function getSystemThemeColors() {
   return prefersDark ? DEFAULT_THEME : LIGHT_THEME;
 }
 
-function syncThemeInputs(backgroundColor, textColor) {
+function syncThemeInputs(backgroundColor, textColor, accentColor = DEFAULT_THEME.accent) {
   const bgInput = document.getElementById('customBgColor');
   const textInput = document.getElementById('customTextColor');
+  const accentInput = document.getElementById('customAccentColor');
+  const bgHexInput = document.getElementById('customBgHex');
+  const textHexInput = document.getElementById('customTextHex');
+  const accentHexInput = document.getElementById('customAccentHex');
+  const normalizedBackground = normalizeHexColor(backgroundColor, DEFAULT_THEME.background);
+  const normalizedText = normalizeHexColor(textColor, DEFAULT_THEME.text);
+  const normalizedAccent = normalizeHexColor(accentColor, DEFAULT_THEME.accent);
 
-  if (bgInput) bgInput.value = backgroundColor;
-  if (textInput) textInput.value = textColor;
+  if (bgInput) bgInput.value = normalizedBackground;
+  if (textInput) textInput.value = normalizedText;
+  if (accentInput) accentInput.value = normalizedAccent;
+  if (bgHexInput) bgHexInput.value = normalizedBackground;
+  if (textHexInput) textHexInput.value = normalizedText;
+  if (accentHexInput) accentHexInput.value = normalizedAccent;
+  updateCustomPresetSwatches(normalizedBackground, normalizedText, normalizedAccent);
+  updateThemeEditorPreview(buildThemePalette(normalizedBackground, normalizedText, normalizedAccent));
+}
+
+function updateCustomPresetSwatches(backgroundColor, textColor, accentColor) {
+  const swatches = {
+    customPresetBg: backgroundColor,
+    customPresetText: textColor,
+    customPresetAccent: accentColor,
+  };
+
+  Object.entries(swatches).forEach(([id, color]) => {
+    const swatch = document.getElementById(id);
+    if (swatch) {
+      swatch.style.background = color;
+    }
+  });
+}
+
+function updateThemeEditorPreview(theme) {
+  const preview = document.getElementById('themePreview');
+  if (!preview || !theme) return;
+
+  preview.style.setProperty('--theme-preview-bg', theme.background);
+  preview.style.setProperty('--theme-preview-sidebar', theme.secondBackground);
+  preview.style.setProperty('--theme-preview-surface', theme.raisedSurface);
+  preview.style.setProperty('--theme-preview-text', theme.mainText);
+  preview.style.setProperty('--theme-preview-muted', theme.mutedText);
+  preview.style.setProperty('--theme-preview-accent', theme.accent);
+  preview.style.setProperty('--theme-preview-accent-text', theme.accentText);
+  updateThemeContrastStatus(theme);
+}
+
+function updateThemeContrastStatus(theme) {
+  const status = document.getElementById('themeContrastStatus');
+  if (!status || !theme) return;
+
+  const bodyContrast = getContrastRatio(theme.background, theme.mainText);
+  const accentContrast = getContrastRatio(theme.accent, theme.accentText);
+  const bodyLabel = bodyContrast >= 7 ? 'AAA' : bodyContrast >= 4.5 ? 'AA' : 'Low';
+  const accentLabel = accentContrast >= 4.5 ? 'AA' : 'Low';
+  const passes = bodyContrast >= 4.5 && accentContrast >= 4.5;
+
+  status.dataset.variant = passes ? 'pass' : 'warn';
+  status.textContent = `Text contrast ${bodyContrast.toFixed(1)}:1 (${bodyLabel}). Accent contrast ${accentContrast.toFixed(1)}:1 (${accentLabel}).`;
+}
+
+function getThemeFromInputs() {
+  return {
+    backgroundColor: normalizeHexColor(
+      document.getElementById('customBgColor')?.value,
+      DEFAULT_THEME.background
+    ),
+    textColor: normalizeHexColor(
+      document.getElementById('customTextColor')?.value,
+      DEFAULT_THEME.text
+    ),
+    accentColor: normalizeHexColor(
+      document.getElementById('customAccentColor')?.value,
+      DEFAULT_THEME.accent
+    ),
+  };
+}
+
+function setThemePresetSelection(presetKey = 'custom') {
+  document.querySelectorAll('.theme-preset').forEach((button) => {
+    const isSelected = button.dataset.themePreset === presetKey;
+    button.classList.toggle('active', isSelected);
+    button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+  });
+}
+
+function applyThemeEditorPreset(presetKey) {
+  const preset = THEME_PRESETS[presetKey];
+  if (!preset) {
+    setThemePresetSelection('custom');
+    return;
+  }
+
+  syncThemeInputs(preset.background, preset.text, preset.accent);
+  applyTheme(preset.background, preset.text, preset.accent);
+  setThemePresetSelection(presetKey);
+}
+
+function setupThemeEditor() {
+  const fields = [
+    ['customBgColor', 'customBgHex', DEFAULT_THEME.background],
+    ['customTextColor', 'customTextHex', DEFAULT_THEME.text],
+    ['customAccentColor', 'customAccentHex', DEFAULT_THEME.accent],
+  ];
+
+  const previewFromInputs = () => {
+    const theme = getThemeFromInputs();
+    syncThemeInputs(theme.backgroundColor, theme.textColor, theme.accentColor);
+    applyTheme(theme.backgroundColor, theme.textColor, theme.accentColor);
+    setThemePresetSelection('custom');
+  };
+
+  fields.forEach(([colorId, hexId, fallback]) => {
+    const colorInput = document.getElementById(colorId);
+    const hexInput = document.getElementById(hexId);
+    if (colorInput && colorInput.dataset.themeInputReady !== 'true') {
+      colorInput.dataset.themeInputReady = 'true';
+      colorInput.addEventListener('input', () => {
+        if (hexInput) hexInput.value = normalizeHexColor(colorInput.value, fallback);
+        previewFromInputs();
+      });
+    }
+
+    if (hexInput && hexInput.dataset.themeInputReady !== 'true') {
+      hexInput.dataset.themeInputReady = 'true';
+      hexInput.addEventListener('input', () => {
+        const normalized = normalizeHexColor(hexInput.value, '');
+        if (normalized && colorInput) {
+          colorInput.value = normalized;
+          previewFromInputs();
+        }
+      });
+      hexInput.addEventListener('blur', () => {
+        const normalized = normalizeHexColor(hexInput.value, fallback);
+        hexInput.value = normalized;
+        if (colorInput) colorInput.value = normalized;
+        previewFromInputs();
+      });
+    }
+  });
+
+  document.querySelectorAll('.theme-preset').forEach((button) => {
+    if (button.dataset.themePresetReady === 'true') return;
+    button.dataset.themePresetReady = 'true';
+    button.setAttribute('aria-pressed', button.classList.contains('active') ? 'true' : 'false');
+    button.addEventListener('click', () => {
+      const presetKey = button.dataset.themePreset || 'custom';
+      if (presetKey === 'custom') {
+        previewFromInputs();
+      } else {
+        applyThemeEditorPreset(presetKey);
+      }
+    });
+  });
 }
 
 function applyThemeMode(themeMode, options = {}) {
   const { syncInputs = true } = options;
+  const customTheme = normalizeCustomTheme(readSettingsState().customTheme);
   const presetTheme =
-    themeMode === 'light'
-      ? LIGHT_THEME
-      : themeMode === 'sync-with-computer'
-        ? getSystemThemeColors()
-        : DEFAULT_THEME;
+    themeMode === 'custom' && customTheme
+      ? {
+          background: customTheme.backgroundColor,
+          text: customTheme.textColor,
+          accent: customTheme.accentColor,
+        }
+      : themeMode === 'light'
+        ? LIGHT_THEME
+        : themeMode === 'sync-with-computer'
+          ? getSystemThemeColors()
+          : DEFAULT_THEME;
 
   if (syncInputs) {
-    syncThemeInputs(presetTheme.background, presetTheme.text);
+    syncThemeInputs(presetTheme.background, presetTheme.text, presetTheme.accent);
   }
 
-  applyTheme(presetTheme.background, presetTheme.text);
+  applyTheme(presetTheme.background, presetTheme.text, presetTheme.accent);
+  setThemePresetSelection(themeMode === 'custom' ? 'custom' : themeMode);
 }
 
-function syncThemeModeSelectionFromTheme(backgroundColor, textColor) {
+function syncThemeModeSelectionFromTheme(backgroundColor, textColor, accentColor = DEFAULT_THEME.accent) {
   const themeGroup = document.querySelector('[data-settings-radio="themeMode"]');
   if (!themeGroup) {
     return;
@@ -17315,21 +17706,27 @@ function syncThemeModeSelectionFromTheme(backgroundColor, textColor) {
     DEFAULT_THEME.background
   );
   const normalizedText = normalizeHexColor(textColor, DEFAULT_THEME.text);
+  const normalizedAccent = normalizeHexColor(accentColor, DEFAULT_THEME.accent);
   let nextThemeMode = readSettingsState().themeMode || 'dark';
 
   if (
     normalizedBackground === normalizeHexColor(DEFAULT_THEME.background) &&
-    normalizedText === normalizeHexColor(DEFAULT_THEME.text)
+    normalizedText === normalizeHexColor(DEFAULT_THEME.text) &&
+    normalizedAccent === normalizeHexColor(DEFAULT_THEME.accent)
   ) {
     nextThemeMode = 'dark';
   } else if (
     normalizedBackground === normalizeHexColor(LIGHT_THEME.background) &&
-    normalizedText === normalizeHexColor(LIGHT_THEME.text)
+    normalizedText === normalizeHexColor(LIGHT_THEME.text) &&
+    normalizedAccent === normalizeHexColor(LIGHT_THEME.accent)
   ) {
     nextThemeMode = 'light';
+  } else {
+    nextThemeMode = 'custom';
   }
 
   setRadioGroupSelection(themeGroup, nextThemeMode);
+  setThemePresetSelection(nextThemeMode === 'custom' ? 'custom' : nextThemeMode);
 }
 
 function handleToggleStateChange(settingKey, isActive) {
@@ -17341,7 +17738,7 @@ function handleToggleStateChange(settingKey, isActive) {
     },
   }));
 
-  if (settingKey.endsWith('-reduced-motion')) {
+  if (isReducedMotionSetting(settingKey)) {
     applyReducedMotion(isActive);
   }
 
@@ -17492,7 +17889,9 @@ function handleRadioStateChange(settingKey, value) {
 
     if (settingKey === 'themeMode') {
       nextState.themeMode = value;
-      nextState.customTheme = null;
+      if (value !== 'custom') {
+        nextState.customTheme = null;
+      }
     }
 
     if (settingKey === 'messageDisplay') {
@@ -17703,12 +18102,19 @@ function applyVoiceChangerPreset(preset) {
 function applyPersistedSettingsState() {
   const state = readSettingsState();
   const themeMode = state.themeMode || 'dark';
+  const customTheme = normalizeCustomTheme(state.customTheme);
   const messageDisplay = state.messageDisplay || 'cozy';
   const fontSize = normalizeSettingsNumber(state.fontSize, 16, 12, 24);
   const zoomLevel = normalizeSettingsNumber(state.zoomLevel, 100, 50, 150);
   const saturation = normalizeSettingsNumber(state.saturation, 100, 0, 100);
 
-  applyThemeMode(themeMode);
+  if (themeMode === 'custom' && customTheme) {
+    syncThemeInputs(customTheme.backgroundColor, customTheme.textColor, customTheme.accentColor);
+    applyTheme(customTheme.backgroundColor, customTheme.textColor, customTheme.accentColor);
+    setThemePresetSelection('custom');
+  } else {
+    applyThemeMode(themeMode);
+  }
   applyMessageDisplay(messageDisplay);
   applyMessageFontSize(fontSize);
   applyZoomLevel(zoomLevel);
@@ -17779,8 +18185,9 @@ function applyPersistedSettingsState() {
           : toggle.classList.contains('active');
 
     toggle.classList.toggle('active', isActive);
+    updateToggleAccessibility(item);
 
-    if (settingKey.endsWith('-reduced-motion')) {
+    if (isReducedMotionSetting(settingKey)) {
       applyReducedMotion(isActive);
     }
   });
@@ -17808,6 +18215,7 @@ function applyPersistedSettingsState() {
           : checkbox.classList.contains('checked');
 
     checkbox.classList.toggle('checked', isChecked);
+    updateCheckboxAccessibility(item);
   });
 
   document.querySelectorAll('.radio-group').forEach((group, index) => {
@@ -19810,6 +20218,13 @@ function switchSettingsTab(target) {
     }
   });
 
+  const activeNavItem = document.querySelector(`.settings-item[data-target="${escapeCssIdentifier(target)}"]`);
+  const dialogTitle = document.getElementById('settingsDialogTitle');
+  if (dialogTitle && activeNavItem) {
+    dialogTitle.textContent = activeNavItem.textContent.trim();
+  }
+  updateSettingsNavigationAccessibility();
+
   writeSettingsState((state) => ({
     ...state,
     selectedTab: target,
@@ -19833,6 +20248,7 @@ function setupSettingsInteractivity() {
   }
 
   settingsInteractivityInitialized = true;
+  setupSettingsAccessibility();
 
   document.querySelectorAll('.settings-item[data-target]').forEach((item) => {
     item.addEventListener('click', () => {
@@ -19870,6 +20286,17 @@ function setupSettingsInteractivity() {
           profileView: nextTab,
         }));
       });
+
+      tab.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+        event.preventDefault();
+        const tabs = Array.from(profileTabBar.querySelectorAll('.settings-tab'));
+        const currentIndex = tabs.indexOf(tab);
+        const direction = event.key === 'ArrowRight' ? 1 : -1;
+        const nextTab = tabs[(currentIndex + direction + tabs.length) % tabs.length];
+        nextTab?.focus();
+        nextTab?.click();
+      });
     });
   }
 
@@ -19882,6 +20309,7 @@ function setupSettingsInteractivity() {
 
       const isActive = !toggle.classList.contains('active');
       toggle.classList.toggle('active', isActive);
+      updateToggleAccessibility(item);
       handleToggleStateChange(getToggleSettingKey(item, index), isActive);
     });
   });
@@ -19893,6 +20321,17 @@ function setupSettingsInteractivity() {
         const value = getRadioItemValue(item, itemIndex);
         setRadioGroupSelection(group, value);
         handleRadioStateChange(settingKey, value);
+      });
+
+      item.addEventListener('keydown', (event) => {
+        if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+        event.preventDefault();
+        const items = Array.from(group.querySelectorAll('.radio-item'));
+        const currentIndex = items.indexOf(item);
+        const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1;
+        const nextItem = items[(currentIndex + direction + items.length) % items.length];
+        nextItem?.focus();
+        nextItem?.click();
       });
     });
   });
@@ -19906,6 +20345,7 @@ function setupSettingsInteractivity() {
 
       const isChecked = !checkbox.classList.contains('checked');
       checkbox.classList.toggle('checked', isChecked);
+      updateCheckboxAccessibility(item);
       handleCheckboxStateChange(getCheckboxSettingKey(item, index), isChecked);
     });
   });
@@ -19944,6 +20384,7 @@ function setupSettingsInteractivity() {
         closeSettingsModal();
       }
     }
+    trapSettingsModalFocus(event);
   });
 
   const saveProfileBtn = document.getElementById('saveProfileSettingsBtn');
@@ -20007,10 +20448,7 @@ function setupSettingsInteractivity() {
   const saveThemeBtn = document.getElementById('saveCustomThemeBtn');
   if (saveThemeBtn) {
     saveThemeBtn.addEventListener('click', async () => {
-      const bgColor =
-        document.getElementById('customBgColor')?.value || DEFAULT_THEME.background;
-      const textColor =
-        document.getElementById('customTextColor')?.value || DEFAULT_THEME.text;
+      const customTheme = getThemeFromInputs();
 
       try {
         saveThemeBtn.textContent = 'Saving...';
@@ -20018,18 +20456,21 @@ function setupSettingsInteractivity() {
 
         await axios.post(`${homeApiBase}/api/Account/UpdateAccountTheme`, {
           username: JWTusername,
-          backgroundColor: bgColor,
-          textColor: textColor,
+          backgroundColor: customTheme.backgroundColor,
+          textColor: customTheme.textColor,
         });
 
-        applyTheme(bgColor, textColor);
-        syncThemeModeSelectionFromTheme(bgColor, textColor);
+        applyTheme(customTheme.backgroundColor, customTheme.textColor, customTheme.accentColor);
+        syncThemeInputs(customTheme.backgroundColor, customTheme.textColor, customTheme.accentColor);
+        syncThemeModeSelectionFromTheme(
+          customTheme.backgroundColor,
+          customTheme.textColor,
+          customTheme.accentColor
+        );
         writeSettingsState((state) => ({
           ...state,
-          customTheme: {
-            backgroundColor: bgColor,
-            textColor,
-          },
+          themeMode: 'custom',
+          customTheme,
         }));
 
         saveThemeBtn.textContent = 'Saved!';
@@ -20056,12 +20497,13 @@ function setupSettingsInteractivity() {
           textColor: DEFAULT_THEME.text,
         });
 
-        applyTheme(DEFAULT_THEME.background, DEFAULT_THEME.text);
-        syncThemeInputs(DEFAULT_THEME.background, DEFAULT_THEME.text);
+        applyTheme(DEFAULT_THEME.background, DEFAULT_THEME.text, DEFAULT_THEME.accent);
+        syncThemeInputs(DEFAULT_THEME.background, DEFAULT_THEME.text, DEFAULT_THEME.accent);
         setRadioGroupSelection(
           document.querySelector('[data-settings-radio="themeMode"]'),
           'dark'
         );
+        setThemePresetSelection('dark');
         writeSettingsState((state) => ({
           ...state,
           themeMode: 'dark',
@@ -20073,18 +20515,7 @@ function setupSettingsInteractivity() {
       }
     });
   }
-
-  const bgInput = document.getElementById('customBgColor');
-  const textInput = document.getElementById('customTextColor');
-  const previewTheme = () => {
-    if (!bgInput || !textInput) return;
-    applyTheme(
-      bgInput.value || DEFAULT_THEME.background,
-      textInput.value || DEFAULT_THEME.text
-    );
-  };
-  if (bgInput) bgInput.addEventListener('input', previewTheme);
-  if (textInput) textInput.addEventListener('input', previewTheme);
+  setupThemeEditor();
 
   const editProfileBtn = document.querySelector('.edit-profile-btn');
   if (editProfileBtn) {
@@ -20117,6 +20548,22 @@ function setupSettingsInteractivity() {
 const DEFAULT_THEME = {
   background: '#313338',
   text: '#dbdee1',
+  accent: '#5865f2',
+};
+
+const THEME_PRESETS = {
+  dark: DEFAULT_THEME,
+  light: LIGHT_THEME,
+  midnight: {
+    background: '#101114',
+    text: '#f4f7fb',
+    accent: '#3cc7a0',
+  },
+  forest: {
+    background: '#17231d',
+    text: '#e8f4ee',
+    accent: '#55b87a',
+  },
 };
 
 function clampColorChannel(value) {
@@ -20142,6 +20589,25 @@ function normalizeHexColor(color, fallback = DEFAULT_THEME.background) {
   }
 
   return fallback;
+}
+
+function normalizeCustomTheme(theme, fallback = null) {
+  if (!theme || typeof theme !== 'object') return fallback;
+
+  return {
+    backgroundColor: normalizeHexColor(
+      theme.backgroundColor ?? theme.background ?? theme.bgColor,
+      fallback?.backgroundColor || DEFAULT_THEME.background
+    ),
+    textColor: normalizeHexColor(
+      theme.textColor ?? theme.text,
+      fallback?.textColor || DEFAULT_THEME.text
+    ),
+    accentColor: normalizeHexColor(
+      theme.accentColor ?? theme.accent,
+      fallback?.accentColor || DEFAULT_THEME.accent
+    ),
+  };
 }
 
 function hexToRgb(color) {
@@ -20208,17 +20674,24 @@ function getReadableTextColor(backgroundColor, preferredTextColor) {
   return whiteContrast >= blackContrast ? '#ffffff' : '#000000';
 }
 
-function buildThemePalette(backgroundColor, textColor) {
+function buildThemePalette(backgroundColor, textColor, accentColor = DEFAULT_THEME.accent) {
   const background = normalizeHexColor(
     backgroundColor,
     DEFAULT_THEME.background
   );
   const mainText = getReadableTextColor(background, textColor);
+  const accent = normalizeHexColor(accentColor, DEFAULT_THEME.accent);
   const isDarkTheme = getRelativeLuminance(background) < 0.35;
   const referenceColor = isDarkTheme ? '#ffffff' : '#000000';
+  const accentReference = getRelativeLuminance(accent) < 0.35 ? '#ffffff' : '#000000';
+  const accentHover = mixColors(accent, accentReference, 0.16);
 
   return {
     background,
+    accent,
+    accentHover,
+    accentText: getReadableTextColor(accent, '#ffffff'),
+    focusRing: mixColors(accent, accentReference, 0.34),
     secondBackground: mixColors(background, referenceColor, isDarkTheme ? 0.07 : 0.05),
     raisedSurface: mixColors(background, referenceColor, isDarkTheme ? 0.13 : 0.1),
     floatingSurface: mixColors(background, referenceColor, isDarkTheme ? 0.18 : 0.15),
@@ -20234,8 +20707,8 @@ function buildThemePalette(backgroundColor, textColor) {
   };
 }
 
-function applyTheme(bgColor, textColor) {
-  const theme = buildThemePalette(bgColor, textColor);
+function applyTheme(bgColor, textColor, accentColor = DEFAULT_THEME.accent) {
+  const theme = buildThemePalette(bgColor, textColor, accentColor);
 
   setHomeRuntimeCss(
     'theme',
@@ -20253,9 +20726,14 @@ function applyTheme(bgColor, textColor) {
   --text-soft: ${theme.softText};
   --text-inverse: ${theme.inverseText};
   --theme-shadow: ${theme.shadowColor};
+  --brand-primary: ${theme.accent};
+  --brand-hover: ${theme.accentHover};
+  --brand-text: ${theme.accentText};
+  --focus-ring: ${theme.focusRing};
 }`
   );
 
+  updateThemeEditorPreview(theme);
   return theme;
 }
 
@@ -20264,15 +20742,17 @@ async function loadUserTheme() {
     if (typeof JWTusername === 'undefined' || !JWTusername) return;
     const res = await axios.get(`${homeApiBase}/api/Account/GetAccountTheme`);
     if (res.data && res.data.backgroundColor) {
-      applyTheme(res.data.backgroundColor, res.data.textColor || '#dbdee1');
-      
-      const bgInput = document.getElementById('customBgColor');
-      const textInput = document.getElementById('customTextColor');
-      if (bgInput) bgInput.value = res.data.backgroundColor;
-      if (textInput && res.data.textColor) textInput.value = res.data.textColor;
+      const savedTheme = normalizeCustomTheme(readSettingsState().customTheme);
+      const backgroundColor = normalizeHexColor(res.data.backgroundColor, DEFAULT_THEME.background);
+      const textColor = normalizeHexColor(res.data.textColor || DEFAULT_THEME.text, DEFAULT_THEME.text);
+      const accentColor = savedTheme?.accentColor || DEFAULT_THEME.accent;
+
+      applyTheme(backgroundColor, textColor, accentColor);
+      syncThemeInputs(backgroundColor, textColor, accentColor);
       syncThemeModeSelectionFromTheme(
-        res.data.backgroundColor,
-        res.data.textColor || DEFAULT_THEME.text
+        backgroundColor,
+        textColor,
+        accentColor
       );
     }
   } catch (err) {
