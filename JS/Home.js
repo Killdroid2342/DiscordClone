@@ -19377,40 +19377,235 @@ function openDisableAccountDialog() {
   });
 }
 
-function openDeleteAccountDialog() {
-  openAccountActionDialog({
-    title: 'Delete Account',
-    description: 'This removes your account and friend relationships. Messages already sent are kept for conversation history.',
-    confirmText: 'Delete Account',
-    danger: true,
-    fields: [
-      {
-        name: 'username',
-        label: `Type ${JWTusername} to confirm`,
-        type: 'text',
-        autocomplete: 'username',
-      },
-      {
-        name: 'password',
-        label: 'Password',
-        type: 'password',
-        autocomplete: 'current-password',
-        minLength: 6,
-      },
-    ],
-    onSubmit: async ({ username, password }) => {
-      if (username !== JWTusername) {
-        throw new Error('The confirmation username does not match.');
-      }
+async function fetchAccountDeletionPreview() {
+  const response = await axios.get(`${homeApiBase}/api/Account/GetAccountDeletionPreview`);
+  return response.data || {};
+}
 
+function createAccountDeletionSummary(preview = {}) {
+  const summary = preview.summary || {};
+  const items = [
+    ['Direct messages', summary.directMessageCount],
+    ['Group chats', summary.groupChatCount],
+    ['Group messages', summary.groupMessageCount],
+    ['Server memberships', summary.serverMembershipCount],
+    ['Owned servers', summary.ownedServerCount],
+    ['Server messages', summary.authoredServerMessageCount],
+    ['Thread messages', summary.authoredThreadMessageCount],
+    ['Reports', summary.reportCount],
+    ['Active sessions', summary.activeSessionCount],
+    ['Owned apps', summary.ownedOAuthApplicationCount],
+    ['Authorized apps', summary.authorizedApplicationCount],
+  ];
+
+  const grid = document.createElement('div');
+  grid.className = 'account-deletion-summary';
+
+  items.forEach(([label, value]) => {
+    const item = document.createElement('div');
+    item.className = 'account-deletion-summary-item';
+
+    const valueEl = document.createElement('strong');
+    valueEl.textContent = String(value ?? 0);
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+
+    item.appendChild(valueEl);
+    item.appendChild(labelEl);
+    grid.appendChild(item);
+  });
+
+  return grid;
+}
+
+async function openDeleteAccountDialog() {
+  closeAccountActionDialog();
+
+  let preview = null;
+  try {
+    preview = await fetchAccountDeletionPreview();
+  } catch (error) {
+    console.warn('Could not load deletion preview:', error);
+    showAppMessage(getApiErrorMessage(error, 'Could not load deletion preview. Showing the required warnings.'), 'error');
+    preview = {
+      confirmationText: JWTusername,
+      warnings: [
+        'Account deletion is permanent after you confirm it.',
+        'Download your data export first if you need a copy of your account data.',
+        'Friends, sessions, app authorizations, and account settings will be removed.',
+      ],
+      summary: {},
+    };
+  }
+
+  const expectedUsername = String(preview.confirmationText || JWTusername || '').trim();
+  const overlay = document.createElement('div');
+  overlay.className = 'account-action-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'account-action-dialog account-deletion-dialog';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Delete Account';
+
+  const copy = document.createElement('p');
+  copy.className = 'account-action-copy';
+  copy.textContent = 'Review what will happen, download an export if you need it, then confirm with your username and password.';
+
+  const warningPanel = document.createElement('div');
+  warningPanel.className = 'account-deletion-warning';
+  const warningTitle = document.createElement('div');
+  warningTitle.className = 'account-deletion-warning-title';
+  warningTitle.textContent = 'Before you continue';
+  const warningList = document.createElement('ul');
+  (Array.isArray(preview.warnings) ? preview.warnings : []).forEach((warning) => {
+    const item = document.createElement('li');
+    item.textContent = warning;
+    warningList.appendChild(item);
+  });
+  warningPanel.appendChild(warningTitle);
+  warningPanel.appendChild(warningList);
+
+  const exportPanel = document.createElement('div');
+  exportPanel.className = 'account-deletion-export';
+  const exportCopy = document.createElement('p');
+  exportCopy.textContent = 'Your export includes account profile, settings, sessions, relationships, conversations, reports, and app authorizations.';
+  const exportButton = document.createElement('button');
+  exportButton.type = 'button';
+  exportButton.className = 'account-action-cancel account-deletion-export-btn';
+  exportButton.textContent = 'Download Data Export';
+  const exportStatus = document.createElement('span');
+  exportStatus.className = 'account-deletion-export-status';
+  exportStatus.textContent = 'No export downloaded in this flow.';
+  exportPanel.appendChild(exportCopy);
+  exportPanel.appendChild(exportButton);
+  exportPanel.appendChild(exportStatus);
+
+  const form = document.createElement('form');
+  form.className = 'account-action-form';
+
+  const acknowledgeLabel = document.createElement('label');
+  acknowledgeLabel.className = 'account-deletion-ack';
+  const acknowledgeInput = document.createElement('input');
+  acknowledgeInput.type = 'checkbox';
+  acknowledgeInput.required = true;
+  const acknowledgeText = document.createElement('span');
+  acknowledgeText.textContent = 'I have downloaded my data or I do not need an export, and I understand this deletion cannot be undone.';
+  acknowledgeLabel.appendChild(acknowledgeInput);
+  acknowledgeLabel.appendChild(acknowledgeText);
+
+  const usernameLabel = document.createElement('label');
+  usernameLabel.textContent = `Type ${expectedUsername} to confirm`;
+  const usernameInput = document.createElement('input');
+  usernameInput.type = 'text';
+  usernameInput.name = 'confirmationUsername';
+  usernameInput.autocomplete = 'username';
+  usernameInput.required = true;
+  usernameLabel.appendChild(usernameInput);
+
+  const passwordLabel = document.createElement('label');
+  passwordLabel.textContent = 'Password';
+  const passwordInput = document.createElement('input');
+  passwordInput.type = 'password';
+  passwordInput.name = 'password';
+  passwordInput.autocomplete = 'current-password';
+  passwordInput.minLength = 6;
+  passwordInput.required = true;
+  passwordLabel.appendChild(passwordInput);
+
+  const error = document.createElement('p');
+  error.className = 'account-action-error';
+  error.setAttribute('role', 'alert');
+
+  const actions = document.createElement('div');
+  actions.className = 'account-action-buttons';
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.className = 'account-action-cancel';
+  cancelButton.textContent = 'Cancel';
+  cancelButton.addEventListener('click', closeAccountActionDialog);
+
+  const submitButton = document.createElement('button');
+  submitButton.type = 'submit';
+  submitButton.className = 'account-action-submit danger';
+  submitButton.textContent = 'Delete Account';
+
+  const updateSubmitState = () => {
+    submitButton.disabled = !(
+      acknowledgeInput.checked &&
+      usernameInput.value.trim() === expectedUsername &&
+      passwordInput.value.length >= 6
+    );
+  };
+
+  acknowledgeInput.addEventListener('change', updateSubmitState);
+  usernameInput.addEventListener('input', updateSubmitState);
+  passwordInput.addEventListener('input', updateSubmitState);
+  updateSubmitState();
+
+  exportButton.addEventListener('click', async () => {
+    const downloaded = await downloadUserDataExport(exportButton);
+    if (downloaded) {
+      exportStatus.textContent = 'Export downloaded for this deletion review.';
+      acknowledgeInput.checked = true;
+      updateSubmitState();
+    }
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.textContent = '';
+
+    if (usernameInput.value.trim() !== expectedUsername) {
+      error.textContent = 'The confirmation username does not match.';
+      updateSubmitState();
+      return;
+    }
+
+    try {
+      setBusyState(submitButton, true, 'Deleting...');
       const res = await axios.post(`${homeApiBase}/api/Account/DeleteAccount`, {
         username: JWTusername,
-        password,
+        confirmationUsername: usernameInput.value.trim(),
+        password: passwordInput.value,
+        acknowledgedWarnings: acknowledgeInput.checked,
       });
       showAppMessage(res.data?.message || 'Account deleted.', 'success');
+      closeAccountActionDialog();
       window.setTimeout(LogOut, 900);
-    },
+    } catch (err) {
+      console.error('Delete Account failed:', err);
+      error.textContent = getApiErrorMessage(err, 'Could not delete account.');
+    } finally {
+      setBusyState(submitButton, false);
+      updateSubmitState();
+    }
   });
+
+  actions.appendChild(cancelButton);
+  actions.appendChild(submitButton);
+  form.appendChild(acknowledgeLabel);
+  form.appendChild(usernameLabel);
+  form.appendChild(passwordLabel);
+  form.appendChild(error);
+  form.appendChild(actions);
+
+  dialog.appendChild(heading);
+  dialog.appendChild(copy);
+  dialog.appendChild(warningPanel);
+  dialog.appendChild(createAccountDeletionSummary(preview));
+  dialog.appendChild(exportPanel);
+  dialog.appendChild(form);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      closeAccountActionDialog();
+    }
+  });
+
+  usernameInput.focus();
 }
 
 function openContactInfoDialog() {
@@ -19726,8 +19921,11 @@ function downloadBlob(blob, filename) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-async function downloadUserDataExport() {
-  const button = document.getElementById('downloadDataExportBtn');
+async function downloadUserDataExport(button = document.getElementById('downloadDataExportBtn')) {
+  if (button && typeof button === 'object' && 'currentTarget' in button) {
+    button = button.currentTarget;
+  }
+
   try {
     setBusyState(button, true, 'Preparing...');
     const response = await axios.get(`${homeApiBase}/api/Account/ExportUserData`, {
@@ -19738,8 +19936,10 @@ async function downloadUserDataExport() {
       `${JWTusername || 'mydiscord'}-data-export.json`;
     downloadBlob(response.data, filename);
     showAppMessage('Data export downloaded.', 'success');
+    return true;
   } catch (error) {
     showAppMessage(getApiErrorMessage(error, 'Could not download data export.'), 'error');
+    return false;
   } finally {
     setBusyState(button, false);
   }
