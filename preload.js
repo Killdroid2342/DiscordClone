@@ -27,6 +27,82 @@ function reportRendererDiagnostic(payload = {}) {
   });
 }
 
+function cleanUpdateInfo(info = {}) {
+  return {
+    version: cleanDiagnosticText(info.version, '', 80),
+    releaseName: cleanDiagnosticText(info.releaseName, '', 160),
+    releaseDate: cleanDiagnosticText(info.releaseDate, '', 80),
+    releaseNotes: cleanDiagnosticText(info.releaseNotes, '', 2000),
+  };
+}
+
+function cleanUpdateProgress(progress = {}) {
+  return {
+    percent: Math.max(0, Math.min(100, Number(progress.percent) || 0)),
+    bytesPerSecond: Math.max(0, Number(progress.bytesPerSecond) || 0),
+    transferred: Math.max(0, Number(progress.transferred) || 0),
+    total: Math.max(0, Number(progress.total) || 0),
+  };
+}
+
+function cleanUpdateStatus(status = {}) {
+  return {
+    enabled: Boolean(status.enabled),
+    phase: cleanDiagnosticText(status.phase, 'disabled', 40),
+    channel: cleanDiagnosticText(status.channel, 'latest', 40),
+    currentVersion: cleanDiagnosticText(status.currentVersion, '', 80),
+    feedConfigured: Boolean(status.feedConfigured),
+    message: cleanDiagnosticText(status.message, 'Update status unavailable.', 500),
+    checkedAt: cleanDiagnosticText(status.checkedAt, '', 80),
+    updateInfo: status.updateInfo ? cleanUpdateInfo(status.updateInfo) : null,
+    progress: status.progress ? cleanUpdateProgress(status.progress) : null,
+    error: cleanDiagnosticText(status.error, '', 500),
+    canCheck: Boolean(status.canCheck),
+    canDownload: Boolean(status.canDownload),
+    canInstall: Boolean(status.canInstall),
+    installStarted: Boolean(status.installStarted),
+  };
+}
+
+function cleanDiagnosticsStatus(status = {}) {
+  const crashReporter = status.crashReporter || {};
+  const errorReporting = status.errorReporting || {};
+  const lastReport = errorReporting.lastReport || null;
+  const lastCrashReport = crashReporter.lastCrashReport || null;
+
+  return {
+    crashReporter: {
+      started: Boolean(crashReporter.started),
+      uploadToServer: Boolean(crashReporter.uploadToServer),
+      submitUrlConfigured: Boolean(crashReporter.submitUrlConfigured),
+      startError: cleanDiagnosticText(crashReporter.startError, '', 500),
+      uploadedCrashReportCount: Math.max(0, Number(crashReporter.uploadedCrashReportCount) || 0),
+      lastCrashReport: lastCrashReport
+        ? {
+            id: cleanDiagnosticText(lastCrashReport.id, '', 120),
+            date: cleanDiagnosticText(lastCrashReport.date, '', 80),
+          }
+        : null,
+    },
+    errorReporting: {
+      remoteConfigured: Boolean(errorReporting.remoteConfigured),
+      logFilePath: cleanDiagnosticText(errorReporting.logFilePath, '', 500),
+      diagnosticFilePath: cleanDiagnosticText(errorReporting.diagnosticFilePath, '', 500),
+      lastReport: lastReport
+        ? {
+            id: cleanDiagnosticText(lastReport.id, '', 120),
+            timestamp: cleanDiagnosticText(lastReport.timestamp, '', 80),
+            type: cleanDiagnosticText(lastReport.type, '', 80),
+            message: cleanDiagnosticText(lastReport.message, '', 500),
+            submitted: Boolean(lastReport.submitted),
+            reason: cleanDiagnosticText(lastReport.reason, '', 120),
+            uploadError: cleanDiagnosticText(lastReport.uploadError, '', 500),
+          }
+        : null,
+    },
+  };
+}
+
 contextBridge.exposeInMainWorld('desktopNotifications', {
   notify(payload) {
     return ipcRenderer.invoke(
@@ -46,6 +122,40 @@ contextBridge.exposeInMainWorld('desktopNotifications', {
 contextBridge.exposeInMainWorld('appDiagnostics', {
   reportError(payload) {
     return reportRendererDiagnostic(payload);
+  },
+  getStatus() {
+    return ipcRenderer.invoke('diagnostics:get-status').then(cleanDiagnosticsStatus);
+  },
+  sendTestReport() {
+    return ipcRenderer.invoke('diagnostics:test-error-report');
+  },
+});
+
+contextBridge.exposeInMainWorld('appUpdates', {
+  getStatus() {
+    return ipcRenderer.invoke('app-updates:get-status').then(cleanUpdateStatus);
+  },
+  checkForUpdates() {
+    return ipcRenderer.invoke('app-updates:check').then(cleanUpdateStatus);
+  },
+  downloadUpdate() {
+    return ipcRenderer.invoke('app-updates:download').then(cleanUpdateStatus);
+  },
+  installUpdate() {
+    return ipcRenderer.invoke('app-updates:install').then(cleanUpdateStatus);
+  },
+  onStatus(callback) {
+    if (typeof callback !== 'function') {
+      return () => {};
+    }
+
+    const listener = (event, status) => {
+      callback(cleanUpdateStatus(status));
+    };
+    ipcRenderer.on('app-updates:status', listener);
+    return () => {
+      ipcRenderer.removeListener('app-updates:status', listener);
+    };
   },
 });
 
