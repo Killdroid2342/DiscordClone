@@ -1,5 +1,23 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function cleanOptionalUrl(value) {
+  const text = String(value || '').trim().replace(/\/+$/, '');
+  if (!text) {
+    return '';
+  }
+
+  try {
+    const parsedUrl = new URL(text);
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      return '';
+    }
+
+    return parsedUrl.toString().replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
 function cleanDiagnosticText(value, fallback, maxLength) {
   return String(value || fallback || '')
     .replace(/\s+/g, ' ')
@@ -102,6 +120,11 @@ function cleanDiagnosticsStatus(status = {}) {
     },
   };
 }
+
+contextBridge.exposeInMainWorld('myDiscordRuntimeConfig', {
+  apiBase: cleanOptionalUrl(process.env.MYDISCORD_API_BASE),
+  cdnBase: cleanOptionalUrl(process.env.MYDISCORD_CDN_BASE),
+});
 
 contextBridge.exposeInMainWorld('desktopNotifications', {
   notify(payload) {
