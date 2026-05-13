@@ -914,6 +914,50 @@
               <div class="checkbox-label">Server Members</div>
             </div>
           </div>
+
+          <div class="settings-separator"></div>
+
+          <div class="privacy-card">
+            <h3 class="settings-section-header">Data & Privacy Controls</h3>
+            <p class="form-desc">Choose how local app data and optional diagnostics are used.</p>
+
+            <div class="toggle-item" data-setting-key="privacyUseActivityForPersonalization">
+              <div class="toggle-info">
+                <div class="toggle-label">Use activity for personalization</div>
+                <div class="toggle-desc">Let MyDiscord tailor suggestions and reminders from your activity status.</div>
+              </div>
+              <div class="toggle-switch active"></div>
+            </div>
+
+            <div class="toggle-item" data-setting-key="privacyShareDiagnostics">
+              <div class="toggle-info">
+                <div class="toggle-label">Share crash and error diagnostics</div>
+                <div class="toggle-desc">Include technical reports that help improve app stability.</div>
+              </div>
+              <div class="toggle-switch"></div>
+            </div>
+
+            <div class="toggle-item" data-setting-key="privacyLocalSearchHistory">
+              <div class="toggle-info">
+                <div class="toggle-label">Keep local search and onboarding history</div>
+                <div class="toggle-desc">Store convenience data on this device for faster repeat visits.</div>
+              </div>
+              <div class="toggle-switch active"></div>
+            </div>
+
+            <div class="toggle-item" data-setting-key="privacyLocalMediaCache">
+              <div class="toggle-info">
+                <div class="toggle-label">Cache media previews locally</div>
+                <div class="toggle-desc">Keep temporary profile and media metadata on this device.</div>
+              </div>
+              <div class="toggle-switch active"></div>
+            </div>
+
+            <div class="settings-inline-actions data-privacy-actions">
+              <button type="button" class="settings-btn-primary button-auto-width" id="openDataExportSettingsBtn">Download Data</button>
+              <button type="button" class="settings-btn-danger button-auto-width" id="clearLocalPrivacyDataBtn">Clear Local Data</button>
+            </div>
+          </div>
         </div>
 
         <div id="view-family" class="settings-view extracted-inline-2">
@@ -1618,6 +1662,20 @@
                 this off if you are experiencing frame drops.</div>
             </div>
             <div class="toggle-switch active"></div>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <h3 class="settings-section-header">App Settings Backup</h3>
+          <p class="form-desc">Export your local app preferences or import a settings JSON file on this device.</p>
+          <div class="app-maintenance-panel" id="appSettingsBackupPanel">
+            <div class="settings-inline-actions app-maintenance-actions">
+              <button type="button" class="settings-btn-primary button-auto-width" id="exportAppSettingsBtn">Export Settings</button>
+              <button type="button" class="settings-btn-primary button-auto-width" id="importAppSettingsBtn">Import Settings</button>
+              <button type="button" class="settings-btn-danger button-auto-width" id="resetAppSettingsBtn">Reset Settings</button>
+            </div>
+            <input type="file" id="appSettingsImportInput" accept="application/json,.json" class="extracted-inline-2" />
+            <div class="app-maintenance-message" id="appSettingsBackupStatus">Settings backup is ready.</div>
           </div>
 
           <div class="settings-separator"></div>
