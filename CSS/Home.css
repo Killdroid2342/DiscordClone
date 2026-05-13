@@ -2990,6 +2990,12 @@ textarea:disabled {
   background-color: var(--brand-hover);
 }
 
+.settings-btn-primary:disabled,
+.settings-btn-danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .settings-btn-danger {
   background-color: transparent;
   color: var(--status-danger);
@@ -3006,6 +3012,88 @@ textarea:disabled {
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
+}
+
+.app-maintenance-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--second-bg);
+}
+
+.app-maintenance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.app-maintenance-label {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.app-maintenance-value {
+  margin-top: 4px;
+  color: var(--text-main);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.app-maintenance-status {
+  padding: 5px 9px;
+  border-radius: 4px;
+  background: var(--surface-raised);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.app-maintenance-status[data-phase='available'],
+.app-maintenance-status[data-phase='downloaded'] {
+  background: rgba(35, 165, 90, 0.15);
+  color: #3ba55d;
+}
+
+.app-maintenance-status[data-phase='error'],
+.app-maintenance-status[data-phase='disabled'] {
+  background: rgba(237, 66, 69, 0.14);
+  color: #ed4245;
+}
+
+.app-maintenance-message {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.app-maintenance-actions {
+  margin-top: 0;
+}
+
+.app-update-progress {
+  display: none;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--input-bg);
+}
+
+.app-update-progress.is-visible {
+  display: block;
+}
+
+.app-update-progress-bar {
+  width: 0%;
+  height: 100%;
+  background: var(--brand-primary);
+  transition: width 0.18s ease;
 }
 
 .empty-state-card.compact {

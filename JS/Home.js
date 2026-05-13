@@ -929,6 +929,14 @@ function getDesktopNotificationBridge() {
   return window.desktopNotifications || null;
 }
 
+function getAppUpdateBridge() {
+  return window.appUpdates || null;
+}
+
+function getAppDiagnosticsBridge() {
+  return window.appDiagnostics || null;
+}
+
 function isToggleSettingEnabled(settingKey, fallback = true) {
   const state = readSettingsState();
   if (hasStoredSettingValue(state.toggles || {}, settingKey)) {
@@ -19313,7 +19321,262 @@ async function copyUserDataExportSummary() {
   }
 }
 
+function formatAppUpdatePhase(phase = '') {
+  const labels = {
+    disabled: 'Disabled',
+    idle: 'Ready',
+    checking: 'Checking',
+    available: 'Available',
+    downloading: 'Downloading',
+    downloaded: 'Ready',
+    'up-to-date': 'Up to date',
+    error: 'Error',
+  };
+  return labels[phase] || 'Unknown';
+}
+
+function updateAppUpdateControls(status = {}) {
+  const version = document.getElementById('appUpdateVersion');
+  const phase = document.getElementById('appUpdatePhase');
+  const statusText = document.getElementById('appUpdateStatusText');
+  const checkButton = document.getElementById('checkForUpdatesBtn');
+  const downloadButton = document.getElementById('downloadUpdateBtn');
+  const installButton = document.getElementById('installUpdateBtn');
+  const progress = document.getElementById('appUpdateProgress');
+  const progressBar = document.getElementById('appUpdateProgressBar');
+  const progressPercent = Math.round(status.progress?.percent || 0);
+
+  if (version) {
+    version.textContent = status.currentVersion || 'Unknown';
+  }
+
+  if (phase) {
+    phase.textContent = formatAppUpdatePhase(status.phase);
+    phase.dataset.phase = status.phase || 'disabled';
+  }
+
+  if (statusText) {
+    statusText.textContent = status.message || 'Update status unavailable.';
+  }
+
+  if (checkButton) {
+    checkButton.disabled = !status.canCheck;
+  }
+
+  if (downloadButton) {
+    downloadButton.disabled = !status.canDownload;
+  }
+
+  if (installButton) {
+    installButton.disabled = !status.canInstall;
+  }
+
+  if (progress) {
+    const isVisible = status.phase === 'downloading';
+    progress.classList.toggle('is-visible', isVisible);
+    progress.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+  }
+
+  if (progressBar) {
+    progressBar.style.width = `${progressPercent}%`;
+  }
+}
+
+async function refreshAppUpdateStatus() {
+  const bridge = getAppUpdateBridge();
+  if (!bridge?.getStatus) {
+    updateAppUpdateControls({
+      phase: 'disabled',
+      message: 'Desktop update integration unavailable.',
+      currentVersion: 'Unknown',
+    });
+    return null;
+  }
+
+  try {
+    const status = await bridge.getStatus();
+    updateAppUpdateControls(status);
+    return status;
+  } catch (error) {
+    updateAppUpdateControls({
+      phase: 'error',
+      message: getApiErrorMessage(error, 'Could not read update status.'),
+      currentVersion: 'Unknown',
+    });
+    return null;
+  }
+}
+
+async function checkForDesktopUpdates() {
+  const bridge = getAppUpdateBridge();
+  const button = document.getElementById('checkForUpdatesBtn');
+  if (!bridge?.checkForUpdates) {
+    showAppMessage('Desktop update integration unavailable.', 'error');
+    return;
+  }
+
+  setBusyState(button, true, 'Checking...');
+  try {
+    const status = await bridge.checkForUpdates();
+    updateAppUpdateControls(status);
+    if (status.phase === 'up-to-date') {
+      showAppMessage('MyDiscord is up to date.', 'success');
+    } else if (status.phase === 'available') {
+      showAppMessage(status.message || 'An update is available.', 'success');
+    } else if (status.phase === 'disabled' || status.phase === 'error') {
+      showAppMessage(status.message || 'Update check failed.', 'error');
+    }
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not check for updates.'), 'error');
+  } finally {
+    setBusyState(button, false);
+    refreshAppUpdateStatus();
+  }
+}
+
+async function downloadDesktopUpdate() {
+  const bridge = getAppUpdateBridge();
+  const button = document.getElementById('downloadUpdateBtn');
+  if (!bridge?.downloadUpdate) {
+    showAppMessage('Desktop update integration unavailable.', 'error');
+    return;
+  }
+
+  setBusyState(button, true, 'Starting...');
+  try {
+    const status = await bridge.downloadUpdate();
+    updateAppUpdateControls(status);
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not download update.'), 'error');
+  } finally {
+    setBusyState(button, false);
+    refreshAppUpdateStatus();
+  }
+}
+
+async function installDesktopUpdate() {
+  const bridge = getAppUpdateBridge();
+  if (!bridge?.installUpdate) {
+    showAppMessage('Desktop update integration unavailable.', 'error');
+    return;
+  }
+
+  try {
+    const status = await bridge.installUpdate();
+    updateAppUpdateControls(status);
+    if (!status.installStarted) {
+      showAppMessage(status.message || 'Update is not ready to install.', 'error');
+    }
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not install update.'), 'error');
+  }
+}
+
+function setupAppUpdateControls() {
+  const bridge = getAppUpdateBridge();
+  document.getElementById('checkForUpdatesBtn')?.addEventListener('click', checkForDesktopUpdates);
+  document.getElementById('downloadUpdateBtn')?.addEventListener('click', downloadDesktopUpdate);
+  document.getElementById('installUpdateBtn')?.addEventListener('click', installDesktopUpdate);
+
+  if (bridge?.onStatus && !setupAppUpdateControls.unsubscribe) {
+    setupAppUpdateControls.unsubscribe = bridge.onStatus(updateAppUpdateControls);
+  }
+
+  refreshAppUpdateStatus();
+}
+
+function formatDiagnosticsLastReport(lastReport) {
+  if (!lastReport) {
+    return 'No renderer error reports recorded this session.';
+  }
+
+  if (lastReport.submitted) {
+    return `Last report sent: ${lastReport.type || 'error'} at ${lastReport.timestamp || 'unknown time'}.`;
+  }
+
+  if (lastReport.uploadError) {
+    return `Last report saved locally. Upload failed: ${lastReport.uploadError}`;
+  }
+
+  return `Last report saved locally: ${lastReport.type || 'error'} at ${lastReport.timestamp || 'unknown time'}.`;
+}
+
+function updateDiagnosticsControls(status = {}) {
+  const crashStatus = document.getElementById('crashReporterStatus');
+  const errorStatus = document.getElementById('errorReporterStatus');
+  const message = document.getElementById('diagnosticsStatusText');
+  const crash = status.crashReporter || {};
+  const errors = status.errorReporting || {};
+
+  if (crashStatus) {
+    crashStatus.textContent = crash.started
+      ? crash.uploadToServer
+        ? 'Remote'
+        : 'Local'
+      : 'Unavailable';
+  }
+
+  if (errorStatus) {
+    errorStatus.textContent = errors.remoteConfigured ? 'Remote' : 'Local';
+  }
+
+  if (message) {
+    const pathText = errors.diagnosticFilePath ? ` Logs: ${errors.diagnosticFilePath}` : '';
+    message.textContent = `${formatDiagnosticsLastReport(errors.lastReport)}${pathText}`;
+  }
+}
+
+async function refreshDesktopDiagnostics() {
+  const bridge = getAppDiagnosticsBridge();
+  const button = document.getElementById('refreshDiagnosticsBtn');
+  if (!bridge?.getStatus) {
+    updateDiagnosticsControls({
+      crashReporter: { started: false },
+      errorReporting: { remoteConfigured: false },
+    });
+    return;
+  }
+
+  setBusyState(button, true, 'Refreshing...');
+  try {
+    updateDiagnosticsControls(await bridge.getStatus());
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not load diagnostics status.'), 'error');
+  } finally {
+    setBusyState(button, false);
+  }
+}
+
+async function sendDesktopTestErrorReport() {
+  const bridge = getAppDiagnosticsBridge();
+  const button = document.getElementById('sendTestErrorReportBtn');
+  if (!bridge?.sendTestReport) {
+    showAppMessage('Desktop diagnostics integration unavailable.', 'error');
+    return;
+  }
+
+  setBusyState(button, true, 'Sending...');
+  try {
+    const result = await bridge.sendTestReport();
+    await refreshDesktopDiagnostics();
+    showAppMessage(result?.submitted ? 'Test report sent.' : 'Test report saved locally.', 'success');
+  } catch (error) {
+    showAppMessage(getApiErrorMessage(error, 'Could not create test report.'), 'error');
+  } finally {
+    setBusyState(button, false);
+  }
+}
+
+function setupDesktopDiagnosticsControls() {
+  document.getElementById('refreshDiagnosticsBtn')?.addEventListener('click', refreshDesktopDiagnostics);
+  document.getElementById('sendTestErrorReportBtn')?.addEventListener('click', sendDesktopTestErrorReport);
+  refreshDesktopDiagnostics();
+}
+
 function setupSettingsActionButtons() {
+  setupAppUpdateControls();
+  setupDesktopDiagnosticsControls();
+
   document.querySelectorAll('.account-detail-row .edit-detail-btn:not(#editContactInfoBtn):not(#editContactInfoBtnSecondary)').forEach((button) => {
     button.addEventListener('click', () => switchSettingsTab('profiles'));
   });
