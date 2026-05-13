@@ -5,8 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "nodemon --exec electron .",
+    "configure": "node scripts/write-app-config.mjs",
     "test": "npm run build",
-    "build": "webpack",
+    "build": "webpack --mode production",
+    "build:dev": "webpack --mode development",
     "package": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
   },
