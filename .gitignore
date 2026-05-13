@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+release
 playwright-report
 test-results
 *.local
@@ -25,3 +26,4 @@ test-results
 *.sln
 *.sw?
 .env*
+!.env.example
