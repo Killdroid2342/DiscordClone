@@ -1552,4 +1552,119 @@ body.home-page {
   color: var(--text-bright);
 }
 
+.outerModalMessage {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 100000;
+  pointer-events: none;
+}
+
+.innerModalMessage {
+  position: relative;
+  width: fit-content;
+  max-width: min(520px, calc(100vw - 32px));
+  margin: 16px auto 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: rgba(12, 15, 19, 0.96);
+  box-shadow: var(--shadow-md);
+}
+
+/* Settings */
+#settingsModal.outerModal {
+  background:
+    linear-gradient(135deg, rgba(45, 180, 168, 0.13), transparent 46%),
+    rgba(5, 6, 8, 0.76);
+}
+
+.settings-container {
+  width: min(1180px, calc(100vw - 32px));
+  height: min(820px, calc(100vh - 32px));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(27, 32, 39, 0.98), rgba(12, 15, 19, 0.99)),
+    var(--surface-panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.settings-sidebar {
+  border-right: 1px solid var(--border-subtle);
+  background: rgba(5, 6, 8, 0.38);
+}
+
+.sidebar-search input {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+}
+
+.settings-item {
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+}
+
+.settings-item:hover {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text-bright);
+}
+
+.settings-item.active {
+  border-color: var(--brand-border);
+  background: var(--brand-soft);
+  color: var(--brand-text-soft);
+}
+
+.settings-content {
+  background: transparent;
+}
+
+.settings-page-title {
+  color: var(--text-bright);
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.account-profile-banner,
+.banner-color,
+.preview-banner,
+.profile-popout-header {
+  background:
+    linear-gradient(135deg, rgba(45, 180, 168, 0.72), rgba(239, 106, 90, 0.66)),
+    var(--surface-active);
+}
+
+.settings-separator {
+  border-color: var(--border-subtle);
+}
+
+.toggle-switch {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.toggle-switch.active {
+  background: var(--brand-primary);
+}
+
+.radio-circle.selected,
+.checkbox-box.checked {
+  border-color: var(--brand-primary);
+  background: var(--brand-primary);
+}
+
+.settings-slider::-webkit-slider-runnable-track {
+  background: var(--input-bg);
+}
+
+.settings-slider::-webkit-slider-thumb {
+  background: var(--brand-primary);
+  box-shadow: 0 0 0 4px rgba(45, 180, 168, 0.14);
+}
+
+.theme-editor-panel {
+  gap: 16px;
+}
 
